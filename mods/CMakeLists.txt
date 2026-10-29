@@ -1,6 +1,7 @@
 # Mod host and mods, built only with -DPE_MODS=ON. See mods/README.md.
 # Each mod is a folder here holding .c files and defining `const PeMod pe_mod_<folder>`.
-# pe_hello is the example mod; add it to the list to build it.
+# pe_hello is the example mod; add it to the list to build it. pe_lang (language packs) is
+# opt-in while it only covers item text.
 set(PE_MOD_LIST pe_qol pe_rebalance pe_economy pe_collection CACHE STRING "Mods built into the game (folder names)")
 
 set(pe_host_sources
@@ -173,6 +174,18 @@ if(BUILD_TESTING AND "pe_collection" IN_LIST PE_MOD_LIST)
     pe_feature_test(model ${PROJECT_SOURCE_DIR}/tests/pe_mod_model_test.c host/pe_model.c host/pe_model_view.c)
     pe_feature_test(present ${PROJECT_SOURCE_DIR}/tests/pe_mod_present_test.c host/pe_present.c)
     pe_feature_test(stage ${PROJECT_SOURCE_DIR}/tests/pe_mod_stage_test.c host/pe_model_stage.c)
+endif()
+
+# The language pack reader is plain data code, so its test runs whichever mods are built.
+if(BUILD_TESTING)
+    add_executable(test-mod-lang-pack ${PROJECT_SOURCE_DIR}/tests/pe_mod_lang_test.c pe_lang/pe_lang_pack.c)
+    target_include_directories(test-mod-lang-pack PRIVATE pe_lang)
+    if(MSVC)
+        target_compile_options(test-mod-lang-pack PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(test-mod-lang-pack PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME mod-lang-pack COMMAND test-mod-lang-pack)
 endif()
 
 # Rust save-editor interoperability uses the actual C serializer, including the
