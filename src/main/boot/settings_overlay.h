@@ -157,6 +157,10 @@ static const char *const kFilterNames[] = {"Original", "Bilinear"};
 ACCESSORS(ModelFiltering, host_options.model_filtering != 0,
           host_options.model_filtering = i)
 
+static const char *const kFrameRateNames[]={"30 Hz (original)","60 Hz (interpolated)"};
+ACCESSORS(FrameInterpolation,host_options.frame_interpolation!=0,
+          host_options.frame_interpolation=i)
+
 static const OverlaySetting kGraphics[] = {
     SETTING("Render resolution", "Higher values increase image detail and GPU load.",
             kScaleNames, Scale),
@@ -172,6 +176,8 @@ static const OverlaySetting kGraphics[] = {
             kAntialiasNames, Antialiasing),
     SETTING("Model textures", "Bilinear filtering for 3D models; backgrounds and text keep original sampling.",
             kFilterNames, ModelFiltering),
+    SETTING("Gameplay display", "Interpolate models and scrolling between original game frames. Game speed and input timing stay original.",
+            kFrameRateNames, FrameInterpolation),
 };
 
 /* audio */
@@ -230,7 +236,7 @@ enum {
 
 static int Host_SettingsVisibleSettingCount(int page) {
     (void)page;
-    return OVERLAY_VISIBLE_CONTROLS;
+    return COUNT_OF(kGraphics)>OVERLAY_VISIBLE_CONTROLS ? COUNT_OF(kGraphics) : OVERLAY_VISIBLE_CONTROLS;
 }
 
 static int Host_SettingsVisibleRowCount(int page) {

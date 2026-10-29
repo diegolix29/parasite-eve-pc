@@ -1,5 +1,6 @@
 #include "common.h"
 #include <math.h>
+#include <psyz/gpu.h>
 #include "pe1/entity_frame_update.h"
 #include "pe1/field_actor.h"
 #include "pe1/gte.h"
@@ -9,6 +10,8 @@
 #include "pe1/render_object.h"
 #include "pe1/render_setup.h"
 #include "pe1/render_tint.h"
+
+static void Render_RegisterInterpolationPackets(RenderObjectEntity *object,int reset);
 
 /* Original USA resident model-rendering data. The historical "identity"
  * name denotes an X-reflecting basis: its first signed halfword is -4096. */
@@ -417,6 +420,7 @@ void Render_DrawObjectAlt(RenderObjectEntity *entity, s16 limit, u8 red, u8 gree
 
     if (!entity->header || !entity->draw_count)
         return;
+    if(Psyz_GpuGetFrameInterpolation())Render_RegisterInterpolationPackets(entity,0);
     matrix = entity->matrices;
     for (i = 0; i < entity->header->part_count; i++, matrix++) {
         RenderObjectPart *part;
@@ -495,6 +499,7 @@ void Render_DrawObjectVariant(RenderObjectEntity *input, s16 limit, s32 *project
     projected = &projectedStorage;
     if (!entity->header || !entity->draw_count)
         return;
+    if(Psyz_GpuGetFrameInterpolation())Render_RegisterInterpolationPackets(entity,0);
     matrix = (s32 *)entity->matrices;
     i = 0;
     if (changed < entity->header->part_count) {
@@ -980,6 +985,21 @@ void Anim_SetInterpRate(RenderObjectEntity *obj, int arg1) {
     obj->fade_blue_step = divisor;
 }
 
+/* Presentation metadata only; surviving actors can acquire fresh history
+ * after a room flush without rebuilding or modifying their native packets. */
+static void Render_RegisterInterpolationPackets(RenderObjectEntity *object,int reset) {
+    if(!object->header||!object->primitive_buffer)return;
+    unsigned char *packet=object->primitive_buffer;
+    const RenderObjectHeader *header=object->header;
+    const unsigned counts[]={header->packet34_count,header->packet28_count,header->packet24_count,header->packet1c_count};
+    const size_t sizes[]={sizeof(RenderPacket34),sizeof(RenderPacket28),sizeof(RenderPacket24),sizeof(RenderPacket1C)};
+    for(unsigned kind=0;kind<4;++kind)for(unsigned face=0;face<counts[kind];++face){
+        if(reset)Psyz_GpuRegisterInterpolationPair(packet+sizeof(RenderNativeTag),packet+sizes[kind]+sizeof(RenderNativeTag));
+        else Psyz_GpuEnsureInterpolationPair(packet+sizeof(RenderNativeTag),packet+sizes[kind]+sizeof(RenderNativeTag));
+        packet+=2*sizes[kind];
+    }
+}
+
 int Render_SetupEntityPrims(RenderObjectEntity *obj, RenderObjectHeader *model,
                             u8 *packetBuffer, s16 x, s16 y, s16 unused,
                             s16 paletteRow, s16 initCount, s8 **textureOut,
@@ -1091,6 +1111,7 @@ int Render_SetupEntityPrims(RenderObjectEntity *obj, RenderObjectHeader *model,
     cursor.commands += bytes;
 
     if (setup) {
+        Render_RegisterInterpolationPackets(obj,1);
         RenderPrimCursor out;
 
         src = cursor;
@@ -1557,6 +1578,7 @@ void Render_DrawObject(RenderObjectEntity *entity, union RenderLightingMatrix *v
 
     if (!entity->header || !entity->draw_count)
         return;
+    if(Psyz_GpuGetFrameInterpolation())Render_RegisterInterpolationPackets(entity,0);
     *baseColour = g_RenderFadeColour;
     matrix = entity->matrices;
     gte_SetBackColor(entity->shade, entity->shade, entity->shade);

@@ -39,6 +39,7 @@ static struct {
     int aspect;
     int dither;
     int geometry_correction;
+    int frame_interpolation;
     int antialiasing;
     int model_filtering;
     int widescreen;
@@ -432,6 +433,8 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
         } else if (!strcmp(key, "widescreen")) {
             if (v > 1) return 0;
             host_options.widescreen = v;
+        } else if (!strcmp(key, "frame_interpolation")) {
+            if(v>1)return 0;host_options.frame_interpolation=v;
         } else if (!strcmp(key, "geometry_correction")) {
             if (v > 1) {
                 return 0;
@@ -566,6 +569,7 @@ static int Host_SaveOptions(void) {
         "square_pixels = %s\n"
         "disable_dithering = %s\n"
         "geometry_correction = %s\n"
+        "frame_interpolation = %s\n"
         "antialiasing = %s\n"
         "model_filtering = %s\n"
         "widescreen = %s\n\n"
@@ -582,6 +586,7 @@ static int Host_SaveOptions(void) {
         host_options.aspect ? "true" : "false",
         host_options.dither ? "true" : "false",
         host_options.geometry_correction ? "true" : "false",
+        host_options.frame_interpolation ? "true" : "false",
         host_options.antialiasing ? "true" : "false",
         host_options.model_filtering ? "true" : "false",
         host_options.widescreen ? "true" : "false",
@@ -848,6 +853,7 @@ static void Host_ApplyOptions(SDL_Window *window) {
     Psyz_VideoSetInternalResolution(host_options.scale);
     Psyz_VideoSetAspectMode(host_options.widescreen ? PSYZ_ASPECT_DISPLAY : (PsyzAspectMode)host_options.aspect);
     Psyz_VideoSetDitheringMode((PsyzDitherMode)host_options.dither);
+    Psyz_GpuSetFrameInterpolation(host_options.frame_interpolation);
     Psyz_VideoSetGeometryCorrection(host_options.geometry_correction != 0);
     Psyz_VideoSetAntialiasing(host_options.antialiasing != 0);
     Psyz_VideoSetModelFiltering(host_options.model_filtering != 0);
@@ -2063,7 +2069,7 @@ static void Host_DescribeSaveData(char *out, size_t size) {
 static void Host_PrintHelp(const char *program_name) {
     printf(
         "Usage: %s [--disc <USA Disc 1 CUE/BIN>] [--disc2 <USA Disc 2 CUE/BIN>] [--choose-discs] "
-        "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] "
+        "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] [--frame-interpolation 0|1] "
         "[--headless | --headless-gpu] [--internal-resolution 1..8] [--frame-limit N] [--control-at N] "
         "[--dump-vram PATH] [--dump-frame PATH] [--dump-audio PATH] [--pad-at VBLANK:BUTTON_MASK ...] "
         "[--test-crash-after N | --test-abort-after N]\n",
@@ -2210,10 +2216,12 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[arg], "--geometry-correction") ||
                    !strcmp(argv[arg], "--antialiasing") ||
                    !strcmp(argv[arg], "--model-filtering") ||
-                   !strcmp(argv[arg], "--widescreen")) {
+                   !strcmp(argv[arg], "--widescreen") ||
+                   !strcmp(argv[arg], "--frame-interpolation")) {
             unsigned effect = !strcmp(argv[arg], "--geometry-correction") ? 1u :
                               !strcmp(argv[arg], "--antialiasing") ? 2u :
-                              !strcmp(argv[arg], "--model-filtering") ? 4u : 8u;
+                              !strcmp(argv[arg], "--model-filtering") ? 4u :
+                              !strcmp(argv[arg], "--widescreen") ? 8u : 16u;
             if ((effect_arguments & effect) || arg + 1 >= argc ||
                 (strcmp(argv[arg+1], "0") && strcmp(argv[arg+1], "1"))) {
                 fprintf(stderr, "Missing, invalid or duplicate graphics effect (use 0 or 1)\n");
@@ -2224,7 +2232,8 @@ int main(int argc, char **argv) {
             if (effect == 1u) host_options.geometry_correction = enabled;
             else if (effect == 2u) host_options.antialiasing = enabled;
             else if (effect == 4u) host_options.model_filtering = enabled;
-            else host_options.widescreen = enabled;
+            else if(effect==8u) host_options.widescreen = enabled;
+            else host_options.frame_interpolation=enabled;
         } else if (!strcmp(argv[arg], "--frame-limit")) {
             char *end = NULL;
             errno = 0;
@@ -2472,6 +2481,7 @@ images_ready:;
         if (internal_resolution > 1 || (effect_arguments & 1u) ||
             host_options.antialiasing || host_options.model_filtering)
             Psyz_VideoSetGeometryCorrection(host_options.geometry_correction != 0);
+        Psyz_GpuSetFrameInterpolation(host_options.frame_interpolation);
         Psyz_VideoSetAntialiasing(host_options.antialiasing);
         Psyz_VideoSetModelFiltering(host_options.model_filtering);
         Psyz_VideoSetWidescreen(host_options.widescreen);
