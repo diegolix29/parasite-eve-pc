@@ -136,6 +136,6 @@ typedef struct SceneE22SweepBolt {
     s16 sweep;                    /* 0x1E */
 } SceneE22SweepBolt;
 
-extern void Geo_ClipAlternatingArcPoint(int mode, int step, int time);
+#include "pe1/field_ring_geometry.h"
 
 #endif

@@ -184,7 +184,7 @@ void Menu_OpenInventoryScreen(void) {
     }
 }
 
-void Menu_DrawEquipListContainer(void *node) {
+void Menu_DrawEquipListContainer(MenuWidgetNode *node) {
     int count;
 
     g_MenuActiveWidget = node;
@@ -443,10 +443,10 @@ void Menu_ProcessSwapReturnIfPending(void) {
 
 #define NULL ((void *)0)
 ItemDataRecord *g_MenuSelectedItemData;
-void Menu_DrawEquipStatsPanel(void);
+void Menu_DrawEquipStatsPanel(MenuWidgetNode *unused);
 int Menu_HandleItemInput(MenuWidgetNode *arg0, unsigned int arg1);
-void Menu_DrawEquipItemName(void);
-void Menu_DrawEquipItemIcon(void);
+void Menu_DrawEquipItemName(MenuWidgetNode *unused);
+void Menu_DrawEquipItemIcon(MenuWidgetNode *unused);
 void Menu_DrawSoundEffectList(MenuWidgetNode *node);
 void Menu_DrawEquipItemDetailPanel(MenuWidgetNode *node);
 int g_MenuItemDiscardMode;
@@ -493,7 +493,8 @@ void Menu_CreateItemUsePanel(int itemId) {
     MenuInput_InitQueue();
 }
 
-void Menu_DrawEquipStatsPanel(void) {
+void Menu_DrawEquipStatsPanel(MenuWidgetNode *unused) {
+    (void)unused;
     ItemDataRecord *temp_s0;
 
     Menu_DrawEquipStatsDelta(g_MenuSelectedItemData);
@@ -536,7 +537,8 @@ int Menu_HandleItemInput(MenuWidgetNode *arg0, unsigned int arg1) {
     return 1;
 }
 
-void Menu_DrawEquipItemName(void) {
+void Menu_DrawEquipItemName(MenuWidgetNode *unused) {
+    (void)unused;
     Draw_OffsetCursor(4, 4);
     Draw_PrintRawText(Text_LookupTableC(g_MenuSelectedItemData->itemId - 1));
 }
@@ -552,7 +554,8 @@ int g_MenuItemSelectFlag;
 int g_MenuInputPausePending;
 int g_MenuMemCardConfirmPending;
 
-void Menu_DrawEquipItemIcon(void) {
+void Menu_DrawEquipItemIcon(MenuWidgetNode *unused) {
+    (void)unused;
     Draw_OffsetCursor(6, 6);
     Menu_CursorRenderData(g_MenuSelectedItemData);
 }

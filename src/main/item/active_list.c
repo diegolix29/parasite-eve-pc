@@ -50,8 +50,7 @@ void Akao_SetBgmVolumeFade(void) {
     g_AkaoPendingBgmVolumeFade = value;
 }
 
-/* Retail passes the window index although the reset ignores it. */
-void Save_ResetMetadataWindow(int);
+
 void Menu_ResetStateFlags(void);
 void Inv_SetDefaultItemId(void);
 void MenuWidget_InitPoolUnk(void);
@@ -84,7 +83,7 @@ void Inv_BoundsCheckAssertStub(int code, ...)
 
 void Menu_FullInit(void) {
     Menu_SetBattleEquipMode(0);
-    Save_ResetMetadataWindow(0);
+    Save_ResetMetadataWindow();
     g_SavedMenuMode.value = 0;
     g_MemCardDialogState = 0;
     g_MenuErrorSoundPending = 0;
@@ -101,7 +100,7 @@ void Menu_FullInit(void) {
     Save_InitMetadataState();
     BattleCmd_LoadWeaponModifiers();
     Menu_SaveBgInitFade();
-    Save_ResetMetadataWindow(1);
+    Save_ResetMetadataWindow();
     g_GameState.flags |= 0x40000000;
     Menu_SetEquipSlotIndex(1);
 }

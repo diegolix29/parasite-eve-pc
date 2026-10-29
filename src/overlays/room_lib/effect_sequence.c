@@ -1583,7 +1583,7 @@ int RoomEffect_EffectSequenceNopB(void *object_, void *slot_, void *data_) {
     return 0;
 }
 
-void FieldFx_ModelSetDepthBias(s32 arg0);
+
 void FieldFx_ModelSetTexture(s32 arg0, s32 arg1);
 
 int RoomEffect_DrawEffectGlow(void *object_, void *slot_, void *data_) {

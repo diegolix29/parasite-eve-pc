@@ -13,6 +13,7 @@
 #include "pe1/field_owner_actor.h"
 #include "pe1/field_pulled_sprite.h"
 #include "pe1/field_ring_band.h"
+#include "pe1/field_ring_geometry.h"
 #include "pe1/field_rotated_quad.h"
 #include "pe1/field_rotated_triangle.h"
 #include "pe1/field_shape_quads.h"

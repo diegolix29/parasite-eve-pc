@@ -1940,8 +1940,8 @@ void FxCommon_DrawModelFlat(void *context, FxCommonPolyModel *model, int index)
 }
 
 
-void SetGeomOffset(int,int);
-void SetGeomScreen(int);
+void SetGeomOffset(long,long);
+void SetGeomScreen(long);
 
 /* Native storage replaces the executable overlay's address-owned frame records.
  * Packet arenas remain in the original shared scene work area. */

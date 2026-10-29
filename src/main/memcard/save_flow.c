@@ -375,8 +375,8 @@ int MemCard_PollTransferDelay(void) {
 }
 
 void _card_clear(int arg0);
-void _card_info(int arg0);
-void _card_load(int arg0);
+long _card_info(long arg0);
+long _card_load(long arg0);
 int Menu_IsMemCardDialogOpen(void);
 void MemCard_StartRead(int port, int arg1);
 

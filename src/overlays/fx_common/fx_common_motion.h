@@ -101,7 +101,7 @@ extern GteVector g_FxCommonFrustumNormal0, g_FxCommonFrustumNormal1, g_FxCommonF
 extern s32 g_FxCommonFrustumDistance0, g_FxCommonFrustumDistance1, g_FxCommonFrustumDistance2, g_FxCommonFrustumDistance3;
 extern s32 g_FxCommonFrustumSide0, g_FxCommonFrustumSide1, g_FxCommonFrustumSide2, g_FxCommonFrustumSide3;
 extern s32 g_FxCommonFrustumLength0, g_FxCommonFrustumLength1, g_FxCommonFrustumLength2, g_FxCommonFrustumLength3;
-void OuterProduct0(GteVector *a, GteVector *b, GteVector *out);
+GteVector *OuterProduct0(GteVector *a, GteVector *b, GteVector *out);
 s16 FxCommon_StepFadeIntensity(s16 value);
 void FxCommon_DrawNightShadeAndMarkers(void);
 void FxCommon_DrawSceneNodes(void);

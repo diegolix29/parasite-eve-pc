@@ -11,6 +11,7 @@ void Menu_DrawInventoryItemRow(int index);
 void Menu_DrawArmorItemRow(int index);
 void Menu_DrawArmorItemDetail(int index);
 void Menu_DrawActiveListSlot(int index);
+void Inv_ShowItemDescriptionPanel(int index);
 void Draw_SetTextDimmed(int dimmed);
 void Draw_DropShadow(void);
 void MenuWidget_DrawCenteredTableText(int textId);

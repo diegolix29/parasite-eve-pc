@@ -39,6 +39,8 @@ target_compile_definitions(psyz PRIVATE __psyz)
 # Preserve those accesses instead of assuming different struct tags cannot alias.
 # Set this after configuring PsyZ: its SDK/SDL targets retain their own options.
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options("$<$<COMPILE_LANGUAGE:C>:-Werror=pointer-to-int-cast>"
+        "$<$<COMPILE_LANGUAGE:C>:-Werror=int-to-pointer-cast>")
     add_compile_options("$<$<COMPILE_LANGUAGE:C>:-fno-strict-aliasing>"
         "$<$<COMPILE_LANGUAGE:C>:-ffunction-sections>"
         "$<$<COMPILE_LANGUAGE:C>:-fdata-sections>")
@@ -401,6 +403,21 @@ function(pe_add_common_unit_test target_name test_name source_file)
 endfunction()
 
 if(BUILD_TESTING)
+    add_executable(test-menu-call-abi tests/original_menu_call_abi.c
+        src/main/menu/lists.c src/main/menu/widget.c src/main/item/swap.c
+        src/main/psyq/libds/dssys_3.c)
+    target_include_directories(test-menu-call-abi PRIVATE include)
+    target_compile_definitions(test-menu-call-abi PRIVATE __psyz)
+    target_link_libraries(test-menu-call-abi PRIVATE psyz)
+    if(MSVC)
+        target_compile_options(test-menu-call-abi PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(test-menu-call-abi PRIVATE -UNDEBUG)
+    endif()
+    if(MINGW)
+        target_compile_options(test-menu-call-abi PRIVATE -fno-asynchronous-unwind-tables)
+    endif()
+    add_test(NAME original-menu-call-abi COMMAND test-menu-call-abi)
     if(NOT EMSCRIPTEN)
         add_executable(test-crash-report tests/original_input_rules.c
             src/main/boot/crash_report.c src/main/boot/crash_report_posix.c)
@@ -626,6 +643,12 @@ if(BUILD_TESTING)
     add_test(NAME original-m430-cruiser-load COMMAND test-original-actor-animation --m430-load)
     set_tests_properties(original-m430-cruiser-load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
         LABELS "game-assets;room" ENVIRONMENT "PSYZ_HEADLESS=1;SDL_AUDIODRIVER=dummy")
+    add_test(NAME original-callback-allocation-failure COMMAND test-original-actor-animation --callback-allocation-failure)
+    add_test(NAME original-m273-landing-cycle COMMAND test-original-actor-animation --m273-landing-cycle)
+    add_test(NAME original-m273-effect-pointers COMMAND test-original-actor-animation --m273-effect-pointers)
+    add_test(NAME original-m273-attack-timing COMMAND test-original-actor-animation --m273-attack-timing)
+    set_tests_properties(original-m273-attack-timing PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
+        ENVIRONMENT "PSYZ_HEADLESS=1;SDL_AUDIODRIVER=dummy" LABELS "game-assets;fieldfx")
     add_test(NAME original-m273-liberty-load COMMAND test-original-actor-animation --m273-load)
     set_tests_properties(original-m273-liberty-load PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
         ENVIRONMENT "PSYZ_HEADLESS=1;SDL_AUDIODRIVER=dummy" LABELS "game-assets;render")

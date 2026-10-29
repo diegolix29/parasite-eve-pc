@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "common.h"
+#include "pe1/asset_find.h"
 #include <psyz/audio.h>
 #include <psyz/cd.h>
 #include "pe1/akao.h"

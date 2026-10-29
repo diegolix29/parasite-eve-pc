@@ -25,7 +25,7 @@ PE1_STATIC_ASSERT(PE1_OFFSETOF(MenuWidgetNode, refreshItems) == PE1_OFFSETOF(Men
 
 void Menu_OpenEquipScreen(int mode);
 int Menu_StepInventoryCategory(MenuWidgetNode *node, unsigned int flags);
-void Menu_DrawEquipListContainer(void *node);
+void Menu_DrawEquipListContainer(MenuWidgetNode *node);
 
 int Menu_EquipOptionsInputHandler(MenuWidgetNode *node, unsigned int flags);
 void Menu_DrawEquipOptionsList(MenuWidgetNode *node);

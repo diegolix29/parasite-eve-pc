@@ -15,7 +15,7 @@ typedef struct MenuWidgetNode {
     int selected_base;
     int flags;
     int (*update)(struct MenuWidgetNode *, unsigned int); /* input handler */
-    void (*draw)();            /* +0x30 draw callback */
+    void (*draw)(struct MenuWidgetNode *); /* draw callback */
     union { int grid_width; struct MenuWidgetNode *list; };
     union { int visible_rows; int visibleRows; };
     union { int draw_state; int drawState; };
@@ -155,7 +155,7 @@ extern MenuWidgetNode *g_MenuWidgetSavedNode;
 
 MenuWidgetNode *MenuWidget_GetChild(MenuWidgetNode *node, int index);
 int MenuWidget_HasActiveNodes(void);
-MenuWidgetNode *MenuWidget_FindByFieldValue(int value);
+MenuWidgetNode *MenuWidget_FindByFieldValue(const MenuWidgetNode *value);
 MenuWidgetNode *MenuWidget_FindByModeAndSelectedBase(int mode, int selectedBase);
 
 void MenuWidget_UpdateAndDraw(void);

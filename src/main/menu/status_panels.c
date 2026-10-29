@@ -538,8 +538,8 @@ void Menu_CreateInventoryTabView(void) {
     }
 }
 
-void Menu_DrawStatusPanel(void);
-void Menu_DrawStatsList(void);
+void Menu_DrawStatusPanel(MenuWidgetNode *unused);
+void Menu_DrawStatsList(MenuWidgetNode *unused);
 
 void Menu_CreateBonusPointAllocationView(void) {
     int *var_s3;
@@ -575,7 +575,8 @@ void Menu_CreateBonusPointAllocationView(void) {
     g_BonusPointDisplayValue = g_AyaSaveState.bonus_points;
 }
 
-void Menu_DrawStatusPanel(void) {
+void Menu_DrawStatusPanel(MenuWidgetNode *unused) {
+    (void)unused;
     s32 var_a0;
 
     Draw_OffsetCursor(2, 2);
@@ -607,7 +608,8 @@ void Menu_DrawStatusPanel(void) {
     Draw_PrintTextById(0x39);
 }
 
-void Menu_DrawStatsList(void) {
+void Menu_DrawStatsList(MenuWidgetNode *unused) {
+    (void)unused;
     s32 sp10;
     int var_a0;
     int var_a1;

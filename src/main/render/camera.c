@@ -250,7 +250,7 @@ int Menu_SetSlotEntry(int index, unsigned int limit, unsigned int slot)
 
 }
 
-void SetGeomScreen(int h);
+void SetGeomScreen(long h);
 
 int Render_LoadGeomState(int index) {
     GeomStateAddress table, base;

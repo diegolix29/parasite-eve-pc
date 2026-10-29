@@ -39,11 +39,11 @@ void Field_HandleStateTransition(void);
 void Scene_UpdateEntityList(void);
 void Entity_FrameUpdate(void);
 void Draw_ClearOnFlag(void);
-void Render_Update(void);
+
 void FieldFx_UpdateScriptSprites(void);
 void Boot_FinishFrame(void);
 void Akao_Cmd_F1(void);
-void Render_Noop(int mode);
+
 int Asset_UnloadTableEntries(void);
 
 void Boot_FlushSceneFast(void) {
@@ -60,7 +60,7 @@ void Boot_FlushSceneFast(void) {
     }
     DrawSync(0);
     Akao_Cmd_F1();
-    Render_Noop(1);
+    Render_Noop();
     Asset_UnloadTableEntries();
     status = g_GameState.flags | 2;
     g_GameStateFlags = (g_GameStateFlags | 0x40) & ~0x3800;
@@ -213,7 +213,7 @@ loop_end_check:
     }
     DrawSync(0);
     Akao_Cmd_F1();
-    Render_Noop(1);
+    Render_Noop();
     Asset_UnloadTableEntries();
     g_GameStateFlags = (g_GameStateFlags | 0x40) & ~0x3800u;
     status = g_GameStateFlagsWord | 2;

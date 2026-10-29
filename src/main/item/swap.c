@@ -37,6 +37,7 @@ void Inv_ShowItemDescriptionPanel(s32 index) {
     ItemDataRecord *entry;
     u8 *text;
 
+    if ((unsigned)index >= 10u || index >= g_InvActiveListCount) return;
     value = g_InvActiveListItems[index];
     if (value < 0x200) {
         if ((unsigned int)(value - 0x100) < 0x80U) {
@@ -52,6 +53,7 @@ void Inv_ShowItemDescriptionPanel(s32 index) {
             Menu_DrawSlotRow(entry, Text_LookupTable8(entry->itemId - 1));
         }
     } else {
+        if (value >= 0x209) return;
         entry = &g_KeyItemRecords[value - 0x200];
         if (entry->flags & ITEM_DATA_FLAG_GENERIC_DESCRIPTION) {
             text = g_CursorRenderDataBlock;

@@ -81,7 +81,7 @@ PE1_STATIC_ASSERT(PE1_OFFSETOF(RenderAnimLineG2, xy1) == sizeof(RenderNativeTag)
                   render_anim_line_g2_xy1_offset);
 PE1_STATIC_ASSERT(sizeof(RenderAnimFace) == 4, render_anim_face_size);
 
-GteMatrix *RotMatrixY(s32, GteMatrix *);
+GteMatrix *RotMatrixY(long, GteMatrix *);
 void SetDrawTPage(void *, s32, s32, s32);
 
 #define AnimLoadRotMatrix(matrix) gte_ldrotmatrix((const GteMatrixWords *)(matrix))

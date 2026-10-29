@@ -14,7 +14,7 @@
 #endif
 
 /* File services used by the memory-card manager. */
-int erase(char *path);
+long erase(char *path);
 
 /* Program control and cache services. */
 void FlushCache(void);
@@ -27,8 +27,8 @@ void PS1_ExitCriticalSection(void);
 int ResetEntryInt(void);
 void ReturnFromException(void);
 void HookEntryInt(void *entry);
-void ChangeClearPAD(int mode);
-int ChangeClearRCnt(int counter, int enabled);
+void ChangeClearPAD(long mode);
+long ChangeClearRCnt(long counter, long enabled);
 
 void DeliverEvent(unsigned int event, unsigned int spec);
 
@@ -40,10 +40,10 @@ long DisableEvent(long event);
 void UnDeliverEvent(unsigned int event, unsigned int spec);
 
 /* LIBAPI root counters (counter.c). */
-int SetRCnt(unsigned int counter, int target, int mode);
-int GetRCnt(unsigned int counter);
-int StartRCnt(unsigned int counter);
-int StopRCnt(unsigned int counter);
+long SetRCnt(long counter, unsigned short target, long mode);
+long GetRCnt(long counter);
+long StartRCnt(long counter);
+long StopRCnt(long counter);
 
 /* LIBAPI.H descriptor, event and counter mode constants. */
 #define RCntCNT2 0xF2000002

@@ -42,7 +42,7 @@ extern GteShortVector g_RoomM350RushPreviousEndpoint,g_RoomM350RushPreviousOppos
 extern volatile short g_RoomM350RushEndpointZ,g_RoomM350RushEndpointValid,g_RoomM350RushOppositeZ;
 extern RenderColor g_RoomM350GlowSpriteColor;
 extern unsigned char g_RoomM350BodyDone;
-extern int Asset_Find08w(int,int,int,int,int);
+#include "pe1/asset_find.h"
 int RoomM350_BodyDebrisCallback(int mode, void *state, intptr_t argument);
 extern int rand(void),Inv_ScrambleGrid(void),rcos(int),rsin(int);
 extern RenderColor g_RoomM350BodyRingColor0, g_RoomM350BodyRingColor1;

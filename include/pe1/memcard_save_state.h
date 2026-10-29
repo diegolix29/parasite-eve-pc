@@ -23,7 +23,7 @@ typedef struct MemCardDirEntry {
 /* SDK firstfile wrapper (FIRST.OBJ); returns the entry or 0. */
 void *firstfile(const char *name, void *entry);
 void *nextfile(void *entry);
-int format(char *device);
+long format(char *device);
 
 
 unsigned int MemCard_GetDialogMode(void);

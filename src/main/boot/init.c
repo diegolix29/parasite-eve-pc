@@ -76,8 +76,8 @@ u8 *g_CdLoadAreaBase = g_BootDisplayWorkArea;
 
 void Render_ResetScene(int arg0, int arg1);
 void InitGeom(void);
-void SetGeomOffset(int x, int y);
-void SetGeomScreen(int h);
+void SetGeomOffset(long x, long y);
+void SetGeomScreen(long h);
 void MemCard_InitManager(void);
 void Boot_InitMemCard(void);
 
