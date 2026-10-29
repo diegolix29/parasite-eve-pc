@@ -29,8 +29,19 @@ void pe_lang_pack_free(PeLangPack *pack);
 /* The translation of `key` (glyph bytes ending in FF), or NULL when the pack has none. */
 const unsigned char *pe_lang_pack_find(const PeLangPack *pack, const char *key);
 
-/* The translation for a resident text table lookup (PE_HOOK_TEXT_LOOKUP): table 8 is item
- * names ("item/NNN"), 12 item descriptions ("desc/NNN"); NULL for anything else. */
+/* The translation for a resident text table lookup (PE_HOOK_TEXT_LOOKUP): table 4 is system
+ * messages ("sys/NNN"), 8 item names ("item/NNN"), 12 item descriptions ("desc/NNN"), 16 the
+ * rest ("misc/NNN"); NULL for anything else. */
 const unsigned char *pe_lang_pack_table(const PeLangPack *pack, unsigned table, unsigned index);
+
+/* A room's message bank, as extract_text.py measures it: pages FE <id> text FF|F9, one after
+ * another, until a page end not followed by FE. Returns the bytes the pages span (at most
+ * `max`), or 0 when `bank` doesn't start with a page or runs past `max`. */
+size_t pe_lang_bank_size(const unsigned char *bank, size_t max);
+uint32_t pe_lang_crc32(const unsigned char *data, size_t size);   /* the zlib CRC-32 */
+
+/* The translation of page `page` of the bank whose CRC32 is `bank_crc` ("dlg/<bank key>/PPP",
+ * the bank key from the pack's "bank/<crc32>" entry), or NULL. */
+const unsigned char *pe_lang_pack_page(const PeLangPack *pack, uint32_t bank_crc, unsigned page);
 
 #endif

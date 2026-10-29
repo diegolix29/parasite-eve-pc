@@ -86,8 +86,48 @@ const unsigned char *pe_lang_pack_find(const PeLangPack *pack, const char *key) 
 
 const unsigned char *pe_lang_pack_table(const PeLangPack *pack, unsigned table, unsigned index) {
     char key[32];
-    const char *prefix = table == 8 ? "item" : table == 12 ? "desc" : NULL;
+    const char *prefix = table == 4 ? "sys" : table == 8 ? "item" : table == 12 ? "desc" : table == 16 ? "misc" : NULL;
     if (!prefix || index > 999) return NULL;
     snprintf(key, sizeof key, "%s/%03u", prefix, index);
+    return pe_lang_pack_find(pack, key);
+}
+
+size_t pe_lang_bank_size(const unsigned char *bank, size_t max) {
+    size_t i = 0;
+    if (!bank || max < 2 || bank[0] != 0xFE) return 0;
+    while (i + 1 < max && bank[i] == 0xFE) {
+        size_t j = i + 2;
+        while (j < max && bank[j] != 0xFF && bank[j] != 0xF9) {
+            if (bank[j] == 0xFC || bank[j] == 0xFD) j += 2;
+            else if (bank[j] == 0xFB && j + 1 < max) j += bank[j + 1] == 7 || bank[j + 1] == 9 ? 3 : 2;
+            else j += 1;
+        }
+        if (j >= max) return 0;
+        i = j + 1;
+    }
+    return i;
+}
+
+uint32_t pe_lang_crc32(const unsigned char *data, size_t size) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int k = 0; k < 8; ++k) crc = crc >> 1 ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
+}
+
+const unsigned char *pe_lang_pack_page(const PeLangPack *pack, uint32_t bank_crc, unsigned page) {
+    char key[32], name[16];
+    const unsigned char *bank;
+    size_t n = 0;
+    snprintf(key, sizeof key, "bank/%08x", (unsigned)bank_crc);
+    if (page > 255 || !(bank = pe_lang_pack_find(pack, key))) return NULL;
+    while (n + 1 < sizeof name && bank[n] != 0xFF) {
+        name[n] = (char)bank[n];
+        ++n;
+    }
+    name[n] = '\0';
+    snprintf(key, sizeof key, "dlg/%s/%03u", name, page);
     return pe_lang_pack_find(pack, key);
 }

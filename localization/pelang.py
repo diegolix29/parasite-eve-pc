@@ -21,7 +21,11 @@ Pack format (little-endian), read by mods/pe_lang/pe_lang_pack.c:
           char lang[16] and char name[32] (UTF-8, NUL-padded)
   entries count x {u32 key hash, u32 text offset from the text start}, sorted by hash
           (FNV-1a 32 of the key's UTF-8, e.g. "item/054"; the build refuses a collision)
-  text    each entry's glyph bytes followed by FF
+  text    each entry's glyph bytes followed by FF (a dialogue page that ends in F9 keeps it
+          before the FF)
+Besides the translations, a pack holds one "bank/<crc32>" entry per message bank: the bank's key
+("M001", ASCII), so pe_lang can tell which bank a room has loaded (the CRC32 of the bytes its
+pages span, as banks.json lists them) and find that bank's dlg/ keys.
 """
 from __future__ import annotations
 
@@ -162,6 +166,15 @@ def cmd_build(a) -> int:
         warnings += [f"{key}: {w}" for w in warns]
         if raw is not None and not errs:
             entries[key] = raw
+    # Dialogue pages keep the page end the game had (F9 instead of FF closes some boxes), and the
+    # pack says which bank is which: "bank/<crc32>" holds that bank's key ("M001") in ASCII.
+    for key, raw in list(entries.items()):
+        end = strings[key].get("end", "FF")
+        if key.startswith("dlg/") and end != "FF":
+            entries[key] = raw + bytes([int(end, 16)])
+    banks = json.loads(Path(a.banks or a.strings.with_name("banks.json")).read_text(encoding="utf-8"))
+    for b in banks:
+        entries[f"bank/{b['crc32']}"] = b["key"].encode("ascii")
     hashes: dict[int, str] = {}
     for key in entries:
         h = fnv1a(key)
@@ -172,7 +185,9 @@ def cmd_build(a) -> int:
         print(f"warning: {w}")
     for e in errors[: a.max_messages]:
         print(f"error: {e}")
-    print(f"{len(entries)} of {len(strings)} keys translated; {len(warnings)} warning(s), {len(errors)} error(s)")
+    translated = sum(1 for k in entries if not k.startswith("bank/"))
+    print(f"{translated} of {len(strings)} keys translated, {len(banks)} banks; "
+          f"{len(warnings)} warning(s), {len(errors)} error(s)")
     if errors:
         return 1
     write_pack(a.out, a.lang, a.name, entries)
@@ -220,6 +235,7 @@ def main(argv=None) -> int:
     b = sub.add_parser("build", help="check a translated CSV and write a .pelang pack")
     b.add_argument("csv", type=Path)
     b.add_argument("--strings", type=Path, required=True, help="strings.json from extract_text.py")
+    b.add_argument("--banks", type=Path, help="banks.json from extract_text.py (default: beside strings.json)")
     b.add_argument("--lang", required=True, help="language code, e.g. fr, pt-BR, en-x-jp, qps")
     b.add_argument("--name", required=True, help="the name the Language row shows, e.g. French")
     b.add_argument("-o", "--out", type=Path, required=True)

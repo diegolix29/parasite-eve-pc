@@ -14,6 +14,8 @@ Reads the player's own disc images (nothing from them goes into git: out/ is ign
   report.txt    counts, round-trip check, what couldn't be tied to a box
   items.json, items.csv, room_items.csv, key_items.json
                 what the room scripts give, show, check for and take (see docs/LOCALIZATION.md)
+  banks.json    each English message bank's key, size and CRC32: how a pack finds the room's
+                dialogue at run time (pelang.py build puts them in the pack)
 Keys:
   sys/NNN, item/NNN, desc/NNN, misc/NNN   the resident text tables (system messages, item names
                                           and descriptions, the rest); NNN is the table index
@@ -27,6 +29,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import zlib
 import json
 import re
 import struct
@@ -291,7 +294,8 @@ def main():
             h = hashlib.sha1(en[:used]).hexdigest()
             b = banks.get(h)
             if b is None:
-                b = banks[h] = {"key": f"M{m:03d}", "rooms": [], "pages": pages}
+                b = banks[h] = {"key": f"M{m:03d}", "rooms": [], "pages": pages,
+                                "crc32": zlib.crc32(en[:used]), "size": used}
             if f"M{m:03d}" not in b["rooms"]:
                 b["rooms"].append(f"M{m:03d}")
             calls = box_calls(code)
@@ -379,6 +383,10 @@ def main():
     ]
     (out / "report.txt").write_text("\n".join(report) + "\n", encoding="utf-8")
     (out / "unresolved.json").write_text(json.dumps(unresolved, indent=1), encoding="utf-8")
+    # How pe_lang knows a room's bank in memory: the CRC32 of the bytes its pages span.
+    (out / "banks.json").write_text(json.dumps(
+        [{"key": b["key"], "crc32": f"{b['crc32']:08x}", "size": b["size"], "rooms": b["rooms"]}
+         for b in sorted(banks.values(), key=lambda b: b["key"])], indent=1), encoding="utf-8")
     print("\n".join(report))
     print(f"\nwritten to {out}")
 

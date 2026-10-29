@@ -20,8 +20,11 @@ STRINGS = [
     {"key": "dlg/M001/002", "text": "Drop an item here?{br}{choice 2}    Yes{br}    No",
      "lines_px": [110, 40, 40], "boxes": ["default"], "rooms": ["M001"], "unused": False,
      "japanese": "手持ちのアイテムをここに置きますか?"},
+    {"key": "dlg/M001/003", "text": "Bye.", "lines_px": [24], "boxes": ["default"], "rooms": ["M001"],
+     "unused": False, "end": "F9"},
     {"key": "misc/100", "text": "filler", "lines_px": [30], "boxes": [], "rooms": [], "unused": True},
 ]
+BANKS = [{"key": "M001", "crc32": "1a2b3c4d", "size": 120, "rooms": ["M001", "M002"]}]
 
 
 class PelangTest(unittest.TestCase):
@@ -29,6 +32,7 @@ class PelangTest(unittest.TestCase):
         self.dir = Path(tempfile.mkdtemp())
         self.strings = self.dir / "strings.json"
         self.strings.write_text(json.dumps(STRINGS), encoding="utf-8")
+        (self.dir / "banks.json").write_text(json.dumps(BANKS), encoding="utf-8")
 
     def csv_with(self, translations: dict) -> Path:
         path = self.dir / "t.csv"
@@ -55,7 +59,7 @@ class PelangTest(unittest.TestCase):
         pelang.main(["template", str(self.strings), "-o", str(path)])
         with open(path, encoding="utf-8") as f:
             rows = list(csv.DictReader(f))
-        self.assertEqual([r["key"] for r in rows], ["dlg/M001/002", "item/000", "item/054"])
+        self.assertEqual([r["key"] for r in rows], ["dlg/M001/002", "dlg/M001/003", "item/000", "item/054"])
         self.assertTrue(rows[0]["japanese"].startswith("手持ち"))
         self.assertEqual(rows[0]["box"], "default")
 
@@ -73,7 +77,14 @@ class PelangTest(unittest.TestCase):
         lang, name, entries = pelang.read_pack(out)
         self.assertEqual((lang, name), ("xx", "Test"))
         self.assertEqual(entries[pelang.fnv1a("item/000")], gt.encode("Balles +6"))
-        self.assertEqual(len(entries), 2)
+        self.assertEqual(entries[pelang.fnv1a("bank/1a2b3c4d")], b"M001")   # the bank names itself
+        self.assertEqual(len(entries), 3)
+
+    def test_dialogue_keeps_its_page_end(self):
+        code, out = self.build({"dlg/M001/003": "Salut."})
+        self.assertEqual(code, 0)
+        _, _, entries = pelang.read_pack(out)
+        self.assertEqual(entries[pelang.fnv1a("dlg/M001/003")], gt.encode("Salut.") + b"\xf9")
 
     def test_build_refuses_missing_glyphs_and_changed_choices(self):
         code, _ = self.build({"item/000": "Munitions é"})

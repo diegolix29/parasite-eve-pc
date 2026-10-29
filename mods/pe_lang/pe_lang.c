@@ -4,8 +4,11 @@
  * F1 > Language picks one, or the game's own text. Anything a pack doesn't translate keeps the
  * game's text, so a half-finished pack is still playable.
  *
- * So far the item names and descriptions are replaced, through PE_HOOK_TEXT_LOOKUP. System
- * messages, the misc table and room dialogue need hooks the game doesn't have yet (phase 2). */
+ * The resident text tables (system messages, item names and descriptions, the rest) come through
+ * PE_HOOK_TEXT_LOOKUP. Room dialogue comes through PE_HOOK_TEXT_PAGE: the pack names each English
+ * message bank by its CRC32 ("bank/<crc32>"), so the bank a box reads from is measured once per
+ * room and its pages looked up as dlg/<bank>/<page>. A bank the pack doesn't know (another disc
+ * version, a modded room) keeps the game's text. */
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +37,36 @@ static int on_text_lookup(void *ctx, void *user) {
     const unsigned char *text = pe_lang_pack_table(active_pack(), lookup->table, lookup->index);
     (void)user;
     if (text) *lookup->text = (void *)text;
+    return 0;
+}
+
+/* The bank the last box read from and its CRC32, measured once per room. */
+#define MAX_BANK_BYTES 0x20000u
+static const unsigned char *s_bank;
+static uint32_t s_bank_crc;
+static int s_bank_known;
+
+static int on_text_page(void *ctx, void *user) {
+    PeHookTextPage *box = ctx;
+    const unsigned char *text;
+    (void)user;
+    if (!active_pack() || !box->bank) return 0;
+    if (box->bank != s_bank) {
+        size_t size = pe_lang_bank_size(box->bank, MAX_BANK_BYTES);
+        s_bank = box->bank;
+        s_bank_known = size != 0;
+        s_bank_crc = s_bank_known ? pe_lang_crc32(box->bank, size) : 0;
+    }
+    if (s_bank_known && (text = pe_lang_pack_page(active_pack(), s_bank_crc, box->page)))
+        *box->message = (unsigned char *)text;
+    return 0;
+}
+
+/* A new room can load its bank where the last one was: measure again. */
+static int on_scene_start(void *ctx, void *user) {
+    (void)ctx;
+    (void)user;
+    s_bank = NULL;
     return 0;
 }
 
@@ -80,6 +113,8 @@ static int lang_init(void) {
     s_names[0] = "Game text";
     for (unsigned i = 0; i < s_pack_count; ++i) s_names[i + 1] = s_labels[i];
     pe_hook_add(PE_HOOK_TEXT_LOOKUP, on_text_lookup, NULL, PE_PRIORITY_EARLY, MOD_ID);
+    pe_hook_add(PE_HOOK_TEXT_PAGE, on_text_page, NULL, PE_PRIORITY_EARLY, MOD_ID);
+    pe_hook_add(PE_HOOK_SCENE_START, on_scene_start, NULL, PE_PRIORITY_NORMAL, MOD_ID);
 
     pe_menu_begin("Language");
     pe_menu_top_page("Language", "Play with the game's text from a language pack.", 0);

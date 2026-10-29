@@ -45,25 +45,40 @@ int main(void) {
     /* The same FNV-1a 32 as pelang.py (localization/tests/test_pelang.py checks these too). */
     assert(pe_lang_hash("") == 0x811C9DC5u && pe_lang_hash("a") == 0xE40C292Cu);
 
-    Entry entries[] = {{"item/054", "\x12\x37\x48"}, {"desc/000", "\x11\x30"}, {"dlg/M001/002", "\x13"}};
+    /* A room's message bank as it sits in memory: pages 0 and 1, then other room data. */
+    static const unsigned char bank[] = {0xFE, 0x00, 0x10, 0x11, 0xFF, 0xFE, 0x01, 0xFB, 0x09, 0x02, 0x12, 0xF9,
+                                         0x00, 0x00, 0xFE};
+    assert(pe_lang_bank_size(bank, sizeof bank) == 12);
+    assert(!pe_lang_bank_size(bank + 1, sizeof bank - 1) && !pe_lang_bank_size(bank, 8));  /* no page / cut */
+    assert(pe_lang_crc32((const unsigned char *)"123456789", 9) == 0xCBF43926u);  /* the zlib check value */
+    char bank_key[32];
+    snprintf(bank_key, sizeof bank_key, "bank/%08x", (unsigned)pe_lang_crc32(bank, 12));
+
+    Entry entries[] = {{"item/054", "\x12\x37\x48"}, {"desc/000", "\x11\x30"}, {"dlg/M001/002", "\x13"},
+                       {"sys/001", "\x14"}, {"misc/130", "\x15"}, {bank_key, "M001"}};
     size_t size;
-    unsigned char *good = make_pack(entries, 3, &size);
+    unsigned char *good = make_pack(entries, 6, &size);
     PeLangPack pack;
     assert(!pe_lang_pack_parse(&pack, copy_of(good, size), size));
-    assert(pack.count == 3 && !strcmp(pack.lang, "fr") && !strcmp(pack.name, "French"));
+    assert(pack.count == 6 && !strcmp(pack.lang, "fr") && !strcmp(pack.name, "French"));
     const unsigned char *t = pe_lang_pack_find(&pack, "item/054");
     assert(t && t[0] == 0x12 && t[1] == 0x37 && t[2] == 0x48 && t[3] == 0xFF);
     assert(pe_lang_pack_table(&pack, 8, 54) == t);
     assert(pe_lang_pack_table(&pack, 12, 0)[0] == 0x11);
-    assert(!pe_lang_pack_table(&pack, 8, 55) && !pe_lang_pack_table(&pack, 4, 54));
+    assert(pe_lang_pack_table(&pack, 4, 1)[0] == 0x14 && pe_lang_pack_table(&pack, 16, 130)[0] == 0x15);
+    assert(!pe_lang_pack_table(&pack, 8, 55) && !pe_lang_pack_table(&pack, 4, 54) && !pe_lang_pack_table(&pack, 20, 1));
     assert(pe_lang_pack_find(&pack, "dlg/M001/002")[0] == 0x13 && !pe_lang_pack_find(&pack, "dlg/M001/003"));
-    assert(!pe_lang_pack_table(NULL, 8, 54));
+    /* Dialogue through the bank: the bank's CRC names it, then the page. */
+    assert(pe_lang_pack_page(&pack, pe_lang_crc32(bank, 12), 2)[0] == 0x13);
+    assert(!pe_lang_pack_page(&pack, pe_lang_crc32(bank, 12), 3));
+    assert(!pe_lang_pack_page(&pack, 0x12345678u, 2));       /* a bank the pack doesn't know */
+    assert(!pe_lang_pack_table(NULL, 8, 54) && !pe_lang_pack_page(NULL, 0, 2));
     pe_lang_pack_free(&pack);
 
     /* From a file, as the mod loads it. */
     FILE *f = fopen("pe_lang_test.pelang", "wb");
     assert(f && fwrite(good, 1, size, f) == size && !fclose(f));
-    assert(!pe_lang_pack_load(&pack, "pe_lang_test.pelang") && pack.count == 3);
+    assert(!pe_lang_pack_load(&pack, "pe_lang_test.pelang") && pack.count == 6);
     pe_lang_pack_free(&pack);
     remove("pe_lang_test.pelang");
     assert(pe_lang_pack_load(&pack, "no-such-pack.pelang") == -1);
@@ -80,6 +95,7 @@ int main(void) {
     assert(pe_lang_pack_parse(&pack, copy_of(good, 40), 40));
     assert(pack.data == NULL && !pe_lang_pack_find(&pack, "item/054"));
     free(good);
-    puts("Passed language pack checks: lookups by key and table, file load, damaged packs refused whole.");
+    puts("Passed language pack checks: lookups by key, table and bank page, bank measure and CRC, "
+         "file load, damaged packs refused whole.");
     return 0;
 }
