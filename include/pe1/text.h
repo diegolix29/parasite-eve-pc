@@ -25,6 +25,8 @@ typedef union TextTableDirectory {
 
 void *Text_LookupTable4(unsigned int index);
 void *Text_LookupTable8(unsigned int index);
+/* Whether `text` is what a PE_HOOK_TEXT_LOOKUP handler returned for the last text lookup. */
+int Text_IsLookupReplacement(const void *text);
 extern int g_SaveMetadataWindowIndex;
 void Text_CopyFFTerminatedBytes(u8 *dst, u8 *src);
 void Text_AppendFFTerminatedBytes(u8 *dst, u8 *src);
