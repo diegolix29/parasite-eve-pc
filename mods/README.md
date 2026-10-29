@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_cheats` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -51,6 +51,7 @@ mods/
   pe_collection/       Bestiary and Wardrobe registries, skins, Wardrobe menu (packs register here)
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
   pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
+  pe_cheats/           god mode, infinite ammo and PE, instant win, all PE powers
   pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
                        by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
@@ -72,6 +73,11 @@ mod or the option off, extra copies go back into free slots as plain items.
 F1 > Warp: pick a story checkpoint and Warp. It sets script variable 74 (story progress) to that
 point and runs the field script's own room transfer (Script_EncodeBarcode) on the next free field
 frame, never during a battle, an event, a room change or a movie.
+
+## Cheats (pe_cheats)
+
+F1 > Cheats: God mode, Infinite ammo and PE, Win this battle, and Learn all / Restore PE powers.
+All off until chosen; while they are off the mod writes nothing.
 
 ## A mod
 
