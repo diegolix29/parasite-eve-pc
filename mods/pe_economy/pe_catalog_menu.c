@@ -7,6 +7,7 @@
 #include "pe_catalog.h"
 #include "pe_catalog_menu_state.h"
 #include "pe_catalog_menu_view.h"
+#include "pe_catalog_effect_icons.h"
 #include "pe_game.h"
 #include "pe_main_menu.h"
 #include "pe_mod_host.h"
@@ -18,7 +19,7 @@
 
 static PeScreen s_screen;
 static struct {
-    MenuWidgetNode *slots, *stats, *detail;
+    MenuWidgetNode *selector, *slots, *stats, *detail;
     struct { PeCatalogCursor slots, board; } gear[2];
     int which, review, review_count, *removed, removed_count;
     int ask_valid, ask_which, ask_slot, ask_effect;
@@ -32,15 +33,16 @@ static void cat_refresh(void);
 static void cat_draw_board(MenuWidgetNode *node);
 static void cat_draw_slots(MenuWidgetNode *node);
 static int cat_alive(void) {
-    if (!s_screen.panel || !s_screen.list || !s_cat.slots) return 0;
+    if (!s_screen.panel || !s_screen.list || !s_cat.slots || !s_cat.selector) return 0;
     unsigned found=0;
     MenuWidgetNode *n=g_MenuWidgetActiveListHead;
     for (int i=0;n && i<24;++i,n=n->next) {
         if(n==s_screen.panel)found|=1;
         if(n==s_screen.list)found|=2;
         if(n==s_cat.slots)found|=4;
+        if(n==s_cat.selector)found|=8;
     }
-    return found==7 && s_screen.list->draw==(void (*)())cat_draw_board &&
+    return found==15 && s_screen.list->draw==(void (*)())cat_draw_board &&
            s_cat.slots->draw==(void (*)())cat_draw_slots;
 }
 static void cat_save(void) {
@@ -48,8 +50,10 @@ static void cat_save(void) {
     s_cat.gear[s_cat.which].slots=(PeCatalogCursor){s_cat.slots->cursor_y,s_cat.slots->scroll_y};
     if (!s_cat.review) s_cat.gear[s_cat.which].board=(PeCatalogCursor){s_screen.list->cursor_y,s_screen.list->scroll_y};
 }
+static int cat_board_count(void) { return 1+pe_cat_board_count(s_cat.which); }
 static int cat_effect(void) {
-    return pe_cat_board_effect(s_cat.which, s_cat.gear[s_cat.which].board.row);
+    int row=s_cat.gear[s_cat.which].board.row;
+    return row>0 ? pe_cat_board_effect(s_cat.which,row-1) : 0;
 }
 static void cat_rows(MenuWidgetNode *list, int count, PeCatalogCursor cursor) {
     pe_catalog_cursor_clamp(&cursor,count,list->visible_rows_mirror);
@@ -66,10 +70,14 @@ static void cat_clear_review(void) {
     s_cat.review=0; s_cat.ask_valid=0;
     free(s_cat.removed); s_cat.removed=NULL; s_cat.removed_count=0;
 }
+static void cat_selector_row(int which) {
+    pe_catalog_view_text(which ? "Armor" : "Weapon",0,g_DrawTextPosX-4);
+}
+static void cat_draw_selector(MenuWidgetNode *node) { MenuWidget_DrawList(node,cat_selector_row); }
 static void cat_slot_row(int row) { pe_catalog_view_slot(s_cat.which,row); }
 static void cat_board_row(int row) {
-    if (pe_cat_board_count(s_cat.which)<=0) pe_catalog_view_text("No effects",0,120);
-    else pe_catalog_view_effect(s_cat.which,s_cat.slots->cursor_y,pe_cat_board_effect(s_cat.which,row));
+    if(row==0)pe_catalog_view_remove(s_cat.which,s_cat.slots->cursor_y);
+    else pe_catalog_view_effect(s_cat.which,s_cat.slots->cursor_y,pe_cat_board_effect(s_cat.which,row-1));
 }
 static void cat_review_text(int row, char *out, size_t size) {
     int n = s_cat.removed_count ? s_cat.removed_count : 1;
@@ -82,13 +90,24 @@ static void cat_review_text(int row, char *out, size_t size) {
     else snprintf(out,size,"X yes/no  O back");
 }
 static void cat_review_row(int row) {
-    char text[96]; cat_review_text(row,text,sizeof text);
-    pe_catalog_view_text(text,0,124);
+    if(row==0 && s_cat.ask_effect) {
+        pe_catalog_effect_icon(s_cat.ask_which,s_cat.ask_effect,0,124);
+    } else if(row>=5 && row<5+s_cat.removed_count) {
+        char index[16];snprintf(index,sizeof index,"%d",row-4);
+        pe_catalog_view_text(index,0,18);
+        pe_catalog_effect_icon(s_cat.ask_which,s_cat.removed[row-5],22,100);
+    } else {
+        char text[96];cat_review_text(row,text,sizeof text);
+        pe_catalog_view_text(text,0,124);
+    }
 }
 static void cat_draw_board(MenuWidgetNode *n) {
+    if(s_cat.review && s_cat.ask_effect && !pe_cat_unlocked(s_cat.ask_which,s_cat.ask_effect)) {
+        cat_clear_review();cat_refresh(); /* Debug/save reload revoked this discovery. */
+    }
     /* F1 editors can change slot counts while Aya's menu is still open. */
     if (!s_cat.review && (s_cat.slots->y_limit!=(pe_cat_slots(s_cat.which)>0?pe_cat_slots(s_cat.which):1) ||
-        n->y_limit!=(pe_cat_board_count(s_cat.which)>0?pe_cat_board_count(s_cat.which):1))) {
+        n->y_limit!=cat_board_count())) {
         cat_save();cat_refresh();
     }
     MenuWidget_DrawList(n,s_cat.review ? cat_review_row : cat_board_row);
@@ -99,7 +118,7 @@ static void cat_draw_detail(MenuWidgetNode *n) { pe_catalog_view_detail(n,s_cat.
 
 static void cat_refresh(void) {
     cat_rows(s_cat.slots,pe_cat_slots(s_cat.which),s_cat.gear[s_cat.which].slots);
-    cat_rows(s_screen.list,pe_cat_board_count(s_cat.which),s_cat.gear[s_cat.which].board);
+    cat_rows(s_screen.list,cat_board_count(),s_cat.gear[s_cat.which].board);
     cat_save();
 }
 static void cat_answer(int yes) {
@@ -124,6 +143,9 @@ static void cat_answer(int yes) {
     MenuWidget_SetCurrentNode(s_screen.list);
 }
 static void cat_review(int effect) {
+    if(effect && !pe_cat_unlocked(s_cat.which,effect)) {
+        snprintf(s_cat.result,sizeof s_cat.result,"????");Menu_PlayErrorSound();return;
+    }
     const int slot=s_cat.slots->cursor_y;
     int code=effect ? pe_cat_install(s_cat.which,slot,effect,1) : pe_cat_remove(s_cat.which,slot,1);
     const ItemDataRecord *rec=pe_cat_record(s_cat.which);
@@ -144,22 +166,37 @@ static void cat_review(int effect) {
     cat_rows(s_screen.list,s_cat.review_count,(PeCatalogCursor){0,0});
     cat_focus(s_screen.list); Menu_PlayConfirmSound();
 }
-static void cat_switch(void) {
-    cat_save(); cat_clear_review(); s_cat.which^=1;
-    cat_refresh(); cat_focus(s_cat.slots); Menu_PlayMoveSound();
+static void cat_choose(int which, MenuWidgetNode *focus) {
+    cat_save(); cat_clear_review(); s_cat.which=which;
+    s_cat.selector->cursor_x=which;
+    cat_refresh(); cat_focus(focus); Menu_PlayMoveSound();
 }
 static int cat_input(MenuWidgetNode *node, unsigned int buttons) {
-    if (node!=s_cat.slots && node!=s_screen.list) return 0;
+    if (node!=s_cat.selector && node!=s_cat.slots && node!=s_screen.list) return 0;
     if (pe_confirm_open()) return 1;
-    if (buttons & (4u|8u)) { if (!s_cat.review) cat_switch(); return 1; } /* L1/R1 */
+    if (buttons & (4u|8u)) { /* L1/R1 remains a shortcut from either list. */
+        if (!s_cat.review) cat_choose(s_cat.which^1,node==s_cat.selector?s_cat.selector:s_cat.slots);
+        return 1;
+    }
     if (buttons & PE_MENU_CIRCLE) {
         if (s_cat.review) { cat_clear_review(); cat_refresh(); cat_focus(s_screen.list); }
         else if (node==s_screen.list) cat_focus(s_cat.slots);
-        else { cat_save(); cat_clear_review(); s_cat.slots=s_cat.stats=s_cat.detail=NULL; pe_screen_close(&s_screen); }
+        else if (node==s_cat.slots) cat_focus(s_cat.selector);
+        else { cat_save(); cat_clear_review(); s_cat.selector=s_cat.slots=s_cat.stats=s_cat.detail=NULL; pe_screen_close(&s_screen); }
         Menu_PlayCancelSound(); return 1;
     }
     if (!s_cat.review && (buttons & (0x8000u|0x2000u))) { /* Left / Right */
-        cat_save(); cat_focus((buttons&0x8000u)?s_cat.slots:s_screen.list); Menu_PlayMoveSound(); return 1;
+        if (node==s_cat.selector) cat_choose((buttons&0x8000u)?PE_GUN:PE_ARMOR,s_cat.selector);
+        else {
+            cat_save();
+            cat_focus((buttons&0x8000u)?(node==s_cat.slots?s_cat.selector:s_cat.slots):s_screen.list);
+            Menu_PlayMoveSound();
+        }
+        return 1;
+    }
+    if (node==s_cat.selector) {
+        if (buttons & (PE_MENU_CROSS|0x4000u)) { cat_focus(s_cat.slots);Menu_PlayConfirmSound(); }
+        return 1;
     }
     if (buttons & PE_MENU_CROSS) {
         s_cat.result[0]=0;
@@ -170,7 +207,7 @@ static int cat_input(MenuWidgetNode *node, unsigned int buttons) {
         } else cat_review(cat_effect());
         return 1;
     }
-    if (!s_cat.review && (buttons&0x80u)) { cat_review(0); return 1; } /* Square */
+    if(buttons&0x80u)return 1; /* Removal is the first Catalog row, never a Square shortcut. */
     if (buttons & (0x1000u|0x4000u)) {
         int handled=Menu_StepScrollCursor(node,buttons), old_top=node->scroll_y;
         PeCatalogCursor cursor={node->cursor_y,node->scroll_y};
@@ -183,22 +220,28 @@ static int cat_input(MenuWidgetNode *node, unsigned int buttons) {
 }
 
 static void cat_open(MenuWidgetNode *from) {
-    /* Eight panel/list nodes, two native scroll-arrow nodes and the two-node
-     * Yes/No dialog must fit the native 24-node pool alongside Aya's menu. */
+    /* Ten panel/list nodes, two scroll-arrow nodes and the two-node Yes/No
+     * dialog must fit the native 24-node pool alongside Aya's menu. */
     int used=0;
     for (MenuWidgetNode *n=g_MenuWidgetActiveListHead;n && used<=24;n=n->next) ++used;
-    if (used>12) { pe_toast("Close other screens before opening the Catalog"); Menu_PlayErrorSound(); return; }
+    if (used>10) { pe_toast("Close other screens before opening the Catalog"); Menu_PlayErrorSound(); return; }
     pe_screen_open(&s_screen,from,170,32,142,PE_CAT_BOARD_ROWS,cat_draw_board,NULL);
     pe_catalog_view_layout(s_screen.list,PE_CAT_BOARD_ROWS,142);
-    s_cat.slots=pe_screen_panel(&s_screen,30,128,136,PE_CAT_SLOT_ROWS,cat_draw_slots);
-    s_cat.stats=pe_screen_panel(&s_screen,30,32,136,6,cat_draw_stats);
+    s_cat.selector=pe_screen_panel(&s_screen,30,32,136,1,cat_draw_selector);
+    s_cat.slots=pe_screen_panel(&s_screen,30,154,136,PE_CAT_SLOT_ROWS,cat_draw_slots);
+    s_cat.stats=pe_screen_panel(&s_screen,30,58,136,6,cat_draw_stats);
     s_cat.detail=pe_screen_panel(&s_screen,170,158,142,4,cat_draw_detail);
+    pe_catalog_view_layout(s_cat.selector,1,136);
+    s_cat.selector->grid_width=s_cat.selector->x_limit=2;
+    s_cat.selector->draw_state=(136-8)/2;
+    s_cat.selector->cursor_x=s_cat.which;s_cat.selector->cursor_y=0;
+    Draw_SetPrimCallback(s_cat.selector,2);
     pe_catalog_view_layout(s_cat.slots,PE_CAT_SLOT_ROWS,136);
     pe_catalog_view_layout(s_cat.stats,6,136);
     pe_catalog_view_layout(s_cat.detail,4,142);
     s_cat.stats->cursor_x=s_cat.detail->cursor_x=-1;
-    s_cat.slots->update=s_screen.list->update=cat_input;
-    cat_clear_review(); cat_refresh(); cat_focus(s_cat.slots);
+    s_cat.selector->update=s_cat.slots->update=s_screen.list->update=cat_input;
+    cat_clear_review(); cat_refresh(); cat_focus(s_cat.selector);
     pe_log("catalog_menu","open native panels slots=%d board=%d",pe_cat_slots(s_cat.which),pe_cat_board_count(s_cat.which));
 }
 static int cat_help(void *ctx,void *user) {
@@ -206,14 +249,19 @@ static int cat_help(void *ctx,void *user) {
     char line[96];
     MenuWidgetNode *node=MenuWidget_GetCurrentNode();
     (void)user;
-    if (!cat_alive() || (node!=s_cat.slots && node!=s_screen.list)) return 0;
-    if (s_cat.result[0]) snprintf(line,sizeof line,"%s",s_cat.result);
+    if (!cat_alive() || (node!=s_cat.selector && node!=s_cat.slots && node!=s_screen.list)) return 0;
+    if((s_cat.review && s_cat.ask_effect && !pe_cat_unlocked(s_cat.ask_which,s_cat.ask_effect)) ||
+       (!s_cat.review && node==s_screen.list && cat_effect() && !pe_cat_unlocked(s_cat.which,cat_effect())))
+        snprintf(line,sizeof line,"????");
+    else if (s_cat.result[0]) snprintf(line,sizeof line,"%s",s_cat.result);
     else if (s_cat.review) cat_review_text(node->cursor_y,line,sizeof line);
-    else if (node==s_cat.slots) snprintf(line,sizeof line,"L1/R1 gear / Junk %u",(unsigned)pe_loot_junk());
-    else snprintf(line,sizeof line,"%s / Junk %u",pe_cat_effect_name(s_cat.which,cat_effect()),(unsigned)pe_loot_junk());
+    else if (node==s_cat.selector) snprintf(line,sizeof line,"Choose Weapon or Armor / X select");
+    else if (node==s_cat.slots) snprintf(line,sizeof line,"Slot %d: %s",node->cursor_y+1,pe_cat_effect_name(s_cat.which,pe_cat_slot_effect(s_cat.which,node->cursor_y)));
+    else snprintf(line,sizeof line,"%s / Junk %u",cat_effect()?pe_cat_effect_name(s_cat.which,cat_effect()):"Remove effect",(unsigned)pe_loot_junk());
     pe_text_from_ascii(title,sizeof title,line);
     /* The wide title bar is still finite, even with custom names. */
     size_t n=0;while(title[n]!=0xFF)++n;
+    if(n>48){n=48;title[n]=0xFF;} /* also bound packets with very narrow replacement fonts */
     while(n && Draw_MeasureTextWidth(title)>278)title[--n]=0xFF;
     *(unsigned char **)ctx=title; return 0;
 }

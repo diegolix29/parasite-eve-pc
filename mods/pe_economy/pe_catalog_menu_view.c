@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pe_catalog_menu_view.h"
+#include "pe_catalog_effect_icons.h"
 #include "pe_catalog.h"
 #include "pe_economy.h"
 #include "pe_gametext.h"
@@ -58,26 +59,37 @@ const char *pe_catalog_view_problem(int code) {
 }
 
 void pe_catalog_view_slot(int which, int slot) {
-    char line[96];
-    int effect = pe_cat_slot_effect(which, slot);
-    if (pe_cat_slots(which) <= 0) snprintf(line, sizeof line, "No mod slots");
-    else snprintf(line, sizeof line, "%d %s", slot + 1,
-                  effect ? pe_cat_effect_short(which, effect) : "Empty");
-    pe_catalog_view_text(line, 0, g_DrawTextPosX - 4);
+    char number[16];
+    if(pe_cat_slots(which)<=0){pe_catalog_view_text("No mod slots",0,g_DrawTextPosX-4);return;}
+    snprintf(number,sizeof number,"%d",slot+1);
+    pe_catalog_view_text(number,0,18);
+    pe_catalog_effect_icon(which,pe_cat_slot_effect(which,slot),22,g_DrawTextPosX-28);
+}
+
+void pe_catalog_view_remove(int which, int slot) {
+    Draw_SetTextDimmed(pe_cat_remove(which,slot,1)!=PE_CAT_OK);
+    pe_catalog_view_text("Remove",0,g_DrawTextPosX-4);
+    Draw_SetTextDimmed(0);
 }
 
 void pe_catalog_view_effect(int which, int slot, int effect) {
     char price[32];
     int width = g_DrawTextPosX - 4;
-    int dim = !pe_cat_unlocked(which, effect) || pe_cat_install(which, slot, effect, 1) != PE_CAT_OK;
-    snprintf(price, sizeof price, "%s", "Locked");
+    if(!pe_cat_unlocked(which,effect)) {
+        Draw_SetTextDimmed(1);
+        pe_catalog_view_text("????",0,width);
+        Draw_SetTextDimmed(0);
+        return; /* No icon, price, Tool requirement or name before discovery. */
+    }
+    int dim = pe_cat_install(which, slot, effect, 1) != PE_CAT_OK;
+    snprintf(price, sizeof price, "%s", "--");
     if (pe_cat_unlocked(which, effect))
         snprintf(price, sizeof price, "%u%s", (unsigned)pe_cat_price(which, effect), pe_cat_needs_tool(which, effect) ? "+T" : "");
     unsigned char bytes[40];
     pe_text_from_ascii(bytes, sizeof bytes, price);
     int price_width = Draw_MeasureTextWidth(bytes);
     Draw_SetTextDimmed(dim);
-    pe_catalog_view_text(pe_cat_effect_short(which, effect), 0, width - price_width - 5);
+    pe_catalog_effect_icon(which,effect,0,width-price_width-5);
     pe_catalog_view_text(price, width - price_width, price_width);
     Draw_SetTextDimmed(0);
 }
@@ -128,15 +140,23 @@ static int s_detail_which, s_detail_slot, s_detail_effect, s_detail_review;
 static void detail_row(int row) {
     char line[96];
     const int e = s_detail_effect, which = s_detail_which;
-    int code = pe_cat_install(which, s_detail_slot, e, 1);
-    if (s_detail_review && !e) {
-        static const char *remove_lines[]={"Remove effect","No Junk / Tool cost","Stays unlocked","X yes/no  O back"};
-        snprintf(line,sizeof line,"%s",remove_lines[row]);
+    if(e && !pe_cat_unlocked(which,e)) {
+        if(row==0)pe_catalog_view_text("????",0,g_DrawTextPosX-4);
+        return;
     }
-    else if (row == 0) snprintf(line, sizeof line, "%s", pe_cat_effect_name(which, e));
-    else if (row == 1) snprintf(line, sizeof line, "%u Junk%s", (unsigned)pe_cat_price(which, e), pe_cat_needs_tool(which, e) ? " +Tool" : "");
-    else if (row == 2) snprintf(line, sizeof line, "%s", code == PE_CAT_OK ? "X: review changes" : pe_catalog_view_problem(code));
-    else snprintf(line, sizeof line, "%s", s_detail_review ? "X yes/no  O back" : "Square: remove");
+    int code=e ? pe_cat_install(which,s_detail_slot,e,1) : pe_cat_remove(which,s_detail_slot,1);
+    if(s_detail_review) {
+        static const char *review_lines[]={"Review changes","X: Yes / No","O: back",""};
+        snprintf(line,sizeof line,"%s",review_lines[row]);
+    } else if(!e) {
+        if(row==0)snprintf(line,sizeof line,"Remove effect");
+        else if(row==1)snprintf(line,sizeof line,"No Junk cost");
+        else if(row==2)snprintf(line,sizeof line,"%s",code==PE_CAT_OK?"Stays unlocked":pe_catalog_view_problem(code));
+        else snprintf(line,sizeof line,"X: review removal");
+    } else if(row==0)snprintf(line,sizeof line,"%s",pe_cat_effect_name(which,e));
+    else if(row==1)snprintf(line,sizeof line,"%u Junk%s",(unsigned)pe_cat_price(which,e),pe_cat_needs_tool(which,e)?" +Tool":"");
+    else if(row==2)snprintf(line,sizeof line,"%s",code==PE_CAT_OK?"X: review changes":pe_catalog_view_problem(code));
+    else snprintf(line,sizeof line,"O: slots");
     pe_catalog_view_text(line, 0, g_DrawTextPosX - 4);
 }
 void pe_catalog_view_detail(MenuWidgetNode *node, int which, int slot, int effect, int review) {
