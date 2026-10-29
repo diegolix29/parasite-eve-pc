@@ -72,7 +72,10 @@ def decode(b: bytes) -> str:
 _TAG = re.compile(r"\{([gx][0-9A-F]{2}|[a-z/]+[0-9]*)(?: ([0-9A-Fa-f]+))?\}")
 
 
-def encode(text: str) -> bytes:
+def encode(text: str, extended: bool = False) -> bytes:
+    """`text` in the game's glyph code. With `extended`, letters of the Latin Extended set
+    (petext/latin.py: é, ñ, ß, « ...) are allowed too; pe_lang adds their glyphs to the font."""
+    latin = _latin_codes() if extended else {}
     out, i = bytearray(), 0
     while i < len(text):
         if text[i] == "{":
@@ -101,11 +104,27 @@ def encode(text: str) -> bytes:
             i = m.end()
         else:
             ch = text[i]
-            if ch not in CODE_OF:
+            if ch in CODE_OF:
+                out.append(CODE_OF[ch])
+            elif ch in latin:
+                out.append(latin[ch])
+            else:
                 raise ValueError(f"no glyph for {ch!r}")
-            out.append(CODE_OF[ch])
             i += 1
     return bytes(out)
+
+
+def _latin_codes() -> dict[str, int]:
+    from . import latin
+    return latin.CODE_OF
+
+
+def _latin_advance(code: int) -> int | None:
+    from . import latin
+    g = latin.BY_CODE.get(code)
+    if not g:
+        return None
+    return latin.advance(g, ADVANCE[CODE_OF[g.base]] if g.base else None)
 
 
 def lines(b: bytes) -> list[int]:
@@ -127,7 +146,7 @@ def lines(b: bytes) -> list[int]:
         elif c < len(ADVANCE):
             w += ADVANCE[c]
         elif c < 0xF1:
-            w += WIDE
+            w += _latin_advance(c) or WIDE
         i += 1
     widths.append(w)
     return widths

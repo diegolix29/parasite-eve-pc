@@ -1,7 +1,7 @@
 # Mod host and mods, built only with -DPE_MODS=ON. See mods/README.md.
 # Each mod is a folder here holding .c files and defining `const PeMod pe_mod_<folder>`.
 # pe_hello is the example mod; add it to the list to build it. pe_lang (language packs) is
-# opt-in too while packs can only use the US font's glyphs.
+# opt-in too.
 set(PE_MOD_LIST pe_qol pe_rebalance pe_economy pe_collection CACHE STRING "Mods built into the game (folder names)")
 
 set(pe_host_sources
@@ -186,6 +186,14 @@ if(BUILD_TESTING)
         target_compile_options(test-mod-lang-pack PRIVATE -UNDEBUG)
     endif()
     add_test(NAME mod-lang-pack COMMAND test-mod-lang-pack)
+    add_executable(test-mod-lang-font ${PROJECT_SOURCE_DIR}/tests/pe_mod_lang_font_test.c pe_lang/pe_lang_font.c)
+    target_include_directories(test-mod-lang-font PRIVATE pe_lang ${PROJECT_SOURCE_DIR}/tests)
+    if(MSVC)
+        target_compile_options(test-mod-lang-font PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(test-mod-lang-font PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME mod-lang-font COMMAND test-mod-lang-font)
 endif()
 
 # Rust save-editor interoperability uses the actual C serializer, including the

@@ -17,11 +17,36 @@ the [Parasite Eve Localization Mod Plan](https://claude.ai/artifact/2NpmecRhhgMB
 | `pe_lang` mod: F1 > Language, item names and descriptions | Done |
 | System messages, misc table, room dialogue | Done: `PE_HOOK_TEXT_LOOKUP` from every table, `PE_HOOK_TEXT_PAGE` |
 | Text drawn into images, text compiled into the port, other mods' messages | Not keyed yet |
-| Accented letters, Cyrillic | Needs the font upload (phase 3) |
+| Accented letters (Latin Extended: French, German, Spanish, Italian, Portuguese, Polish, Czech, Turkish) | Done |
+| Cyrillic | Not started |
 | Chinese, Japanese, Korean | Needs the per-area glyph pages (phase 5) |
 
-Until the accented-letter font lands, a pack can only use the glyphs the US font has: A-Z, a-z,
-0-9, space and `+ - % & ! ? " ' . : , /`. The compiler says so when a character is missing.
+A pack can use the US font's glyphs (A-Z, a-z, 0-9, space and `+ - % & ! ? " ' . : , /`) and the
+Latin Extended set below. The compiler names any other character it finds.
+
+## The Latin Extended letters
+
+111 glyphs, defined in `localization/petext/latin.py`:
+
+- **Letters with marks**, lowercase and capital: à á â ã ä å ç è é ê ë ì í î ï ñ ò ó ô õ ö ø ù ú
+  û ü ý ÿ, ą ć ę ł ń ś ź ż, č ď ě ň ř š ť ů ž, ğ ı İ ş, ő ű.
+- **Signs**: ß æ Æ œ Œ « » € ° ¿ ¡.
+
+They are made from the game's own letters at run time, so no game art is in the repo or in a pack:
+- When the dialogue font goes to VRAM (`PE_HOOK_TIM_UPLOAD`), `pe_lang` composes each glyph from its
+  base letter plus a mark drawn in `latin.py` (é is the font's own `e` plus an acute), into the
+  font's empty cells, codes 0x4D-0xBB.
+- Over a capital it first drops one repeated stem row, so the mark fits without moving the baseline.
+- The few signs that aren't letter + mark (ß, æ, «, €) are drawn in `latin.py` in the font's style.
+  ¿ and ¡ are the font's ? and ! turned over.
+- Widths come from the base letter: the dialogue box reads them through `g_TextboxGlyphWidths` (the
+  original table unless a mod points it at a longer one), the menus from the resident glyph
+  metrics, for those codes only.
+
+`python -I preview_latin.py US1.cue` draws the set from your disc to `out/latin.png`, with sample
+words. After changing `latin.py`, run `python -I pelang.py latin-header` to regenerate
+`mods/pe_lang/pe_lang_latin.h` and the test vectors; the tests check both are current, and
+`mod-lang-font` checks the C composer against the Python one pixel for pixel.
 
 ## Making a pack
 
@@ -116,5 +141,7 @@ reference.
   compiler's checks, and the pack round trip.
 - `ctest -R mod-lang-pack`: the C reader's lookups by key, table and bank page, the bank measure
   and CRC, and damaged packs refused whole.
+- `ctest -R mod-lang-font`: the C composer against `latin.py` on synthetic letters, page fill
+  (only empty cells change), widths.
 - In game: pe-native-debug's `scenarios/lang_items.py` loads a save with a pack and without, and
   takes pictures of the item screen and a phone's dialogue box.

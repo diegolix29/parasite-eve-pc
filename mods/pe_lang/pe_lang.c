@@ -8,13 +8,23 @@
  * PE_HOOK_TEXT_LOOKUP. Room dialogue comes through PE_HOOK_TEXT_PAGE: the pack names each English
  * message bank by its CRC32 ("bank/<crc32>"), so the bank a box reads from is measured once per
  * room and its pages looked up as dlg/<bank>/<page>. A bank the pack doesn't know (another disc
- * version, a modded room) keeps the game's text. */
+ * version, a modded room) keeps the game's text.
+ *
+ * Packs may use the Latin Extended letters (é, ñ, ß, « ...): when the dialogue font goes to VRAM
+ * (PE_HOOK_TIM_UPLOAD) they are composed from the game's own letters into its empty cells, codes
+ * 0x4D on; the dialogue box gets their widths through g_TextboxGlyphWidths, and the menus through
+ * the resident glyph metrics (only those codes' entries, which the game's text never uses). */
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "common.h"
+#include "pe1/psyq_tim.h"
+#include "pe1/resident_tables.h"
+#include "pe1/textbox.h"
 #include "pe_hooks.h"
+#include "pe_lang_font.h"
 #include "pe_lang_pack.h"
 #include "pe_mod_host.h"
 #include "pe_mod_menu.h"
@@ -62,11 +72,59 @@ static int on_text_page(void *ctx, void *user) {
     return 0;
 }
 
-/* A new room can load its bank where the last one was: measure again. */
+/* ---- the Latin Extended glyphs ---- */
+
+#define FONT_CODES 0xF1u                 /* single-byte glyph codes the box can draw: 0x00-0xF0 */
+static TextboxGlyphSpacing s_widths[FONT_CODES];
+static int s_font_added;
+
+/* The US dialogue font page: 4-bit, its image at VRAM 0x140,0 (64 x 256 words), its palette at
+ * 0x140,0xFC (src/main/text/tables.c, g_FieldFontTextureState). */
+static unsigned char *font_pixels(TimFile *tim) {
+    if ((tim->flags & 7) != 0 || !(tim->flags & 8)) return NULL;
+    TimBlock *clut = &tim->first_block;
+    TimBlock *image = (TimBlock *)&clut->bytes[clut->header.length];
+    const RECT *c = &clut->header.rect, *r = &image->header.rect;
+    if (c->x != 0x140 || c->y != 0xFC || r->x != 0x140 || r->y != 0 || r->w != 64 || r->h != 256) return NULL;
+    return (unsigned char *)image->header.pixels;
+}
+
+/* The widths of the new codes, for the dialogue box and for the menus. */
+static void install_widths(void) {
+    unsigned char advance[78], *metrics;
+    for (unsigned i = 0; i < 78; ++i) advance[i] = g_TextboxGlyphSpacing[i].right;
+    memset(s_widths, 0, sizeof s_widths);
+    memcpy(s_widths, g_TextboxGlyphSpacing, sizeof g_TextboxGlyphSpacing);
+    for (unsigned k = 0; k < PE_LATIN_COUNT; ++k)
+        s_widths[kPeLatinGlyphs[k].code].right = (u8)pe_lang_font_advance(&kPeLatinGlyphs[k], advance);
+    g_TextboxGlyphWidths = s_widths;
+    g_TextboxGlyphCount = FONT_CODES;
+    if (!g_ResidentDataPack.directory.glyphMetrics) return;     /* not loaded yet: next scene */
+    metrics = &g_ResidentDataPack.bytes[g_ResidentDataPack.directory.glyphMetrics];
+    for (unsigned k = 0; k < PE_LATIN_COUNT; ++k)
+        metrics[kPeLatinGlyphs[k].code] = pe_lang_font_metric(&kPeLatinGlyphs[k], metrics);
+}
+
+static int on_tim_upload(void *ctx, void *user) {
+    unsigned char *pixels = font_pixels(ctx);
+    (void)user;
+    if (!pixels) return 0;
+    int added = pe_lang_font_fill(pixels, 128, 256);
+    if (!s_font_added && added) pe_mod_log(MOD_ID, "added %d Latin Extended glyphs to the dialogue font", added);
+    if (added) {
+        s_font_added = 1;
+        install_widths();
+    }
+    return 0;
+}
+
+/* A new room can load its bank where the last one was: measure again. The resident pack can be
+ * read again too, so the menu widths go back in. */
 static int on_scene_start(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     s_bank = NULL;
+    if (s_font_added) install_widths();
     return 0;
 }
 
@@ -115,6 +173,7 @@ static int lang_init(void) {
     pe_hook_add(PE_HOOK_TEXT_LOOKUP, on_text_lookup, NULL, PE_PRIORITY_EARLY, MOD_ID);
     pe_hook_add(PE_HOOK_TEXT_PAGE, on_text_page, NULL, PE_PRIORITY_EARLY, MOD_ID);
     pe_hook_add(PE_HOOK_SCENE_START, on_scene_start, NULL, PE_PRIORITY_NORMAL, MOD_ID);
+    pe_hook_add(PE_HOOK_TIM_UPLOAD, on_tim_upload, NULL, PE_PRIORITY_NORMAL, MOD_ID);
 
     pe_menu_begin("Language");
     pe_menu_top_page("Language", "Play with the game's text from a language pack.", 0);
@@ -130,6 +189,12 @@ static void lang_shutdown(void) {
     for (unsigned i = 0; i < s_pack_count; ++i) pe_lang_pack_free(&s_packs[i]);
     s_pack_count = 0;
     s_choice = 0;
+    s_bank = NULL;
+    if (s_font_added) {
+        g_TextboxGlyphWidths = g_TextboxGlyphSpacing;
+        g_TextboxGlyphCount = sizeof g_TextboxGlyphSpacing / sizeof *g_TextboxGlyphSpacing;
+        s_font_added = 0;
+    }
 }
 
 const PeMod pe_mod_pe_lang = {MOD_ID, "Language packs", "0.1", NULL, lang_init, lang_shutdown};

@@ -39,7 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from petext import gametext as gt  # noqa: E402
+from petext import gametext as gt, latin  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
 HEADER = struct.Struct("<4sIII16s32s")
@@ -101,12 +101,16 @@ def cmd_template(a) -> int:
     return 0
 
 
+PSEUDO_ACCENTS = str.maketrans("aeiouyncszAEIOUYNCSZ", "áéîõüÿñçšżÀÉÎÕÜŸÑÇŠŻ")
+
+
 def pseudo(text: str) -> str:
-    """A visibly translated, about 30% longer version of `text`, using only glyphs the font has:
-    letters swap case, and the text is marked and padded with '!' and '+'. Tags stay as they are."""
+    """A visibly translated, about 30% longer version of `text`: letters swap case and take accents
+    (from the Latin Extended set, so the composed glyphs show up), and the text is marked and padded
+    with '!' and '+'. Tags stay as they are."""
     parts = re.split(r"(\{[^}]*\})", text)
     plain = sum(len(p) for p in parts if not p.startswith("{"))
-    body = "".join(p if p.startswith("{") else p.swapcase() for p in parts)
+    body = "".join(p if p.startswith("{") else p.swapcase().translate(PSEUDO_ACCENTS) for p in parts)
     return f"!{body}{'+' * max(1, plain * 3 // 10)}!" if plain else body
 
 
@@ -123,11 +127,11 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int]):
     """(glyph bytes or None, errors, warnings) for one translated row."""
     errors, warnings = [], []
     try:
-        raw = gt.encode(text)
+        raw = gt.encode(text, extended=True)
     except ValueError as e:
         msg = str(e)
         if msg.startswith("no glyph"):
-            msg += " (the font has only A-Z, a-z, digits and basic punctuation until the accented-letter font lands)"
+            msg += " (the font has A-Z, a-z, digits, basic punctuation and the Latin Extended set in petext/latin.py)"
         return None, [msg], warnings
     english = source["text"]
     if STRUCTURE.findall(english) != STRUCTURE.findall(text):
@@ -223,6 +227,11 @@ def read_pack(path: Path) -> tuple[str, str, dict[int, bytes]]:
 
 
 def main(argv=None) -> int:
+    # Messages quote the translator's text; a console that can't show a character gets an escape
+    # (Б) instead of stopping the build.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("template", help="a translator CSV from strings.json")
@@ -240,8 +249,21 @@ def main(argv=None) -> int:
     b.add_argument("--name", required=True, help="the name the Language row shows, e.g. French")
     b.add_argument("-o", "--out", type=Path, required=True)
     b.add_argument("--max-messages", type=int, default=50)
+    h = sub.add_parser("latin-header", help="write the Latin Extended table the pe_lang mod composes "
+                                            "from, and the test vectors its composer is checked with")
+    h.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods" / "pe_lang" / "pe_lang_latin.h")
+    h.add_argument("--vectors", type=Path, default=ROOT.parent / "tests" / "pe_lang_font_vectors.h")
     a = ap.parse_args(argv)
-    return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build}[a.cmd](a)
+    return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build,
+            "latin-header": cmd_latin_header}[a.cmd](a)
+
+
+def cmd_latin_header(a) -> int:
+    latin.write_c_header(str(a.out))
+    latin.write_test_vectors(str(a.vectors))
+    print(f"wrote {a.out}: {len(latin.GLYPHS)} glyphs, codes 0x{latin.FIRST_CODE:02X}-0x{latin.GLYPHS[-1].code:02X}; "
+          f"test vectors {a.vectors}")
+    return 0
 
 
 if __name__ == "__main__":

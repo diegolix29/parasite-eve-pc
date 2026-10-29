@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pelang  # noqa: E402
-from petext import gametext as gt  # noqa: E402
+from petext import gametext as gt, latin  # noqa: E402
 
 STRINGS = [
     {"key": "item/000", "text": "Ammo +6", "lines_px": [44], "boxes": [], "rooms": [], "unused": False},
@@ -87,8 +87,10 @@ class PelangTest(unittest.TestCase):
         self.assertEqual(entries[pelang.fnv1a("dlg/M001/003")], gt.encode("Salut.") + b"\xf9")
 
     def test_build_refuses_missing_glyphs_and_changed_choices(self):
-        code, _ = self.build({"item/000": "Munitions é"})
+        code, _ = self.build({"item/000": "Боеприпасы"})          # Cyrillic: not in the font yet
         self.assertEqual(code, 1)
+        code, _ = self.build({"item/000": "Munitions é"})          # Latin Extended: fine
+        self.assertEqual(code, 0)
         code, _ = self.build({"dlg/M001/002": "Laisser un objet?{br}    Oui{br}    Non"})
         self.assertEqual(code, 1)
         path = self.csv_with({})
@@ -109,7 +111,27 @@ class PelangTest(unittest.TestCase):
         p = pelang.pseudo(text)
         self.assertEqual(pelang.STRUCTURE.findall(p), pelang.STRUCTURE.findall(text))
         self.assertGreater(len(p), len(text))
-        gt.encode(p)    # only glyphs the font has
+        self.assertIn("Ÿ", pelang.pseudo("yes"))        # case swapped, then accented
+        gt.encode(p, extended=True)    # only glyphs the font has, with the Latin Extended set
+
+    def test_latin_codes_and_encoding(self):
+        codes = [g.code for g in latin.GLYPHS]
+        self.assertEqual(len(codes), len(set(codes)))
+        self.assertTrue(all(latin.FIRST_CODE <= c <= 0xF0 for c in codes))
+        self.assertEqual(gt.encode("é", extended=True), bytes([latin.CODE_OF["é"]]))
+        with self.assertRaises(ValueError):
+            gt.encode("é")              # the plain encoder stays the US font's
+        self.assertEqual(gt.lines(gt.encode("é", extended=True)), gt.lines(gt.encode("e")))
+
+    def test_generated_c_files_are_current(self):
+        # mods/pe_lang/pe_lang_latin.h and tests/pe_lang_font_vectors.h come from petext/latin.py.
+        repo = Path(__file__).resolve().parents[2]
+        for name, write in (("mods/pe_lang/pe_lang_latin.h", latin.write_c_header),
+                            ("tests/pe_lang_font_vectors.h", latin.write_test_vectors)):
+            fresh = self.dir / Path(name).name
+            write(str(fresh))
+            self.assertEqual((repo / name).read_bytes().replace(b"\r\n", b"\n"), fresh.read_bytes(),
+                             f"{name} is stale: run `python -I localization/pelang.py latin-header`")
 
 
 if __name__ == "__main__":
