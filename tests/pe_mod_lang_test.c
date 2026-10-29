@@ -94,6 +94,22 @@ int main(void) {
     bad = copy_of(good, size); bad[size - 1] = 0x20;             assert(pe_lang_pack_parse(&pack, bad, size));  /* no FF */
     assert(pe_lang_pack_parse(&pack, copy_of(good, 40), 40));
     assert(pack.data == NULL && !pe_lang_pack_find(&pack, "item/054"));
+    /* Each entry is bounded by the next offset, not an FF in a later entry. */
+    bad = copy_of(good, size); wr32(bad + 76, 0);             assert(pe_lang_pack_parse(&pack, bad, size));
+    bad = copy_of(good, size); memset(bad + 16, 'x', 16);     assert(pe_lang_pack_parse(&pack, bad, size));
+    const char *invalid[] = {"\xFB", "\xFB\x07", "\xFB\x09", "\xFB\x09\x08",
+                             "\xFB\x0A", "\xFC", "\xFD", "\xF1", "\xF9\x10", "\xFF\x10"};
+    for (unsigned i = 0; i < sizeof invalid / sizeof *invalid; ++i) {
+        Entry one[] = {{"dlg/M001/000", invalid[i]}};
+        size_t n;
+        unsigned char *data = make_pack(one, 1, &n);
+        assert(pe_lang_pack_parse(&pack, data, n));
+    }
+    Entry valid[] = {{"dlg/M001/000", "\x10\xFB\x07\xFF\xFB\x09\x02\xFA\xFB\x08\xF9"}};
+    size_t n;
+    unsigned char *data = make_pack(valid, 1, &n);
+    assert(!pe_lang_pack_parse(&pack, data, n)); /* FF is a legal delay operand, not a terminator. */
+    pe_lang_pack_free(&pack);
     free(good);
     puts("Passed language pack checks: lookups by key, table and bank page, bank measure and CRC, "
          "file load, damaged packs refused whole.");

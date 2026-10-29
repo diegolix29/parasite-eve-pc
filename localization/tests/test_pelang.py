@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pelang  # noqa: E402
-from petext import gametext as gt, latin  # noqa: E402
+from petext import gametext as gt, latin, layout, validation  # noqa: E402
 
 STRINGS = [
     {"key": "item/000", "text": "Ammo +6", "lines_px": [44], "boxes": [], "rooms": [], "unused": False},
@@ -100,19 +100,82 @@ class PelangTest(unittest.TestCase):
                             "--name", "Test", "-o", str(self.dir / "u.pelang")])
         self.assertEqual(code, 1)
 
-    def test_build_warns_but_writes_a_long_line(self):
+    def test_build_refuses_a_long_line(self):
         long = "A very long line that will not fit in the standard dialogue box at all{br}{choice 2}  Y{br}  N"
         raw, errors, warnings = pelang.check_row("dlg/M001/002", long, STRINGS[2], {"item": 80})
-        self.assertFalse(errors)
-        self.assertTrue(any("dialogue box" in w for w in warnings))
+        self.assertTrue(any("dialogue box" in e for e in errors))
+        code, out = self.build({"dlg/M001/002": long})
+        self.assertEqual(code, 1)
+        self.assertFalse(out.exists())
 
     def test_pseudo_keeps_tags_and_grows(self):
         text = "Drop an item here?{br}{choice 2}    Yes{br}    No"
         p = pelang.pseudo(text)
-        self.assertEqual(pelang.STRUCTURE.findall(p), pelang.STRUCTURE.findall(text))
+        self.assertEqual(validation.structure(gt.encode(p, extended=True)), validation.structure(gt.encode(text)))
         self.assertGreater(len(p), len(text))
         self.assertIn("Ÿ", pelang.pseudo("yes"))        # case swapped, then accented
         gt.encode(p, extended=True)    # only glyphs the font has, with the Latin Extended set
+
+    def test_raw_tags_cannot_bypass_control_validation(self):
+        for text in ("Hello{xFB}", "Hello{xFF}More", "Hello{end2}More", "Hello{fb 07}",
+                     "Hello{sym 9}", "Hello{fb FF}", "Hello{gF1}", "Hello{fc}",
+                     "Hello{choice 0}", "Hello{choice 8}", "Hello{choice 999}",
+                     "Hello{choice}", "Hello{fb 08}", "Hello{xFA}"):
+            with self.subTest(text=text):
+                raw, errors, _ = pelang.check_row("dlg/M001/003", text, STRINGS[3], {})
+                self.assertIsNone(raw)
+                self.assertTrue(errors)
+
+    def test_control_comparison_uses_bytes_not_tag_spellings(self):
+        source = {"text": "A{wait}B{num}{name}{pause}{fb07 02}", "boxes": []}
+        equivalent = "C{xF8}D{fb 08}{xFA}{fb 06}{fb07 02}"
+        self.assertFalse(pelang.check_row("dlg/M001/003", equivalent, source, {})[1])
+        for text in ("A{num}{wait}B{name}{pause}{fb07 02}",
+                     "A{wait}B{num}{name}{pause}{fb07 03}",
+                     "A B{num}{name}{pause}{fb07 02}"):
+            self.assertTrue(pelang.check_row("dlg/M001/003", text, source, {})[1])
+
+    def test_height_custom_rectangles_and_unknown_layouts(self):
+        source = {"text": "Hello", "boxes": ["default"]}
+        self.assertTrue(pelang.check_row("dlg/M001/003", "{br}".join(["Hi"] * 30), source, {})[1])
+        self.assertFalse(pelang.check_row("dlg/M001/003", "{br}".join(["Hi"] * 4), source, {})[1])
+        for box in ("styled 20,174,80,24", "20,174,80,24"):
+            source["boxes"] = [box]
+            self.assertTrue(pelang.check_row("dlg/M001/003", "W" * 100, source, {})[1])
+            self.assertTrue(pelang.check_row("dlg/M001/003", "Hi{br}Hi", source, {})[1])
+            self.assertFalse(pelang.check_row("dlg/M001/003", "Hi", source, {})[1])
+        source["boxes"] = ["styled (rectangle computed)"]
+        self.assertIn("unknown", pelang.check_row("dlg/M001/003", "Hi", source, {})[2][0])
+        self.assertEqual(layout.bounds("styled 300,220,80,40"), (20, 1))
+
+    def test_waits_reset_height_and_placeholders_have_worst_case_widths(self):
+        source = {"text": "Hi{wait}Hi{name}{num}", "boxes": ["default"]}
+        text = "{br}".join(["Hi"] * 4) + "{wait}Hi{name}{num}"
+        self.assertFalse(pelang.check_row("dlg/M001/003", text, source, {})[1])
+        self.assertEqual(layout.screens(gt.encode("{name}{num}")), [[layout.NAME_WIDTH + 60]])
+        self.assertEqual(gt.lines(gt.encode("{name}{num}")), [layout.NAME_WIDTH + 60])
+        source["boxes"] = ["styled 20,20,80,40"]
+        self.assertTrue(pelang.check_row("dlg/M001/003", "Hi{wait}Hi{name}{num}", source, {})[1])
+
+    def test_overflow_override_never_bypasses_controls(self):
+        path = self.csv_with({"dlg/M001/003": "W" * 100})
+        out = self.dir / "overflow.pelang"
+        args = ["build", str(path), "--strings", str(self.strings), "--lang", "xx", "--name", "Test",
+                "-o", str(out), "--allow-overflow"]
+        self.assertEqual(pelang.main(args), 0)
+        out.unlink()
+        self.csv_with({"dlg/M001/003": "Hello{xFB}"})
+        self.assertEqual(pelang.main(args), 1)
+        self.assertFalse(out.exists())
+
+    def test_pseudo_leaves_unsupported_source_rows_as_fallback(self):
+        rows = STRINGS + [{"key": "sys/116", "text": "Hello{xF3}", "boxes": [], "lines_px": [30]}]
+        self.strings.write_text(json.dumps(rows), encoding="utf-8")
+        out = self.dir / "pseudo.csv"
+        self.assertEqual(pelang.main(["pseudo", str(self.strings), "-o", str(out)]), 0)
+        translated = {r["key"]: r for r in pelang.read_csv(out)}
+        self.assertEqual(translated["sys/116"]["translation"], "")
+        self.assertIn("Unsupported source", translated["sys/116"]["notes"])
 
     def test_latin_codes_and_encoding(self):
         codes = [g.code for g in latin.GLYPHS]

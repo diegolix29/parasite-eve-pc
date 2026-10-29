@@ -71,17 +71,37 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
    `{name}` Aya's name, `{choice N}` a choice of N options, `{red}`/`{/red}` highlight, `{num}` a
    number (see `petext/gametext.py`). An empty translation keeps the game's text.
 4. **Build.** `pelang.py build` checks every row and writes the pack.
-   - Errors stop it: an unknown key, a character the font lacks, or a `{choice}`/`{num}`/`{name}`
-     sequence that differs from the English. Scripts read a choice's result by position.
-   - Warnings don't: a dialogue line wider than its box (297 px), a name or description wider than
-     the widest English one, a different number of `{wait}` screens.
+   - Errors stop it: unknown/duplicate keys, unsupported characters, malformed command operands,
+     embedded terminators, changed control sequences, or overflow in a known dialogue box.
+     Commands are compared after encoding, so raw tags cannot bypass validation. Line breaks may
+     move; waits, choices, names, numbers, pauses, highlighting and extra-page glyphs keep their
+     count, order and operands. The compiler supplies the original page ending itself.
+   - Layout checks live in `petext/layout.py`: default dialogue allows 297 px and four lines per
+     screen; known styled rectangles use their width and height, a conservative six-pixel top
+     inset, and screen bounds. Waits reset the line count. Names reserve nine widest base glyphs;
+     numbers reserve five 12-pixel digits. These are conservative estimates, not automatic reflow.
+   - Warnings flag unknown dialogue layouts and resident table entries wider than the English
+     baseline. Menu column geometry is not fully mapped: review these in game. Every choice's
+     option meaning/order also needs human review; matching control bytes cannot prove that.
+   - For deliberate overflow/pseudo testing only, `--allow-overflow` turns known layout failures
+     into warnings. It never permits malformed or changed controls.
 5. **Play.** Put the `.pelang` in `lang/` beside the game, or in `lang/` in the user folder (beside
    `pe_mods.ini`). Build the game with `pe_lang` in `PE_MOD_LIST`, turn All mods on, and pick the
    language under F1 > Language.
 
 `pelang.py pseudo` makes a test language from every entry: letters swap case, and each entry is
 marked with `!` and padded about 30%. Build it like any pack (`--lang qps`) to see what text a pack
-reaches and where longer text overflows.
+reaches and where longer text overflows. Use `--allow-overflow` when compiling this deliberately
+expanded test text. Extracted rows containing unsupported control bytes are left untranslated
+with a note, retaining the game's own text rather than bypassing validation.
+
+Language selection is stored separately in `pe_lang_selection.dat` beside `pe_mods.ini`, using
+the pack's language code and display/edition name. Filenames and list positions are not identity.
+Keep these two header fields stable across pack updates; give different editions distinct names.
+An identical identity in the user folder overrides the copy beside the game. If a selected pack
+is missing, Game text is used and the identity is retained until a new selection is made.
+Old numeric `Language/Language` preferences are intentionally ignored: select your language once
+after upgrading, because the old index cannot establish which pack was intended.
 
 ## How the text is swapped
 
@@ -98,8 +118,8 @@ through.
   the first room that uses one, so the pack names each bank by the CRC32 of its English bytes
   (`banks.json` from the extractor), and the mod measures the bank a box reads from once per room.
   A bank the pack doesn't know (another disc version, a modded room) keeps the game's text.
-- **Choices** are read back by position, so a translation keeps the English's choices in the same
-  order; the compiler refuses anything else. A page that ends in F9 keeps that end.
+- **Choices** are read back by position. The compiler preserves choice commands and their counts;
+  translators must also preserve the option meanings and order. A page that ends in F9 keeps that end.
 
 ## Pack format
 
@@ -112,7 +132,8 @@ Little-endian, version 1 (`pelang.py` writes it, `mods/pe_lang/pe_lang_pack.c` r
 | Text | each entry's glyph bytes followed by `FF` (a page that ends in F9 keeps it before the `FF`) |
 
 The key hash is 32-bit FNV-1a of the key's UTF-8 (`item/054`). The compiler refuses a collision,
-and the reader checks every offset and terminator at load, refusing a damaged pack whole. Besides
+and the reader checks contiguous entry spans, complete commands and exact terminators at load,
+refusing a damaged pack whole. Entries use the same order in the table and text payload, without gaps. Besides
 the translations, a pack holds one `bank/<crc32>` entry per message bank, whose value is the bank's
 key in ASCII (`M001`).
 

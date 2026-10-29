@@ -194,6 +194,16 @@ if(BUILD_TESTING)
         target_compile_options(test-mod-lang-font PRIVATE -UNDEBUG)
     endif()
     add_test(NAME mod-lang-font COMMAND test-mod-lang-font)
+    add_executable(test-mod-lang-selection ${PROJECT_SOURCE_DIR}/tests/pe_mod_lang_selection_test.c
+        pe_lang/pe_lang_selection.c)
+    target_include_directories(test-mod-lang-selection PRIVATE pe_lang)
+    target_link_libraries(test-mod-lang-selection PRIVATE SDL3::SDL3)
+    if(MSVC)
+        target_compile_options(test-mod-lang-selection PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(test-mod-lang-selection PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME mod-lang-selection COMMAND test-mod-lang-selection)
 endif()
 
 # Rust save-editor interoperability uses the actual C serializer, including the

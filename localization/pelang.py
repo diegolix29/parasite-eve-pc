@@ -12,9 +12,10 @@ petext/gametext.py). An empty translation keeps the game's own text.
 
 `build` checks every translated row and writes a .pelang pack holding only the translations,
 already in the game's glyph code. Errors stop the build: an unknown key, a character the font
-has no glyph for, or a {choice}/{num}/{name} sequence that differs from the English (scripts
-read a choice's result by position). Warnings don't: a dialogue line wider than its box, a name
-wider than the widest English one, a changed number of {wait} screens.
+has no glyph for, malformed commands, changed control sequences, or overflow in a known dialogue
+box. Line breaks can move; waits and other commands retain their count, order and operands.
+Unknown layouts and menu widths require in-game review. --allow-overflow is an explicit layout
+override for testing (it never bypasses control validation).
 
 Pack format (little-endian), read by mods/pe_lang/pe_lang_pack.c:
   header  64 bytes: "PELG", u32 version (1), u32 entry count, u32 offset of the text,
@@ -39,15 +40,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from petext import gametext as gt, latin  # noqa: E402
+from petext import gametext as gt, latin, validation, layout  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
 HEADER = struct.Struct("<4sIII16s32s")
 ENTRY = struct.Struct("<II")
-DEFAULT_BOX_PX = 297            # the standard dialogue box's line width
 COLUMNS = ["key", "english", "japanese", "translation", "box", "widest_px", "rooms", "notes"]
-STRUCTURE = re.compile(r"\{(choice \d+|num|name)\}")
-WAIT = "{wait}"
 
 
 def fnv1a(key: str) -> int:
@@ -116,8 +114,19 @@ def pseudo(text: str) -> str:
 
 def cmd_pseudo(a) -> int:
     rows = template_rows(load_strings(a.strings))
+    skipped = 0
     for r in rows:
+        try:
+            validation.check(gt.encode(r["english"], extended=True), r["english"])
+        except ValueError:
+            # A few extracted source rows contain unsupported control bytes.
+            # Keep fallback instead of making an unsafe pack or bypassing checks.
+            r["notes"] = "Unsupported source controls: kept as game text."
+            skipped += 1
+            continue
         r["translation"] = pseudo(r["english"])
+    if skipped:
+        print(f"kept {skipped} rows with unsupported source controls as game text")
     write_csv(a.out, rows)
     print(f"wrote {len(rows)} pseudo-translated rows to {a.out}")
     return 0
@@ -128,24 +137,17 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int]):
     errors, warnings = [], []
     try:
         raw = gt.encode(text, extended=True)
-    except ValueError as e:
-        msg = str(e)
-        if msg.startswith("no glyph"):
+    except (ValueError, TypeError, OverflowError) as e:
+        msg = "invalid text/tag: " + str(e)
+        if "no glyph" in msg:
             msg += " (the font has A-Z, a-z, digits, basic punctuation and the Latin Extended set in petext/latin.py)"
         return None, [msg], warnings
-    english = source["text"]
-    if STRUCTURE.findall(english) != STRUCTURE.findall(text):
-        errors.append(f"{{choice}}/{{num}}/{{name}} must match the English in count and order: "
-                      f"{STRUCTURE.findall(english)} vs {STRUCTURE.findall(text)}")
-    if english.count(WAIT) != text.count(WAIT):
-        warnings.append(f"{english.count(WAIT) + 1} screen(s) in English, {text.count(WAIT) + 1} here")
-    widest = max(gt.lines(raw))
-    table = key.split("/")[0]
-    if key.startswith("dlg/"):
-        if "default" in (source.get("boxes") or []) and widest > DEFAULT_BOX_PX:
-            warnings.append(f"a line is {widest} px; the dialogue box fits {DEFAULT_BOX_PX}")
-    elif widest > widest_name.get(table, 0):
-        warnings.append(f"{widest} px, wider than any English {table} entry ({widest_name.get(table, 0)} px)")
+    try:
+        validation.check(raw, source["text"])
+    except ValueError as e:
+        return None, [str(e)], warnings
+    layout_errors, warnings = layout.check(key, raw, source, widest_name)
+    errors.extend(layout_errors)
     return raw, errors, warnings
 
 
@@ -157,15 +159,25 @@ def cmd_build(a) -> int:
             t = key.split("/")[0]
             widest_name[t] = max(widest_name.get(t, 0), max(r.get("lines_px") or [0]))
     entries, errors, warnings = {}, [], []
+    seen = set()
     rows = read_csv(a.csv)
     for r in rows:
         key, text = r.get("key", ""), r.get("translation", "")
         if not text:
             continue
+        if key in seen:
+            errors.append(f"{key}: duplicate translated key")
+            continue
+        seen.add(key)
         if key not in strings:
             errors.append(f"{key}: no such key in {a.strings}")
             continue
         raw, errs, warns = check_row(key, text, strings[key], widest_name)
+        if a.allow_overflow:
+            # check_row returns raw only after control validation succeeds.
+            if raw is not None:
+                warns += errs
+                errs = []
         errors += [f"{key}: {e}" for e in errs]
         warnings += [f"{key}: {w}" for w in warns]
         if raw is not None and not errs:
@@ -201,8 +213,8 @@ def cmd_build(a) -> int:
 
 def write_pack(path: Path, lang: str, name: str, entries: dict[str, bytes]) -> None:
     lang_b, name_b = lang.encode("utf-8"), name.encode("utf-8")
-    if len(lang_b) > 15 or len(name_b) > 31:
-        raise SystemExit("--lang is at most 15 bytes and --name at most 31")
+    if not lang_b or not name_b or b"\0" in lang_b + name_b or len(lang_b) > 15 or len(name_b) > 31:
+        raise SystemExit("--lang and --name must be nonempty, without NUL; at most 15 and 31 bytes")
     order = sorted(entries, key=fnv1a)
     text, table = bytearray(), bytearray()
     for key in order:
@@ -249,6 +261,8 @@ def main(argv=None) -> int:
     b.add_argument("--name", required=True, help="the name the Language row shows, e.g. French")
     b.add_argument("-o", "--out", type=Path, required=True)
     b.add_argument("--max-messages", type=int, default=50)
+    b.add_argument("--allow-overflow", action="store_true",
+                   help="emit known layout overflows as warnings for deliberate in-game testing; controls stay strict")
     h = sub.add_parser("latin-header", help="write the Latin Extended table the pe_lang mod composes "
                                             "from, and the test vectors its composer is checked with")
     h.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods" / "pe_lang" / "pe_lang_latin.h")

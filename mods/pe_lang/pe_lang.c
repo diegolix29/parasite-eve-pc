@@ -26,6 +26,7 @@
 #include "pe_hooks.h"
 #include "pe_lang_font.h"
 #include "pe_lang_pack.h"
+#include "pe_lang_selection.h"
 #include "pe_mod_host.h"
 #include "pe_mod_menu.h"
 
@@ -138,17 +139,29 @@ static void load_dir(const char *dir) {
     char **files = SDL_GlobDirectory(dir, "*.pelang", 0, &count);
     if (!files) return;
     qsort(files, (size_t)count, sizeof *files, by_name);
-    for (int i = 0; i < count && s_pack_count < MAX_PACKS; ++i) {
+    for (int i = 0; i < count; ++i) {
         char path[4096];
-        PeLangPack *pack = &s_packs[s_pack_count];
+        PeLangPack loaded, *pack = &loaded;
         snprintf(path, sizeof path, "%s%s", dir, files[i]);
         if (pe_lang_pack_load(pack, path)) {
-            pe_mod_log(MOD_ID, "skipped %s: not a valid version %u language pack", path, PE_LANG_PACK_VERSION);
+            pe_mod_log(MOD_ID, "skipped %s: invalid or unsafe version %u language pack", path, PE_LANG_PACK_VERSION);
             continue;
         }
-        snprintf(s_labels[s_pack_count], sizeof s_labels[0], "%s (%s)", pack->name, pack->lang);
-        pe_mod_log(MOD_ID, "%s: %s, %u entries", path, s_labels[s_pack_count], pack->count);
-        ++s_pack_count;
+        PeLangSelection id;
+        memcpy(id.lang, pack->lang, sizeof id.lang);
+        memcpy(id.name, pack->name, sizeof id.name);
+        int existing = pe_lang_selection_find(&id, s_packs, s_pack_count);
+        unsigned slot = existing ? (unsigned)existing - 1 : s_pack_count;
+        if (slot == MAX_PACKS) {
+            pe_mod_log(MOD_ID, "skipped %s: pack limit reached", path);
+            pe_lang_pack_free(pack);
+            continue;
+        }
+        if (existing) pe_lang_pack_free(&s_packs[slot]);
+        s_packs[slot] = loaded; /* User-folder copies override the same identity beside the game. */
+        snprintf(s_labels[slot], sizeof s_labels[0], "%s (%s)", pack->name, pack->lang);
+        pe_mod_log(MOD_ID, "%s: %s, %u entries", path, s_labels[slot], pack->count);
+        if (!existing) ++s_pack_count;
     }
     SDL_free(files);
 }
@@ -157,6 +170,24 @@ static void active_text(char *out, unsigned size) {
     const PeLangPack *pack = active_pack();
     if (pack) snprintf(out, size, "%s, %u entries", pack->name, pack->count);
     else snprintf(out, size, s_pack_count ? "the game's own text" : "no packs found");
+}
+
+static int language_get(void) { return s_choice; }
+
+static int language_set(int choice) {
+    char path[4096];
+    PeLangSelection id = {0};
+    if (choice < 0 || (unsigned)choice > s_pack_count) return 0;
+    if (choice) {
+        memcpy(id.lang, s_packs[choice - 1].lang, sizeof id.lang);
+        memcpy(id.name, s_packs[choice - 1].name, sizeof id.name);
+    }
+    s_choice = choice;
+    if (pe_mod_path(path, sizeof path, "pe_lang_selection.dat") || pe_lang_selection_save(path, &id)) {
+        pe_mod_log(MOD_ID, "could not save language selection");
+        pe_toast("Could not save language. Selection applies for this session.");
+    }
+    return 1;
 }
 
 static int lang_init(void) {
@@ -168,6 +199,10 @@ static int lang_init(void) {
     }
     if (!pe_mod_path(dir, sizeof dir, "lang/")) load_dir(dir);
 
+    PeLangSelection selected;
+    s_choice = 0;
+    if (!pe_mod_path(dir, sizeof dir, "pe_lang_selection.dat") && !pe_lang_selection_load(dir, &selected))
+        s_choice = pe_lang_selection_find(&selected, s_packs, s_pack_count);
     s_names[0] = "Game text";
     for (unsigned i = 0; i < s_pack_count; ++i) s_names[i + 1] = s_labels[i];
     pe_hook_add(PE_HOOK_TEXT_LOOKUP, on_text_lookup, NULL, PE_PRIORITY_EARLY, MOD_ID);
@@ -177,9 +212,9 @@ static int lang_init(void) {
 
     pe_menu_begin("Language");
     pe_menu_top_page("Language", "Play with the game's text from a language pack.", 0);
-    pe_menu_register_choice(0, "Language",
+    pe_menu_register_live_choice(0, "Language",
                             "A pack from lang/ beside the game or in the user folder; Game text turns it off.",
-                            &s_choice, s_names, s_pack_count + 1);
+                            s_names, s_pack_count + 1, language_get, language_set);
     pe_menu_register_info(0, "In use", "Untranslated text stays as the game has it.", active_text);
     pe_menu_begin(0);
     return 0;

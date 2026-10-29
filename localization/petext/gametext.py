@@ -134,12 +134,14 @@ def lines(b: bytes) -> list[int]:
         c = b[i]
         if c in (0xF7, 0xF8):
             widths.append(w); w = 0
+        elif c == 0xFA:
+            w += 9 * max(ADVANCE)  # TextboxNameGlyphs capacity, widest base glyph
         elif c == 0xFB and i + 1 < len(b):
             sub = b[i + 1]
             if sub <= 3:
                 w += WIDE
             elif sub == 8:
-                w += WIDE * 2      # a number slot: up to five digits, two typical
+                w += WIDE * 5      # TextboxNumber has up to five rendered digits
             i += 1 + (1 if sub in (7, 9) else 0)
         elif c in (0xFC, 0xFD):
             w += WIDE; i += 1

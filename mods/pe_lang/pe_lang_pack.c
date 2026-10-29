@@ -24,10 +24,35 @@ static void copy_field(char *out, const unsigned char *in, size_t size) {
     out[size - 1] = '\0';
 }
 
+/* Validate complete commands, with FF at the exact entry end. F9 may only
+ * precede that FF (the compiler preserves the original dialogue page end). */
+static int valid_text(const unsigned char *p, size_t n) {
+    size_t i = 0;
+    while (i < n) {
+        unsigned c = p[i++];
+        if (c == 0xFF) return i == n;
+        if (c == 0xF9) return i + 1 == n && p[i] == 0xFF;
+        if (c < 0xF1 || c == 0xF7 || c == 0xF8 || c == 0xFA) continue;
+        if (c == 0xFB) {
+            if (i >= n || p[i] > 9) return 0;
+            unsigned sub = p[i++];
+            if (sub != 7 && sub != 9) continue;
+            if (i >= n || (sub == 9 && (p[i] < 1 || p[i] > 7))) return 0;
+            ++i;
+        } else if (c == 0xFC || c == 0xFD) {
+            if (i >= n) return 0;
+            ++i;
+        } else return 0;
+    }
+    return 0;
+}
+
 int pe_lang_pack_parse(PeLangPack *pack, unsigned char *data, size_t size) {
     memset(pack, 0, sizeof *pack);
     if (!data || size < HEADER_SIZE || memcmp(data, "PELG", 4) || rd32(data + 4) != PE_LANG_PACK_VERSION)
         goto bad;
+    if (size > UINT32_MAX || !data[16] || !data[32] ||
+        !memchr(data + 16, 0, 16) || !memchr(data + 32, 0, 32)) goto bad;
     uint32_t count = rd32(data + 8), text = rd32(data + 12);
     if (count > (size - HEADER_SIZE) / ENTRY_SIZE || text < HEADER_SIZE + count * ENTRY_SIZE || text > size)
         goto bad;
@@ -35,7 +60,9 @@ int pe_lang_pack_parse(PeLangPack *pack, unsigned char *data, size_t size) {
         const unsigned char *e = data + HEADER_SIZE + i * ENTRY_SIZE;
         uint32_t at = rd32(e + 4);
         if (i && rd32(e) <= rd32(e - ENTRY_SIZE)) goto bad;     /* sorted, no duplicate hashes */
-        if (at >= size - text || !memchr(data + text + at, 0xFF, size - text - at)) goto bad;
+        uint32_t end = i + 1 < count ? rd32(e + ENTRY_SIZE + 4) : (uint32_t)(size - text);
+        if ((!i && at) || at >= end || end > size - text ||
+            !valid_text(data + text + at, end - at)) goto bad;
     }
     pack->data = data;
     pack->size = size;
