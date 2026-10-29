@@ -39,7 +39,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from petext import gametext as gt, jatext as ja  # noqa: E402
+from petext import gametext as gt, jatext as ja, menu  # noqa: E402
 from petext.disc import Game  # noqa: E402
 from petext.script import MODE_IMMEDIATE, Instr, opcodes, task_block, walk  # noqa: E402
 
@@ -287,8 +287,18 @@ def main():
     for n, path in enumerate(a.discs, 1):
         g = Game(path)
         if n == 1:
-            for key, raw in table_entries(g.resident_pack()):
+            pack = g.resident_pack()
+            for key, raw in table_entries(pack):
                 entries[key] = {"key": key, "raw": raw, "end": 0xFF, "rooms": [], "boxes": []}
+            at = struct.unpack_from("<i", pack, 0x28)[0]        # ResidentTableDirectory.glyphMetrics
+            metrics = pack[at:at + 444]
+            # ItemDataRecord[] (0x20 bytes: itemId at 4, kind at 6) up to statGrowth: the item
+            # list draws a count after the names of some kinds (Menu_DrawSlotRow).
+            begin, end = struct.unpack_from("<2i", pack, 0x0C)
+            for rec in range(begin, end - 0x1F, 0x20):
+                key = f"item/{pack[rec + 4] - 1:03d}"
+                if pack[rec + 4] and key in entries:
+                    entries[key]["item_kind"] = pack[rec + 6]
         for m in range(1, 451):
             room = g.room(m)
             if not room:
@@ -368,6 +378,8 @@ def main():
     for e in entries.values():
         e["text"] = gt.decode(e["raw"])
         e["lines_px"] = gt.lines(e["raw"])
+        if not e["key"].startswith("dlg/"):
+            e["menu_px"] = menu.width(e["raw"], metrics)
         if gt.encode(e["text"]) != e["raw"]:
             bad.append(e["key"])
     rows = []
@@ -375,8 +387,11 @@ def main():
         rows.append({"key": e["key"], "unused": e["unused"], "text": e["text"], "raw": e["raw"].hex(" "), "end": f"{e['end']:02X}",
                      "lines_px": e["lines_px"], "boxes": e["boxes"],
                      "boxes_possible": e.get("boxes_possible", []), "boxes_complete": e.get("boxes_complete", False),
+                     **{k: e[k] for k in ("menu_px", "item_kind") if k in e},
                      "rooms": e["rooms"], "japanese": e.get("ja"), "ja_raw": e.get("ja_raw"), "ja_aligned": e.get("ja_aligned")})
     (out / "strings.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
+    # The menus' glyph widths (resident glyph metrics, game data): petext/menu.py measures with them.
+    (out / "menu_glyphs.json").write_text(json.dumps({"metrics": metrics.hex()}), encoding="utf-8")
     with open(out / "strings.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["key", "english", "japanese", "translation", "lines", "widest_px", "box", "rooms"])

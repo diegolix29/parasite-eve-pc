@@ -61,7 +61,8 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
 
 1. **Extract.** `extract_text.py` writes `out/text/` (git-ignored): `strings.json` and
    `strings.csv` with every entry's key, English, Japanese (with `--ja`), line widths in pixels and
-   the boxes it shows in, `banks.json` (each message bank's CRC32), plus the item reports. Keys: `sys/NNN`, `item/NNN`, `desc/NNN`, `misc/NNN`
+   the boxes it shows in, `banks.json` (each message bank's CRC32), `menu_glyphs.json` (the menus'
+   glyph widths), plus the item reports. Keys: `sys/NNN`, `item/NNN`, `desc/NNN`, `misc/NNN`
    for the resident text tables, `dlg/MNNN/PPP` for room dialogue (the message bank first used by
    room MNNN, page PPP). The 148 table slots that hold filler the game never shows are left out.
 2. **Template.** `pelang.py template` writes the translator CSV: key, English, Japanese (for
@@ -76,13 +77,34 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
      Commands are compared after encoding, so raw tags cannot bypass validation. Line breaks may
      move; waits, choices, names, numbers, pauses, highlighting and extra-page glyphs keep their
      count, order and operands. The compiler supplies the original page ending itself.
-   - Layout checks live in `petext/layout.py`: default dialogue allows 297 px and four lines per
-     screen; known styled rectangles use their width and height, a conservative six-pixel top
-     inset, and screen bounds. Waits reset the line count. Names reserve nine widest base glyphs;
-     numbers reserve five 12-pixel digits. These are conservative estimates, not automatic reflow.
-   - Warnings flag unknown dialogue layouts and resident table entries wider than the English
-     baseline. Menu column geometry is not fully mapped: review these in game. Every choice's
-     option meaning/order also needs human review; matching control bytes cannot prove that.
+   - Dialogue checks live in `petext/layout.py`. The default box allows 297 px and four lines per
+     screen. A styled box neither insets nor clips its text, so going past its rectangle is a
+     warning and only the screen edge is an error. Waits reset the line count. `{name}` is
+     measured as the pack's `sys/030` (Aya's default name, which the dialogue uses until the
+     player renames her; the English is laid out for "Aya"), and numbers reserve five 12-pixel
+     digits. With these rules the original English passes every check.
+   - A page no script ties to a box is checked against every box its bank's rooms open (only
+     opcodes 13 and 209 show a bank's pages), as a warning, since the page may be unused or opened
+     from a room whose scripts don't decode.
+   - Menu checks live in `petext/menu.py` and `data/menu_layouts.json`. Menu text is measured as the
+     menus draw it (the game's glyph metrics, which `extract_text.py` saves as `menu_glyphs.json`).
+     Each context names the code that draws it and its limits:
+     - help line: 294 px (all descriptions, most `misc`, the option hints);
+     - item list: 104 px, or 86 px for item kinds whose count is drawn after the name;
+     - dialog lines and confirm labels: 63 bytes (they are copied unbounded into 64-byte buffers)
+       and the screen width;
+     - the item message: 31 bytes, an item's name and `sys/016`/`017` together (more and the game
+       shows nothing);
+     - the rename grids (`sys/115`–`117`): the same number of cells as the English;
+     - the default name `sys/030`: 8 letters.
+
+     Byte limits and the screen edge are errors. The help line and item list widths were
+     confirmed in game, and the other widths are warnings. Text the game joins (a name and its
+     suffix) is checked with the pack's longest of each part. Keys no context names yet (mostly
+     option labels centred in grid cells, and location names) are compared with the widest
+     English entry of their table.
+   - Every choice's option meaning/order also needs human review; matching control bytes cannot
+     prove that.
    - For deliberate overflow/pseudo testing only, `--allow-overflow` turns known layout failures
      into warnings. It never permits malformed or changed controls.
 5. **Play.** Put the `.pelang` in `lang/` beside the game, or in `lang/` in the user folder (beside

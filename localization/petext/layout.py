@@ -4,7 +4,7 @@ No automatic reflow: moving waits or choice rows could change game interaction.
 Unknown layouts remain explicit warnings rather than invented fit guarantees.
 """
 import re
-from . import gametext as gt
+from . import gametext as gt, menu
 from .validation import commands
 
 # textbox.c: default origin (20,174), fog bottom 224, line pitch 12.
@@ -98,11 +98,20 @@ def name_width(raw: bytes) -> int:
     return sum(gt.ADVANCE[g] if g < len(gt.ADVANCE) else (gt._latin_advance(g) or gt.WIDE) for g in raw[:8])
 
 
-def check(key: str, raw: bytes, source: dict, widest_table: dict, name_px: int = NAME_WIDTH):
+def check(key: str, raw: bytes, source: dict, widest_table: dict, name_px: int = NAME_WIDTH,
+          metrics: bytes | None = None, layouts: dict | None = None):
+    """Dialogue pages against their boxes; menu entries against data/menu_layouts.json when the
+    menu glyph metrics are known (else, and for keys it doesn't name, against the widest English
+    entry of the table in widest_table, measured the same way)."""
     errors, warnings = [], []
     pages = screens(raw, name_px)
     widest = max(max(p) for p in pages)
     if not key.startswith('dlg/'):
+        if metrics is not None:                  # measured as the menus draw it
+            errors, warnings, covered = menu.check(key, raw, source, metrics, layouts or menu.load_layouts())
+            if covered:
+                return errors, warnings
+            widest = menu.width(raw, metrics)
         table = key.split('/')[0]
         if widest > widest_table.get(table, 0):
             warnings.append(f'{widest} px, wider than any English {table} entry '

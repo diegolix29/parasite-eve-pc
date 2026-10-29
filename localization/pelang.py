@@ -12,10 +12,11 @@ petext/gametext.py). An empty translation keeps the game's own text.
 
 `build` checks every translated row and writes a .pelang pack holding only the translations,
 already in the game's glyph code. Errors stop the build: an unknown key, a character the font
-has no glyph for, malformed commands, changed control sequences, or overflow in a known dialogue
-box. Line breaks can move; waits and other commands retain their count, order and operands.
-Unknown layouts and menu widths require in-game review. --allow-overflow is an explicit layout
-override for testing (it never bypasses control validation).
+has no glyph for, malformed commands, changed control sequences, overflow in a known dialogue
+box, or menu text past a buffer or the screen edge (data/menu_layouts.json). Line breaks can move;
+waits and other commands retain their count, order and operands. Unknown layouts and unconfirmed
+menu widths are warnings for in-game review. --allow-overflow is an explicit layout override for
+testing (it never bypasses control validation).
 
 Pack format (little-endian), read by mods/pe_lang/pe_lang_pack.c:
   header  64 bytes: "PELG", u32 version (1), u32 entry count, u32 offset of the text,
@@ -40,7 +41,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-from petext import gametext as gt, latin, validation, layout  # noqa: E402
+from petext import gametext as gt, latin, validation, layout, menu  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
 HEADER = struct.Struct("<4sIII16s32s")
@@ -60,11 +61,26 @@ def load_strings(path: Path) -> dict[str, dict]:
     return {r["key"]: r for r in rows if not r.get("unused")}
 
 
-def template_rows(strings: dict[str, dict]) -> list[dict]:
+def menu_limits(key: str, layouts: dict) -> str:
+    """The template's "box" for a menu entry: where it is drawn and how much room there is."""
     out = []
+    for c in menu.contexts_of(key, layouts):
+        room = [f"{c[k]} px" for k in ("width",) if k in c] + [f"{c['bytes'] - 1} bytes" for _ in [0] if "bytes" in c]
+        if c.get("same_length"):
+            room.append("same length as the English")
+        if "max_glyphs" in c:
+            room.append(f"{c['max_glyphs']} letters")
+        out.append(f"{c['id']}: " + ", ".join(room))
+    return "; ".join(out)
+
+
+def template_rows(strings: dict[str, dict]) -> list[dict]:
+    out, layouts = [], menu.load_layouts()
     for key, r in sorted(strings.items()):
+        dialogue = key.startswith("dlg/")
         out.append({"key": key, "english": r["text"], "japanese": r.get("japanese") or "", "translation": "",
-                    "box": "; ".join(r.get("boxes") or []), "widest_px": max(r.get("lines_px") or [0]),
+                    "box": "; ".join(r.get("boxes") or []) if dialogue else menu_limits(key, layouts),
+                    "widest_px": r["menu_px"] if "menu_px" in r else max(r.get("lines_px") or [0]),
                     "rooms": " ".join((r.get("rooms") or [])[:6]), "notes": ""})
     return out
 
@@ -132,9 +148,11 @@ def cmd_pseudo(a) -> int:
     return 0
 
 
-def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], name_px: int = layout.NAME_WIDTH):
+def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], name_px: int = layout.NAME_WIDTH,
+              metrics: bytes | None = None, layouts: dict | None = None):
     """(glyph bytes or None, errors, warnings) for one translated row. name_px: how wide {name}
-    draws, from the pack's sys/030 (Aya's default name)."""
+    draws, from the pack's sys/030 (Aya's default name); metrics: the menus' glyph widths
+    (menu_glyphs.json), without which menu text is only compared with the English."""
     errors, warnings = [], []
     try:
         raw = gt.encode(text, extended=True)
@@ -147,18 +165,23 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
         validation.check(raw, source["text"])
     except ValueError as e:
         return None, [str(e)], warnings
-    layout_errors, warnings = layout.check(key, raw, source, widest_name, name_px)
+    layout_errors, warnings = layout.check(key, raw, source, widest_name, name_px, metrics, layouts)
     errors.extend(layout_errors)
     return raw, errors, warnings
 
 
 def cmd_build(a) -> int:
     strings = load_strings(a.strings)
+    metrics, layouts = menu.load_metrics(a.strings), menu.load_layouts()
+    if metrics is None:
+        print(f"note: no menu_glyphs.json beside {a.strings} (rerun extract_text.py): "
+              "menu text is compared with the English only", file=sys.stderr)
     widest_name: dict[str, int] = {}
     for key, r in strings.items():
         if not key.startswith("dlg/"):
             t = key.split("/")[0]
-            widest_name[t] = max(widest_name.get(t, 0), max(r.get("lines_px") or [0]))
+            px = r["menu_px"] if metrics is not None and "menu_px" in r else max(r.get("lines_px") or [0])
+            widest_name[t] = max(widest_name.get(t, 0), px)
     entries, errors, warnings = {}, [], []
     seen = set()
     rows = read_csv(a.csv)
@@ -180,7 +203,7 @@ def cmd_build(a) -> int:
         if key not in strings:
             errors.append(f"{key}: no such key in {a.strings}")
             continue
-        raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px)
+        raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px, metrics, layouts)
         if a.allow_overflow:
             # check_row returns raw only after control validation succeeds.
             if raw is not None:
@@ -190,6 +213,12 @@ def cmd_build(a) -> int:
         warnings += [f"{key}: {w}" for w in warns]
         if raw is not None and not errs:
             entries[key] = raw
+    if metrics is not None:
+        # Text the game joins (an item's name and a suffix in one buffer): the pack's longest of each.
+        resident = {k: bytes.fromhex(r["raw"]) for k, r in strings.items() if not k.startswith("dlg/") and r.get("raw")}
+        resident.update({k: v for k, v in entries.items() if not k.startswith("dlg/")})
+        joined = menu.check_combined(resident, metrics, layouts)
+        (warnings if a.allow_overflow else errors).extend(f"joined text: {e}" for e in joined)
     # Dialogue pages keep the page end the game had (F9 instead of FF closes some boxes), and the
     # pack says which bank is which: "bank/<crc32>" holds that bank's key ("M001") in ASCII.
     for key, raw in list(entries.items()):

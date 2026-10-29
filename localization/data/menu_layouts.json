@@ -1,0 +1,36 @@
+{
+ "about": "Where the menus draw resident text, and the limits there (petext/menu.py). Widths in px as Draw_MeasureTextWidth counts them. bytes include the FF end. edge: past it the text or its box leaves the screen (error). width: the space the layout gives it (warning until confirmed in game). Keys not named here are compared with the widest English entry of their table.",
+ "contexts": [
+  {"id": "help line", "source": "save_screens.c Menu_DrawContextHelpText: panel mode 0x13 at x 8, 300 px wide; text at +6",
+   "keys": ["desc/*", "misc/000-088", "sys/014", "sys/015", "sys/039", "sys/076-081", "sys/087-089", "sys/091", "sys/092"],
+   "width": 294, "edge": 306, "confirmed": "2026-10-29: 294 px descriptions end at the panel border, under the clock (pe-native-debug lang_items with a limits pack)"},
+  {"id": "item list", "source": "active_list.c Menu_DrawSlotRow: name 18 px after the icon in a 124 px cell (grid mode 0x01, inset 2)",
+   "keys": ["item/000-234"], "width": 104, "confirmed": "2026-10-29: 104 px names fill the cell; a weapon's count covers the end past 86 px",
+   "soft_width": 86, "soft_kinds": [[1, 7], [19, 255]],
+   "soft_note": "items of this kind (1-7 or 19 and up) have a count drawn 86 px after the name starts (Menu_DrawSlotRow)"},
+  {"id": "dialog line", "source": "save_screens.c Menu_CreateNotificationDialog / Menu_CreateTwoLineDialog: copied unbounded into g_MenuTwoLineDialogText[2][64]; box max(100, w) + 20 wide at x (300 - w) / 2",
+   "keys": ["sys/007", "sys/029", "sys/060-063", "sys/066", "sys/067", "sys/071", "sys/072", "sys/075", "sys/082-086", "sys/098"],
+   "bytes": 64, "edge": 300},
+  {"id": "confirm label", "source": "item_detail.c / skills.c / save_screens.c: label copied unbounded into g_MenuItemLabelBuffer halves of 64; centred box at x (300 - w) / 2",
+   "keys": ["sys/000", "sys/004", "sys/026", "sys/068", "sys/073", "sys/097", "sys/113"],
+   "bytes": 64, "edge": 300},
+  {"id": "item message", "source": "active_list.c Inv_GetItemEffectData: g_InvItemMessageBuffer[32]; text that doesn't fit leaves the message empty",
+   "keys": ["sys/016-019"], "bytes": 32},
+  {"id": "rename grid", "source": "save_screens.c / lists.c Menu_DrawItemIcon: the rename screen reads byte N as the glyph of cell N",
+   "keys": ["sys/115-117"], "same_length": true, "glyphs_only": true},
+  {"id": "default name", "source": "aya/stats.c Menu_CopyPromptCodes: the dialogue's {name}, first 8 glyphs",
+   "keys": ["sys/030"], "max_glyphs": 8}
+ ],
+ "combined": [
+  {"id": "item message", "source": "active_list.c Inv_GetItemEffectData: an item name and sys/016 or 017 in 32 bytes, else empty",
+   "parts": ["item/000-234", "sys/016|sys/017"], "bytes": 32},
+  {"id": "memory card notice", "source": "save_screens.c: sys/071 or 072 then sys/073 in one 64-byte dialog line",
+   "parts": ["sys/071|sys/072", "sys/073"], "bytes": 64, "edge": 300},
+  {"id": "equip confirm", "source": "skills.c: sys/113 then the item's name in g_MenuItemLabelBuffer",
+   "parts": ["sys/113", "item/000-234"], "bytes": 64, "edge": 300},
+  {"id": "discard confirm", "source": "item_detail.c: the item's name then sys/004 in g_MenuItemLabelBuffer",
+   "parts": ["item/000-234", "sys/004"], "bytes": 64, "edge": 300},
+  {"id": "parasite energy confirm", "source": "skills.c: the energy's name then sys/026 in g_MenuItemLabelBuffer",
+   "parts": ["item/235-254", "sys/026"], "bytes": 64, "edge": 300}
+ ]
+}
