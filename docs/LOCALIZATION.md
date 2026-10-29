@@ -90,7 +90,11 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
      menus draw it (the game's glyph metrics, which `extract_text.py` saves as `menu_glyphs.json`).
      Each context names the code that draws it and its limits:
      - help line: 294 px (all descriptions, most `misc`, the option hints);
-     - item list: 104 px, or 86 px for item kinds whose count is drawn after the name;
+     - item list: 104 px, or 86 px for guns and ammo crates, whose count is drawn after the name;
+     - Parasite Energy list: 98 px; config menu labels: 64 px; save file location names: 138 px
+       (the panel cuts off the rest, so this one is an error); the day label before its number;
+     - the other centred labels (OK/Cancel, Yes/No, Mono/Stereo, storage tabs and choice, colour
+       options): their cell width less the 4 px the centring adds;
      - dialog lines and confirm labels: 63 bytes (they are copied unbounded into 64-byte buffers)
        and the screen width;
      - the item message: 31 bytes, an item's name and `sys/016`/`017` together (more and the game
@@ -98,11 +102,12 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
      - the rename grids (`sys/115`–`117`): the same number of cells as the English;
      - the default name `sys/030`: 8 letters.
 
-     Byte limits and the screen edge are errors. The help line and item list widths were
-     confirmed in game, and the other widths are warnings. Text the game joins (a name and its
-     suffix) is checked with the pack's longest of each part. Keys no context names yet (mostly
-     option labels centred in grid cells, and location names) are compared with the widest
-     English entry of their table.
+     Byte limits, the screen edge and clipped text are errors; the other widths are warnings.
+     The help line, item list, Parasite Energy list, config labels and location names were
+     confirmed in game with packs at exactly those widths (pe-native-debug `lang_items` and
+     `lang_menus`). Text the game joins (a name and its suffix) is checked with the pack's
+     longest of each part. Keys no context names yet are compared with the widest English entry
+     of their table.
    - Every choice's option meaning/order also needs human review; matching control bytes cannot
      prove that.
    - For deliberate overflow/pseudo testing only, `--allow-overflow` turns known layout failures

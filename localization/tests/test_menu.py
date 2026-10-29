@@ -26,7 +26,8 @@ def row(key, text, **extra):
 
 STRINGS = [row("item/000", "Ammo +6", item_kind=10), row("item/001", "Handgun", item_kind=1),
            row("desc/000", "Restores HP"), row("sys/016", " used"), row("sys/017", " got"),
-           row("sys/030", "Aya"), row("sys/117", "ABCDE"), row("sys/120", "Other")]
+           row("sys/030", "Aya"), row("sys/117", "ABCDE"), row("sys/120", "Other"),
+           row("misc/131", "Central Park")]
 
 
 class MenuTest(unittest.TestCase):
@@ -75,6 +76,10 @@ class MenuTest(unittest.TestCase):
         self.assertTrue(self.check("item/001", name)[1])               # kind 1 draws a count
         self.assertEqual(self.check("item/000", name)[1], [])          # kind 10 doesn't
         self.assertTrue(self.check("item/000", "W" * 10)[1])           # 110 px, past the cell
+
+    def test_clipped_text_past_its_room_is_an_error(self):
+        self.assertEqual(self.check("misc/131", "W" * 12)[:2], ([], []))   # 132 px of 138
+        self.assertIn("save file location", self.check("misc/131", "W" * 13)[0][0])
 
     def test_rename_grid_keeps_its_cells(self):
         self.assertEqual(self.check("sys/117", "ÉBCDE")[0], [])
