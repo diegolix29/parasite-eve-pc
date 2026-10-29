@@ -10,16 +10,19 @@
  * room and its pages looked up as dlg/<bank>/<page>. A bank the pack doesn't know (another disc
  * version, a modded room) keeps the game's text.
  *
- * Packs may use the Latin Extended letters (é, ñ, ß, « ...): when the dialogue font goes to VRAM
- * (PE_HOOK_TIM_UPLOAD) they are composed from the game's own letters into its empty cells, codes
- * 0x4D on; the dialogue box gets their widths through g_TextboxGlyphWidths, and the menus through
- * the resident glyph metrics (only those codes' entries, which the game's text never uses). */
+ * Packs may use the Latin Extended letters (é, ñ, ß, « ...): while a pack is in use they are
+ * composed from the game's own letters into the dialogue font's empty cells, codes 0x4D on (as
+ * the font goes to VRAM, PE_HOOK_TIM_UPLOAD, or at once when F1 picks a pack); the dialogue box
+ * gets their widths through g_TextboxGlyphWidths, and the menus through the resident glyph
+ * metrics. The game's text never uses those codes, but its rename grids (sys/115-117) draw
+ * them, as blanks: with Game text the page, widths and metrics are put back as the game had them. */
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "common.h"
+#include "pe1/psyq_gpu.h"
 #include "pe1/psyq_tim.h"
 #include "pe1/resident_tables.h"
 #include "pe1/textbox.h"
@@ -76,8 +79,16 @@ static int on_text_page(void *ctx, void *user) {
 /* ---- the Latin Extended glyphs ---- */
 
 #define FONT_CODES 0xF1u                 /* single-byte glyph codes the box can draw: 0x00-0xF0 */
+#define FONT_BYTES (128u * 256u)         /* the page's 4-bit pixels: 64 words x 256 rows */
 static TextboxGlyphSpacing s_widths[FONT_CODES];
-static int s_font_added;
+static int s_font_added;                 /* the glyphs are in VRAM and their widths installed */
+/* The page as the game uploaded it. The glyphs go only into a copy, and only while a pack is in
+ * use: the empty cells they take are drawn by the game too (the rename grids), so with Game text
+ * the font, widths and menu metrics must stay exactly the game's. */
+static unsigned char s_font_original[FONT_BYTES], s_font_work[FONT_BYTES];
+static unsigned char s_metrics_original[PE_LATIN_COUNT];
+static int s_font_saved, s_metrics_saved;
+static const RECT kFontRect = {0x140, 0, 64, 256};
 
 /* The US dialogue font page: 4-bit, its image at VRAM 0x140,0 (64 x 256 words), its palette at
  * 0x140,0xFC (src/main/text/tables.c, g_FieldFontTextureState). */
@@ -102,21 +113,57 @@ static void install_widths(void) {
     g_TextboxGlyphCount = FONT_CODES;
     if (!g_ResidentDataPack.directory.glyphMetrics) return;     /* not loaded yet: next scene */
     metrics = &g_ResidentDataPack.bytes[g_ResidentDataPack.directory.glyphMetrics];
-    for (unsigned k = 0; k < PE_LATIN_COUNT; ++k)
+    for (unsigned k = 0; k < PE_LATIN_COUNT; ++k) {
+        if (!s_metrics_saved) s_metrics_original[k] = metrics[kPeLatinGlyphs[k].code];
         metrics[kPeLatinGlyphs[k].code] = pe_lang_font_metric(&kPeLatinGlyphs[k], metrics);
+    }
+    s_metrics_saved = 1;
 }
 
-static int on_tim_upload(void *ctx, void *user) {
-    unsigned char *pixels = font_pixels(ctx);
-    (void)user;
-    if (!pixels) return 0;
+/* The game's own widths and metrics back. */
+static void remove_widths(void) {
+    g_TextboxGlyphWidths = g_TextboxGlyphSpacing;
+    g_TextboxGlyphCount = sizeof g_TextboxGlyphSpacing / sizeof *g_TextboxGlyphSpacing;
+    if (s_metrics_saved && g_ResidentDataPack.directory.glyphMetrics) {
+        unsigned char *metrics = &g_ResidentDataPack.bytes[g_ResidentDataPack.directory.glyphMetrics];
+        for (unsigned k = 0; k < PE_LATIN_COUNT; ++k) metrics[kPeLatinGlyphs[k].code] = s_metrics_original[k];
+    }
+    s_metrics_saved = 0;
+}
+
+/* Put the glyphs into `pixels` (the page on its way to VRAM, or a copy) when a pack is in use. */
+static void add_glyphs(unsigned char *pixels) {
     int added = pe_lang_font_fill(pixels, 128, 256);
     if (!s_font_added && added) pe_mod_log(MOD_ID, "added %d Latin Extended glyphs to the dialogue font", added);
     if (added) {
         s_font_added = 1;
         install_widths();
     }
+}
+
+static int on_tim_upload(void *ctx, void *user) {
+    unsigned char *pixels = font_pixels(ctx);
+    (void)user;
+    if (!pixels) return 0;
+    memcpy(s_font_original, pixels, FONT_BYTES);
+    s_font_saved = 1;
+    s_font_added = 0;
+    if (active_pack()) add_glyphs(pixels);
     return 0;
+}
+
+/* After the choice changes in F1: the page in VRAM and the widths follow it now. */
+static void font_follow_choice(void) {
+    if (!s_font_saved) return;                       /* not uploaded yet: on_tim_upload decides */
+    if (active_pack() && !s_font_added) {
+        memcpy(s_font_work, s_font_original, FONT_BYTES);
+        add_glyphs(s_font_work);
+        LoadImage((RECT *)&kFontRect, (u_long *)s_font_work);
+    } else if (!active_pack() && s_font_added) {
+        LoadImage((RECT *)&kFontRect, (u_long *)s_font_original);
+        remove_widths();
+        s_font_added = 0;
+    }
 }
 
 /* A new room can load its bank where the last one was: measure again. The resident pack can be
@@ -183,6 +230,8 @@ static int language_set(int choice) {
         memcpy(id.name, s_packs[choice - 1].name, sizeof id.name);
     }
     s_choice = choice;
+    s_bank = NULL;                                   /* measure the room's bank again for the new pack */
+    font_follow_choice();
     if (pe_mod_path(path, sizeof path, "pe_lang_selection.dat") || pe_lang_selection_save(path, &id)) {
         pe_mod_log(MOD_ID, "could not save language selection");
         pe_toast("Could not save language. Selection applies for this session.");
@@ -226,10 +275,10 @@ static void lang_shutdown(void) {
     s_choice = 0;
     s_bank = NULL;
     if (s_font_added) {
-        g_TextboxGlyphWidths = g_TextboxGlyphSpacing;
-        g_TextboxGlyphCount = sizeof g_TextboxGlyphSpacing / sizeof *g_TextboxGlyphSpacing;
+        remove_widths();
         s_font_added = 0;
     }
+    s_font_saved = 0;
 }
 
 const PeMod pe_mod_pe_lang = {MOD_ID, "Language packs", "0.1", NULL, lang_init, lang_shutdown};
