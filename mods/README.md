@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -51,6 +51,7 @@ mods/
   pe_collection/       Bestiary and Wardrobe registries, skins, Wardrobe menu (packs register here)
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
   pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
+  pe_quicksave/        10 quick save slots in the game's own save format (F10 / F11 / F12)
   pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
                        by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
@@ -72,6 +73,15 @@ mod or the option off, extra copies go back into free slots as plain items.
 F1 > Warp: pick a story checkpoint and Warp. It sets script variable 74 (story progress) to that
 point and runs the field script's own room transfer (Script_EncodeBarcode) on the next free field
 frame, never during a battle, an event, a room change or a movie.
+
+## Quick save (pe_quicksave)
+
+F10 saves to the current slot, F11 loads it, F12 picks the next of 10 slots (also F1 > Quick save).
+A quick save is the game's own 8 KB card file (Save_BuildCardFile, with every mod's records), made
+in the free field and kept beside the preferences as quicksave_<slot>.mcd. Loading commits it the
+way Save_LoadCardFileIntoRuntime does, without the card menu's dialogs, then runs the field
+script's room transfer to the saved room: the room starts again as after a loaded save. It holds
+what a save holds, not Aya's place in the room or a fight in progress.
 
 ## A mod
 
