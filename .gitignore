@@ -14,6 +14,7 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+.vs/
 
 # User-supplied game data and proprietary SDK materials
 /assets/
@@ -69,6 +70,9 @@ test_regex*.py
 
 # Local design notes
 /docs/widescreen.md
+
+# Local build directories other than build/
+build-*/
 
 # Local compatibility validation build
 /build-compat/
