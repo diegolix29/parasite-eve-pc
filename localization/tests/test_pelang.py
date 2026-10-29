@@ -141,12 +141,31 @@ class PelangTest(unittest.TestCase):
         self.assertFalse(pelang.check_row("dlg/M001/003", "{br}".join(["Hi"] * 4), source, {})[1])
         for box in ("styled 20,174,80,24", "20,174,80,24"):
             source["boxes"] = [box]
-            self.assertTrue(pelang.check_row("dlg/M001/003", "W" * 100, source, {})[1])
-            self.assertTrue(pelang.check_row("dlg/M001/003", "Hi{br}Hi", source, {})[1])
-            self.assertFalse(pelang.check_row("dlg/M001/003", "Hi", source, {})[1])
+            self.assertTrue(pelang.check_row("dlg/M001/003", "W" * 100, source, {})[1])   # off screen
+            self.assertTrue(pelang.check_row("dlg/M001/003", "{br}".join(["Hi"] * 6), source, {})[1])
+            _, errors, warnings = pelang.check_row("dlg/M001/003", "Hi{br}Hi", source, {})
+            self.assertFalse(errors)                     # past the rectangle, still on screen
+            self.assertIn("past the 1 lines", warnings[0])
+            _, errors, warnings = pelang.check_row("dlg/M001/003", "W" * 14, source, {})
+            self.assertFalse(errors)
+            self.assertIn("past the 80 px", warnings[0])
+            self.assertEqual(pelang.check_row("dlg/M001/003", "Hi", source, {})[1:], ([], []))
         source["boxes"] = ["styled (rectangle computed)"]
         self.assertIn("unknown", pelang.check_row("dlg/M001/003", "Hi", source, {})[2][0])
         self.assertEqual(layout.bounds("styled 300,220,80,40"), (20, 1))
+
+    def test_pages_without_a_box_are_checked_against_the_boxes_their_bank_opens(self):
+        source = {"text": "Hello", "boxes": [], "boxes_possible": ["default"], "boxes_complete": True}
+        self.assertEqual(pelang.check_row("dlg/M001/003", "Hi", source, {})[1:], ([], []))
+        warn = pelang.check_row("dlg/M001/003", "W" * 100, source, {})[2]
+        self.assertIn("fits none", warn[0])
+        source["boxes_possible"] = ["default", "styled 20,20,80,40"]
+        warn = pelang.check_row("dlg/M001/003", "W" * 20, source, {})[2]
+        self.assertIn("too big for styled 20,20,80,40", warn[0])
+        source["boxes_complete"] = False
+        self.assertIn("did not decode", pelang.check_row("dlg/M001/003", "Hi", source, {})[2][0])
+        source["boxes_possible"] = []
+        self.assertIn("unknown", pelang.check_row("dlg/M001/003", "Hi", source, {})[2][0])
 
     def test_waits_reset_height_and_placeholders_have_worst_case_widths(self):
         source = {"text": "Hi{wait}Hi{name}{num}", "boxes": ["default"]}
@@ -155,7 +174,16 @@ class PelangTest(unittest.TestCase):
         self.assertEqual(layout.screens(gt.encode("{name}{num}")), [[layout.NAME_WIDTH + 60]])
         self.assertEqual(gt.lines(gt.encode("{name}{num}")), [layout.NAME_WIDTH + 60])
         source["boxes"] = ["styled 20,20,80,40"]
-        self.assertTrue(pelang.check_row("dlg/M001/003", "Hi{wait}Hi{name}{num}", source, {})[1])
+        self.assertTrue(pelang.check_row("dlg/M001/003", "Hi{wait}Hi{name}{num}", source, {})[2])
+
+    def test_name_is_measured_with_the_packs_default_name(self):
+        source = {"text": "{name}", "boxes": ["default"]}
+        self.assertEqual(layout.NAME_WIDTH, layout.name_width(gt.encode("Aya")))
+        text = "{name}" + "W" * 38                      # fits with "Aya", not with a long name
+        self.assertFalse(pelang.check_row("dlg/M001/003", text, source, {})[1])
+        wide = layout.name_width(gt.encode("WWWWWWWW"))
+        self.assertTrue(pelang.check_row("dlg/M001/003", text, source, {}, wide)[1])
+        self.assertEqual(layout.name_width(gt.encode("WWWWWWWWWW")), wide)   # the game copies 8
 
     def test_overflow_override_never_bypasses_controls(self):
         path = self.csv_with({"dlg/M001/003": "W" * 100})

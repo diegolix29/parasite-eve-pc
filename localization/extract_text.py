@@ -50,6 +50,7 @@ ITEM_OPS = {167: "give", 168: "check", 232: "show"}     # Inv_AddItem, Inv_Count
 OP_INV_COMMAND = 233                                    # Inv_DispatchCommand(cmd, value, ...)
 INV_ITEM_COMMANDS = {1102: "check", 1112: "remove"}     # INV_CMD_COUNT_ITEM, INV_CMD_REMOVE_ITEM
 OP_ASSIGN, OP_ITEM_MENU = 10, 169                       # Script_AssignValue, Entity_InitWithTimeout
+OP_EVAL = 9                                             # Script_EvalExpr: 0 add, 1 subtract, ...
 KEY_ITEMS = set(range(0x38, 0x3F)) | set(range(0xC8, 0xDD))
 ITEM_NAME_BASE = -1                                     # item id N is named by item/(N-1)
 DEBUG_ROOMS = {"M360"}                                  # the debug menu: "Get Bullets", "Map BGM 1", every key
@@ -81,8 +82,9 @@ def bank_slots(data: bytes) -> dict[int, int]:
 
 
 def box_calls(code: list[Instr]):
-    """Every text box a room's scripts open: (script, offset, page or None, box, page operand mode).
-    A styled box uses the rectangle the same script last set with opcode 208."""
+    """Every text box a room's scripts open: (script, offset, page or None, box, page operand mode,
+    the page's variable (mode, index) when it is computed). A styled box uses the rectangle the
+    same script last set with opcode 208."""
     calls, rect, script = [], None, None
     for i in code:
         if i.script != script:
@@ -98,8 +100,24 @@ def box_calls(code: list[Instr]):
                 box = "styled {},{},{},{}".format(*rect)
             else:
                 box = "styled (rectangle " + ("computed" if rect else "not set in this script") + ")"
-            calls.append((i.script, i.at, None if page is None else page & 0xFFFF, box, i.modes[0]))
+            reg = None if page is not None else (i.modes[0], i.args[0])
+            calls.append((i.script, i.at, None if page is None else page & 0xFFFF, box, i.modes[0], reg))
     return calls
+
+
+def constant_writes(code: list[Instr]) -> dict[tuple[int, int], set[int]]:
+    """The constants a room's scripts write into each variable: AssignValue of an immediate, or
+    EvalExpr adding or subtracting two immediates. A box that opens the page held in a variable
+    can show any of them (the room's scripts share their node and script variables)."""
+    out: dict[tuple[int, int], set[int]] = defaultdict(set)
+    for i in code:
+        if i.op == OP_ASSIGN and len(i.args) == 2 and i.modes[1] == MODE_IMMEDIATE:
+            out[(i.modes[0], i.args[0])].add(i.args[1] & 0xFFFF)
+        elif (i.op == OP_EVAL and len(i.args) == 4 and i.args[0] in (0, 1) and i.modes[0] == MODE_IMMEDIATE
+              and i.modes[2] == MODE_IMMEDIATE and i.modes[3] == MODE_IMMEDIATE):
+            v = i.args[2] + i.args[3] if i.args[0] == 0 else i.args[2] - i.args[3]
+            out[(i.modes[1], i.args[1])].add(v & 0xFFFF)
+    return out
 
 
 def item_source(code: list[Instr], k: int, arg: int):
@@ -170,7 +188,7 @@ def add_japanese(entries: dict, discs: list[str], room_bank: dict, room_boxes: d
                 continue
             stats["rooms"] += 1
             code, _ = walk(task_block(room.data), valid)
-            aligned = [(s, p) for s, _, p, _, _ in box_calls(code)] == room_boxes[(n, m)]
+            aligned = [(s, p) for s, _, p, _, _, _ in box_calls(code)] == room_boxes[(n, m)]
             if aligned:
                 stats["aligned"] += 1
             else:
@@ -300,14 +318,29 @@ def main():
                 b["rooms"].append(f"M{m:03d}")
             calls = box_calls(code)
             room_bank[(n, m)] = b["key"]
-            room_boxes[(n, m)] = [(s, p) for s, _, p, _, _ in calls]
-            for script, at, page, box, mode in calls:
+            room_boxes[(n, m)] = [(s, p) for s, _, p, _, _, _ in calls]
+            # Every box this bank can appear in: only opcodes 13 and 209 open a page of a room's
+            # bank (Render_SetupColorTable's other callers read other sources), so a page shown at
+            # all is shown in one of these. Rooms whose scripts don't decode to the end may hold more.
+            b.setdefault("possible", set()).update(box for *_, box, _, _ in calls)
+            b["complete"] = b.get("complete", True) and clean
+            written = constant_writes(code)
+            for script, at, page, box, mode, reg in calls:
                 if page is not None and page in b["pages"]:
                     script_pages[(n, m, script)].append((at, f"dlg/{b['key']}/{page:03d}"))
-                if page is None or page not in b["pages"]:
+                if page is None:
+                    traced = sorted(p for p in written.get(reg, ()) if p in b["pages"])
+                    for p in traced:                 # the constants the room puts in that variable
+                        b.setdefault("boxes", defaultdict(set))[p].add(box)
+                    stats["computed openings"] += 1
+                    stats["computed openings traced"] += bool(traced)
+                    if not traced:
+                        unresolved.append({"room": f"M{m:03d}", "script": script, "offset": at, "box": box,
+                                           "why": "page computed at run time (operand mode %d)" % mode})
+                    continue
+                if page not in b["pages"]:
                     unresolved.append({"room": f"M{m:03d}", "script": script, "offset": at, "box": box,
-                                       "why": "page computed at run time (operand mode %d)" % mode if page is None
-                                       else f"page {page} not in the room's bank"})
+                                       "why": f"page {page} not in the room's bank"})
                     continue
                 b.setdefault("boxes", defaultdict(set))[page].add(box)
 
@@ -315,7 +348,9 @@ def main():
         for pid, (raw, end) in sorted(b["pages"].items()):
             key = f"dlg/{b['key']}/{pid:03d}"
             entries[key] = {"key": key, "raw": raw, "end": end, "rooms": b["rooms"],
-                            "boxes": sorted(b.get("boxes", {}).get(pid, ()))}
+                            "boxes": sorted(b.get("boxes", {}).get(pid, ())),
+                            "boxes_possible": sorted(b.get("possible", ())),
+                            "boxes_complete": b.get("complete", False)}
     ja_stats, ja_only = add_japanese(entries, a.ja, room_bank, room_boxes, valid) if a.ja else ({}, [])
 
     # Table slots the game doesn't use: many indices sharing one filler of codes the font can't
@@ -338,8 +373,9 @@ def main():
     rows = []
     for e in sorted(entries.values(), key=lambda e: e["key"]):
         rows.append({"key": e["key"], "unused": e["unused"], "text": e["text"], "raw": e["raw"].hex(" "), "end": f"{e['end']:02X}",
-                     "lines_px": e["lines_px"], "boxes": e["boxes"], "rooms": e["rooms"],
-                     "japanese": e.get("ja"), "ja_raw": e.get("ja_raw"), "ja_aligned": e.get("ja_aligned")})
+                     "lines_px": e["lines_px"], "boxes": e["boxes"],
+                     "boxes_possible": e.get("boxes_possible", []), "boxes_complete": e.get("boxes_complete", False),
+                     "rooms": e["rooms"], "japanese": e.get("ja"), "ja_raw": e.get("ja_raw"), "ja_aligned": e.get("ja_aligned")})
     (out / "strings.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False), encoding="utf-8")
     with open(out / "strings.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
@@ -367,6 +403,12 @@ def main():
         f"{sum(1 for e in entries.values() if e['unused'])} table slots unused (filler), left out of strings.csv",
         f"round-trip (encode(decode(bytes)) == bytes): {len(entries) - len(bad)} of {len(entries)}" + (f"; failed: {bad[:10]}" if bad else ""),
         f"dialogue pages tied to a box by a script: {sum(1 for e in dlg if e['boxes'])} of {len(dlg)}",
+        f"  of which by a page the room puts in a variable: {stats['computed openings traced']} of "
+        f"{stats['computed openings']} computed openings traced",
+        f"the rest, whose bank can only use the default box: "
+        f"{sum(1 for e in dlg if not e['boxes'] and e['boxes_complete'] and e['boxes_possible'] == ['default'])}; "
+        f"whose bank also opens styled boxes: {sum(1 for e in dlg if not e['boxes'] and e['boxes_complete'] and len(e['boxes_possible']) > 1)}; "
+        f"bank has undecoded rooms: {sum(1 for e in dlg if not e['boxes'] and not e['boxes_complete'])}",
         f"box openings not tied to a page: {len(unresolved)}",
         f"rooms whose scripts didn't decode to the end: {len(unclean)} {unclean[:12]}",
         f"item events: {len(items)} ({', '.join(f'{k} {v}' for k, v in sorted(Counter(i['kind'] for i in items).items()))}); "

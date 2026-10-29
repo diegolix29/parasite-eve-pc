@@ -135,7 +135,7 @@ def lines(b: bytes) -> list[int]:
         if c in (0xF7, 0xF8):
             widths.append(w); w = 0
         elif c == 0xFA:
-            w += 9 * max(ADVANCE)  # TextboxNameGlyphs capacity, widest base glyph
+            w += ADVANCE[0x10] + ADVANCE[0x48] + ADVANCE[0x30]  # "Aya", the default name (petext/layout.py)
         elif c == 0xFB and i + 1 < len(b):
             sub = b[i + 1]
             if sub <= 3:

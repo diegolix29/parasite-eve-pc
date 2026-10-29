@@ -132,8 +132,9 @@ def cmd_pseudo(a) -> int:
     return 0
 
 
-def check_row(key: str, text: str, source: dict, widest_name: dict[str, int]):
-    """(glyph bytes or None, errors, warnings) for one translated row."""
+def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], name_px: int = layout.NAME_WIDTH):
+    """(glyph bytes or None, errors, warnings) for one translated row. name_px: how wide {name}
+    draws, from the pack's sys/030 (Aya's default name)."""
     errors, warnings = [], []
     try:
         raw = gt.encode(text, extended=True)
@@ -146,7 +147,7 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int]):
         validation.check(raw, source["text"])
     except ValueError as e:
         return None, [str(e)], warnings
-    layout_errors, warnings = layout.check(key, raw, source, widest_name)
+    layout_errors, warnings = layout.check(key, raw, source, widest_name, name_px)
     errors.extend(layout_errors)
     return raw, errors, warnings
 
@@ -161,6 +162,13 @@ def cmd_build(a) -> int:
     entries, errors, warnings = {}, [], []
     seen = set()
     rows = read_csv(a.csv)
+    name_px = layout.NAME_WIDTH
+    for r in rows:
+        if r.get("key") == "sys/030" and r.get("translation"):
+            try:
+                name_px = layout.name_width(gt.encode(r["translation"], extended=True))
+            except (ValueError, TypeError, OverflowError):
+                pass                                  # reported with the row below
     for r in rows:
         key, text = r.get("key", ""), r.get("translation", "")
         if not text:
@@ -172,7 +180,7 @@ def cmd_build(a) -> int:
         if key not in strings:
             errors.append(f"{key}: no such key in {a.strings}")
             continue
-        raw, errs, warns = check_row(key, text, strings[key], widest_name)
+        raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px)
         if a.allow_overflow:
             # check_row returns raw only after control validation succeeds.
             if raw is not None:
