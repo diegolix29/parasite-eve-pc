@@ -502,8 +502,8 @@ int RoomM273_GrabPlacementFanEmitter(int mode, void *task_data, intptr_t argumen
         effect->parameter[0]=((short *)g_RoomM273Trig)[((g_FieldFxCurrentAge*1024/12)&0xFFF)*2]*40/4096;
         effect->parameter[1]=8;
         {
-            unsigned long address=((g_FieldFxCurrentAge*1024/12)&0xFFF)*4;
-            address+=(unsigned long)((RoomM273TrigEntry *)g_RoomM273Trig);
+            uintptr_t address=((g_FieldFxCurrentAge*1024/12)&0xFFF)*4;
+            address+=(uintptr_t)((RoomM273TrigEntry *)g_RoomM273Trig);
             effect->parameter[2]=((short *)address)[1]*40/4096;
         }
         break;
@@ -1583,10 +1583,10 @@ int RoomM273_HandGlowEmitter(int mode, void *task_data, intptr_t argument) {
                 Vector *positions=g_RoomM273HandTrailState.hands;
                 do {
                     Vector **out=FieldFx_AcquireCallbackSlot(ANIM_POOL_AS(RoomM273PoolContext)->pool);
-                    unsigned long address;
+                    uintptr_t address;
                     if(!out) break;
                     address=i*8;
-                    address+=(unsigned long)positions;
+                    address+=(uintptr_t)positions;
                     *out=(Vector *)address;
                     i++;
                 } while(i<2);
@@ -1594,10 +1594,10 @@ int RoomM273_HandGlowEmitter(int mode, void *task_data, intptr_t argument) {
                 positions=g_RoomM273HandTrailState.hands;
                 do {
                     Vector **out=FieldFx_AcquireCallbackSlot(g_RoomM273HandRingBandPool);
-                    unsigned long address;
+                    uintptr_t address;
                     if(!out) break;
                     address=i*8;
-                    address+=(unsigned long)positions;
+                    address+=(uintptr_t)positions;
                     *out=(Vector *)address;
                     i++;
                 } while(i<2);
