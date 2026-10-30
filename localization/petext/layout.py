@@ -13,34 +13,48 @@ DEFAULT_LINES = 4
 # {name} draws TextboxNameGlyphs: sys/030 ("Aya") at a new game (Save_InitMetadataState), or the
 # name the player gave her, at most 8 glyphs (Menu_CopyPromptCodes). The English is laid out for
 # "Aya" and overflows with long names, so pages are measured with the pack's own sys/030.
-NAME_WIDTH = sum(gt.ADVANCE[g] for g in gt.encode("Aya"))
+NAME_WIDTH = sum(gt.BOX_ADVANCE[g] for g in gt.encode("Aya"))
 NUMBER_WIDTH = 5 * gt.WIDE
+
+
+def advance(c: bytes, name_width: int = NAME_WIDTH) -> int:
+    """How far one command (from validation.commands) moves the box's pen; 0 for breaks and waits."""
+    op = c[0]
+    if op == 0xFA:
+        return name_width
+    if op == 0xFB:
+        return gt.WIDE if c[1] <= 3 else NUMBER_WIDTH if c[1] == 8 else 0
+    if op in (0xFC, 0xFD):
+        return gt.WIDE
+    if op < 0xF1:
+        return gt.BOX_ADVANCE[op] if op < len(gt.BOX_ADVANCE) else (gt._latin_advance(op) or gt.WIDE)
+    return 0
 
 
 def screens(raw: bytes, name_width: int = NAME_WIDTH):
     pages, lines, width = [], [], 0
     for c in commands(raw):
-        op = c[0]
-        if op in (0xF7, 0xF8):
+        if c[0] in (0xF7, 0xF8):
             lines.append(width)
             width = 0
-            if op == 0xF8:
+            if c[0] == 0xF8:
                 pages.append(lines)
                 lines = []
-        elif op == 0xFA:
-            width += name_width
-        elif op == 0xFB:
-            if c[1] <= 3:
-                width += gt.WIDE
-            elif c[1] == 8:
-                width += NUMBER_WIDTH
-        elif op in (0xFC, 0xFD):
-            width += gt.WIDE
-        elif op < 0xF1:
-            width += gt.ADVANCE[op] if op < len(gt.ADVANCE) else (gt._latin_advance(op) or gt.WIDE)
+        else:
+            width += advance(c, name_width)
     lines.append(width)
     pages.append(lines)
     return pages
+
+
+def box_limit(source: dict):
+    """(width, lines) to wrap a page to: the narrowest of the boxes scripts open it in, else of
+    the boxes its bank opens when that set is complete; None when no box is known."""
+    boxes = source.get('boxes') or (source.get('boxes_possible') if source.get('boxes_complete') else None) or []
+    limits = [b for b in map(bounds, boxes) if b]
+    if not limits:
+        return None
+    return min(w for w, _ in limits), min(n for _, n in limits)
 
 
 def bounds(box: str, screen: bool = False):
@@ -95,7 +109,7 @@ def unproven(pages, source: dict):
 
 def name_width(raw: bytes) -> int:
     """How wide {name} draws when the default name is these glyph bytes (a sys/030 entry)."""
-    return sum(gt.ADVANCE[g] if g < len(gt.ADVANCE) else (gt._latin_advance(g) or gt.WIDE) for g in raw[:8])
+    return sum(gt.BOX_ADVANCE[g] if g < len(gt.BOX_ADVANCE) else (gt._latin_advance(g) or gt.WIDE) for g in raw[:8])
 
 
 def check(key: str, raw: bytes, source: dict, widest_table: dict, name_px: int = NAME_WIDTH,

@@ -24,9 +24,12 @@ CHARS.update({0x30 + i: chr(97 + i) for i in range(26)})
 CODE_OF = {v: k for k, v in CHARS.items()}
 
 # g_TextboxGlyphSpacing (src/main/text/tables.c): the advance of glyph codes 0..77 in a box.
-ADVANCE = [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 11, 14, 9, 8, 7, 8, 7, 7, 8, 9, 6, 7, 9, 8, 11, 9, 7, 8, 7,
+ADVANCE = [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 8, 11, 14, 9, 8, 7, 8, 7, 7, 8, 9, 6, 7, 9, 8, 11, 9, 7, 8, 7,
            9, 7, 7, 9, 9, 11, 7, 9, 7, 9, 4, 7, 6, 4, 4, 8, 8, 7, 7, 7, 7, 8, 9, 5, 4, 8, 5, 11, 9, 7, 8,
            8, 7, 6, 5, 9, 9, 11, 7, 9, 6, 4, 4, 7, 0]
+# What the English box moves its pen: with the English text flag the game sets
+# g_TextboxKernGlyph0F, and the box pulls every space (code 0x0F) back 7 px (textbox.c).
+BOX_ADVANCE = ADVANCE[:0x0F] + [ADVANCE[0x0F] - 7] + ADVANCE[0x10:]
 WIDE = 12          # a glyph from the extra pages, a symbol, a digit of a number
 LINE_HEIGHT = 12
 
@@ -145,8 +148,8 @@ def lines(b: bytes) -> list[int]:
             i += 1 + (1 if sub in (7, 9) else 0)
         elif c in (0xFC, 0xFD):
             w += WIDE; i += 1
-        elif c < len(ADVANCE):
-            w += ADVANCE[c]
+        elif c < len(BOX_ADVANCE):
+            w += BOX_ADVANCE[c]
         elif c < 0xF1:
             w += _latin_advance(c) or WIDE
         i += 1

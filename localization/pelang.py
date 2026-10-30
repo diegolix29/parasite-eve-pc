@@ -42,6 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from petext import gametext as gt, latin, validation, layout, menu  # noqa: E402
+from petext import wrap as wrapping  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
 HEADER = struct.Struct("<4sIII16s32s")
@@ -149,10 +150,11 @@ def cmd_pseudo(a) -> int:
 
 
 def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], name_px: int = layout.NAME_WIDTH,
-              metrics: bytes | None = None, layouts: dict | None = None):
+              metrics: bytes | None = None, layouts: dict | None = None, wrap: bool = True):
     """(glyph bytes or None, errors, warnings) for one translated row. name_px: how wide {name}
     draws, from the pack's sys/030 (Aya's default name); metrics: the menus' glyph widths
-    (menu_glyphs.json), without which menu text is only compared with the English."""
+    (menu_glyphs.json), without which menu text is only compared with the English. wrap: a
+    dialogue page that overflows its box gets line breaks and screens (petext/wrap.py)."""
     errors, warnings = [], []
     try:
         raw = gt.encode(text, extended=True)
@@ -165,8 +167,18 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
         validation.check(raw, source["text"])
     except ValueError as e:
         return None, [str(e)], warnings
+    note = None
+    limit = layout.box_limit(source) if wrap and key.startswith("dlg/") else None
+    if limit and any(max(s) > limit[0] or len(s) > limit[1] for s in layout.screens(raw, name_px)):
+        english = bytes.fromhex(source["raw"]) if source.get("raw") else gt.encode(source["text"])
+        wrapped, added = wrapping.wrap(raw, limit[0], limit[1], english, name_px)
+        if wrapped != raw:
+            raw = wrapped
+            note = "wrapped to fit the box" + (f", {added} screen(s) added" if added else "") + "; check the breaks"
     layout_errors, warnings = layout.check(key, raw, source, widest_name, name_px, metrics, layouts)
     errors.extend(layout_errors)
+    if note:
+        warnings.insert(0, note)
     return raw, errors, warnings
 
 
@@ -203,7 +215,8 @@ def cmd_build(a) -> int:
         if key not in strings:
             errors.append(f"{key}: no such key in {a.strings}")
             continue
-        raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px, metrics, layouts)
+        raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px, metrics, layouts,
+                                     wrap=not a.no_wrap)
         if a.allow_overflow:
             # check_row returns raw only after control validation succeeds.
             if raw is not None:
@@ -300,6 +313,9 @@ def main(argv=None) -> int:
     b.add_argument("--max-messages", type=int, default=50)
     b.add_argument("--allow-overflow", action="store_true",
                    help="emit known layout overflows as warnings for deliberate in-game testing; controls stay strict")
+    b.add_argument("--no-wrap", action="store_true",
+                   help="don't rewrap dialogue pages that overflow their box (by default they get line breaks at "
+                        "spaces and, if still too tall, more screens)")
     h = sub.add_parser("latin-header", help="write the Latin Extended table the pe_lang mod composes "
                                             "from, and the test vectors its composer is checked with")
     h.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods" / "pe_lang" / "pe_lang_latin.h")

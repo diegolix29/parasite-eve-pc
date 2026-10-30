@@ -77,8 +77,15 @@ python -I pelang.py build fr.csv --strings out/text/strings.json --lang fr --nam
      Commands are compared after encoding, so raw tags cannot bypass validation. Line breaks may
      move; waits, choices, names, numbers, pauses, highlighting and extra-page glyphs keep their
      count, order and operands. The compiler supplies the original page ending itself.
+   - A dialogue page that overflows its box is rewrapped (`petext/wrap.py`): line breaks at
+     spaces, continuation lines indented as the English indents them, and a screen still too tall
+     split into screens of the box's height with added waits (an extra button press in game). A
+     screen with a choice is never split and its choice rows are never moved; a word wider than
+     the box stays as it is. Pages that fit keep the translator's breaks. The build notes every
+     rewrapped page for review; `--no-wrap` turns it off.
    - Dialogue checks live in `petext/layout.py`. The default box allows 297 px and four lines per
-     screen. A styled box neither insets nor clips its text, so going past its rectangle is a
+     screen. Widths are the game's spacing table, with the English box's narrower space (it pulls
+     each space back 7 px). A styled box neither insets nor clips its text, so going past its rectangle is a
      warning and only the screen edge is an error. Waits reset the line count. `{name}` is
      measured as the pack's `sys/030` (Aya's default name, which the dialogue uses until the
      player renames her; the English is laid out for "Aya"), and numbers reserve five 12-pixel
