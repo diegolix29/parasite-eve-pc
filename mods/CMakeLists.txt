@@ -15,6 +15,7 @@ set(pe_host_sources
     host/pe_save.c          # mods' per-save data: records the host saves, loads and carries
     host/pe_present.c       # image presenter: pictures pasted into the finished frame
     host/pe_disc_assets.c   # read-only game data from the player's disc (rooms)
+    host/pe_model_skin.c    # isolated Wardrobe asset reads
     host/pe_model.c         # decoded game models: geometry, textures, idle animation
     host/pe_model_view.c    # a model posed, turned and drawn into a picture
     host/pe_model_stage.c   # a model on show: turning, idle animation, box or full screen
