@@ -16,8 +16,11 @@ the [Parasite Eve Localization Mod Plan](https://claude.ai/artifact/2NpmecRhhgMB
 | Translator template, test language, pack compiler (`pelang.py`) | Done |
 | `pe_lang` mod: F1 > Language, item names and descriptions | Done |
 | System messages, misc table, room dialogue | Done: `PE_HOOK_TEXT_LOOKUP` from every table, `PE_HOOK_TEXT_PAGE` |
-| Text drawn into images, text compiled into the port, other mods' messages | Not keyed yet |
+| Spanish pilot | 174 draft entries: 103 system, 21 item names, 30 dialogue pages and 20 mod labels; partial, needs Spanish-speaker review |
+| Mod-owned text (`pe_tr`) | Optional translation service and strict single-line manifest; Wayne/Workshop labels integrated first |
+| Text drawn into images and text compiled into the port | Not keyed yet |
 | Accented letters (Latin Extended: French, German, Spanish, Italian, Portuguese, Polish, Czech, Turkish) | Done |
+| Japanese semantic proofreading | Pending human review; extraction/alignment does not establish translation accuracy |
 | Cyrillic | Not started |
 | Chinese, Japanese, Korean | Needs the per-area glyph pages (phase 5) |
 
@@ -200,3 +203,59 @@ reference.
   (only empty cells change), widths.
 - In game: pe-native-debug's `scenarios/lang_items.py` loads a save with a pack and without, and
   takes pictures of the item screen and a phone's dialogue box.
+
+## Spanish pilot and mod-owned text
+
+The first pilot is **Spanish**. See [`localization/pilots/README.md`](../localization/pilots/README.md)
+for the coverage and local build command. It is a partial draft for testing the pipeline, not a full
+game translation or a proofread release. Missing entries use the game's English.
+
+Mod-owned game labels use `mods/host/pe_translate.h`, separate from resident game-table lookups:
+
+```c
+#include "pe_translate.h"
+/* Append one plain label to a caller-owned PeText message. */
+pe_t_tr(&text, "mod/pe_economy/wayne/workshop", "Workshop", 24);
+```
+
+`pe_tr(key)` queries the optional `translations` v1 service and returns game-encoded glyphs or
+NULL. `pe_t_tr` appends a bounded single-line translation, using the original English when the
+provider/entry is missing or an invalid label is supplied. It rejects command bytes, line breaks,
+empty labels and labels exceeding the caller's limit; it never inserts a new choice or treats
+translation text as a format string. The host disables the service when pe_lang or All mods is off.
+There is no dependency requiring economy mods to install or enable pe_lang.
+
+The key and layout catalogue is `localization/data/mod_strings.json`. Each entry supplies the
+mod's own fallback text, a glyph limit and a pixel limit. Add it explicitly with `--mod-strings`
+to `pelang.py template`, `pseudo` or `build`. It is merged with extracted game keys in memory;
+duplicate keys, unknown keys and namespace collisions are rejected. The pack format stays v1.
+`petext/modtext.py` owns this validation separately from game dialogue and menu checks. A mod label
+cannot contain controls even when deliberate layout overflow is enabled. Fragment limits cover
+the fragment itself; a complete message that combines names, counts and fragments still needs an
+in-game layout check.
+
+Wayne's added Mod Permit Card and Workshop rows, Workshop options/titles, paging, permit prompts
+and small status labels are the first consumers (20 keys). His original choice order is preserved.
+The hand-in option is identified before a language pack changes its wording, keeping its Junk
+totals under translation. Other mod messages, effect names, F1 overlay strings and native image
+labels remain future coverage; this API does not imply they are already translated.
+
+The headless scenario suite and new mod-text contract checks stay local in `pe-native-debug`, which
+has no remote. Existing repository unit tests remain where they already were. Cyrillic, CJK font
+pages, image text and Japanese human proofreading are still separate milestones.
+
+### Pilot verification (October 29, 2026)
+
+- Native localization game rebuilt successfully.
+- Existing Python compiler/layout suite: 31 passed. Existing C pack/font/selection checks: 3 passed.
+- New local mod-text compiler contracts: 6 passed; native optional-service/fallback/buffer checks passed.
+- Local headless suite with the Spanish pilot and `--unchanged-text menu`: 11/11 passed, including
+  disabled/missing/unselected pack equivalence and all six lines in Wayne's expanded storage menu.
+- Spanish inventory names, save-phone choice and Wayne's added rows were visually inspected in
+  captured game frames. Screenshots/reports stay in `pe-native-debug/runs/lang_suite`.
+- The F1 raster now decodes UTF-8 codepoints consistently for width and drawing. An actual-font
+  local check renders “Español - piloto” correctly and verifies malformed/truncated input handling.
+  This fixes language-pack display names; it does not add Cyrillic/CJK glyph pages to the game's
+  own text renderer. Those language/font milestones remain pending.
+- The compiler still reports the two unproven phone-page layouts listed in the pilot README;
+  neither warnings nor partial semantic coverage are described as a proofread full translation.

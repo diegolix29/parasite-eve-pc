@@ -30,6 +30,7 @@
 #include "pe_lang_font.h"
 #include "pe_lang_pack.h"
 #include "pe_lang_selection.h"
+#include "pe_translate.h"
 #include "pe_mod_host.h"
 #include "pe_mod_menu.h"
 
@@ -239,8 +240,16 @@ static int language_set(int choice) {
     return 1;
 }
 
+/* The host hides this service while pe_lang or All mods is off. Resolve the active pack
+ * per lookup, so F1 changes and missing packs immediately use each caller's fallback. */
+static const unsigned char *mod_text(const char *key) {
+    return key && !strncmp(key, "mod/", 4) ? pe_lang_pack_find(active_pack(), key) : NULL;
+}
+static const PeTranslationsApi s_translations = {mod_text};
+
 static int lang_init(void) {
     char dir[4096];
+    pe_service_publish("translations", 1, &s_translations, MOD_ID);
     const char *base = SDL_GetBasePath();
     if (base) {
         snprintf(dir, sizeof dir, "%slang/", base);

@@ -42,6 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from petext import gametext as gt, latin, validation, layout, menu  # noqa: E402
+from petext import modtext
 from petext import wrap as wrapping  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
@@ -79,8 +80,14 @@ def template_rows(strings: dict[str, dict]) -> list[dict]:
     out, layouts = [], menu.load_layouts()
     for key, r in sorted(strings.items()):
         dialogue = key.startswith("dlg/")
+        if dialogue:
+            box = "; ".join(r.get("boxes") or [])
+        elif r.get("mod_label"):
+            box = f"mod label: {r['max_glyphs']} glyphs, {r['width']} px, single line"
+        else:
+            box = menu_limits(key, layouts)
         out.append({"key": key, "english": r["text"], "japanese": r.get("japanese") or "", "translation": "",
-                    "box": "; ".join(r.get("boxes") or []) if dialogue else menu_limits(key, layouts),
+                    "box": box,
                     "widest_px": r["menu_px"] if "menu_px" in r else max(r.get("lines_px") or [0]),
                     "rooms": " ".join((r.get("rooms") or [])[:6]), "notes": ""})
     return out
@@ -99,7 +106,7 @@ def write_csv(path: Path, rows: list[dict]) -> None:
 
 
 def cmd_template(a) -> int:
-    rows = template_rows(load_strings(a.strings))
+    rows = template_rows(modtext.load(getattr(a, "mod_strings", None), load_strings(a.strings)))
     if a.merge:
         old = {r["key"]: r for r in read_csv(a.merge)}
         kept = 0
@@ -130,7 +137,7 @@ def pseudo(text: str) -> str:
 
 
 def cmd_pseudo(a) -> int:
-    rows = template_rows(load_strings(a.strings))
+    rows = template_rows(modtext.load(getattr(a, "mod_strings", None), load_strings(a.strings)))
     skipped = 0
     for r in rows:
         try:
@@ -167,6 +174,10 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
         validation.check(raw, source["text"])
     except ValueError as e:
         return None, [str(e)], warnings
+    if source.get("mod_label"):
+        if any(c >= 0xF1 for c in raw):
+            return None, ["mod labels cannot contain line breaks, waits or commands"], []
+        return raw, modtext.check(raw, source, metrics), []
     note = None
     limit = layout.box_limit(source) if wrap and key.startswith("dlg/") else None
     if limit and any(max(s) > limit[0] or len(s) > limit[1] for s in layout.screens(raw, name_px)):
@@ -183,7 +194,7 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
 
 
 def cmd_build(a) -> int:
-    strings = load_strings(a.strings)
+    strings = modtext.load(getattr(a, "mod_strings", None), load_strings(a.strings))
     metrics, layouts = menu.load_metrics(a.strings), menu.load_layouts()
     if metrics is None:
         print(f"note: no menu_glyphs.json beside {a.strings} (rerun extract_text.py): "
@@ -320,6 +331,8 @@ def main(argv=None) -> int:
                                             "from, and the test vectors its composer is checked with")
     h.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods" / "pe_lang" / "pe_lang_latin.h")
     h.add_argument("--vectors", type=Path, default=ROOT.parent / "tests" / "pe_lang_font_vectors.h")
+    for command in (t, p, b):
+        command.add_argument("--mod-strings", type=Path, help="optional mod-owned key and layout manifest")
     a = ap.parse_args(argv)
     return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build,
             "latin-header": cmd_latin_header}[a.cmd](a)
