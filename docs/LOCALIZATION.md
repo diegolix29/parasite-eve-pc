@@ -55,6 +55,12 @@ words. After changing `latin.py`, run `python -I pelang.py latin-header` to rege
 
 ## Making a pack
 
+Translators: [TRANSLATING.md](TRANSLATING.md) is the contributor's guide (extract from your own
+discs, translate, `export` the translations-only file, open a pull request). Submitted languages
+live in `localization/translations/`; CI (`.github/workflows/localization.yml`) checks and builds
+them from `localization/data/manifest.json`, the source's shape without its text, so it needs no
+discs, and refuses a submission with source text in it.
+
 Every step reads the translator's own discs; no game text goes into git or into a pack.
 
 ```

@@ -99,14 +99,15 @@ def contexts_of(key: str, layouts: dict) -> list[dict]:
 def check(key: str, raw: bytes, source: dict, metrics: bytes, layouts: dict):
     """(errors, warnings, covered) for one menu entry; source is its strings.json row. covered is
     False when no context names the key, so the caller falls back to the table-wide comparison."""
+    from .manifest import english_length
     errors, warnings = [], []
-    english = bytes.fromhex(source["raw"]) if source.get("raw") else gt.encode(source["text"])
+    english_len = english_length(source)
     found = contexts_of(key, layouts)
     px = width(raw, metrics)
     for c in found:
         where = f"{c['id']} ({c['source']})"
-        if c.get("same_length") and len(raw) != len(english):
-            errors.append(f"{len(raw)} bytes; {where} reads exactly {len(english)} glyph cells")
+        if c.get("same_length") and len(raw) != english_len:
+            errors.append(f"{len(raw)} bytes; {where} reads exactly {english_len} glyph cells")
         if c.get("glyphs_only") and (b"\xf1\xc5" in raw or any(b >= 0xFA for b in raw)):
             errors.append(f"a page code (FA..FF) in {where}, which takes each byte as one cell's glyph")
         if "max_glyphs" in c and len(raw) > c["max_glyphs"]:
@@ -125,7 +126,14 @@ def check(key: str, raw: bytes, source: dict, metrics: bytes, layouts: dict):
 
 def check_combined(texts: dict[str, bytes], metrics: bytes, layouts: dict):
     """Pack-wide limits on text the game joins: the widest/longest of each part together.
-    texts: every resident key's bytes as the pack would have it (translation or English)."""
+    texts: every resident key's bytes as the pack would have it (translation or English), or for
+    an English entry known only from the source manifest, its (length, menu px)."""
+    def n_bytes(v):
+        return v[0] if isinstance(v, tuple) else len(v)
+
+    def n_px(v):
+        return v[1] if isinstance(v, tuple) else width(v, metrics)
+
     errors = []
     for c in layouts.get("combined", []):
         worst_px, worst_len, names = 0, 0, []
@@ -133,10 +141,10 @@ def check_combined(texts: dict[str, bytes], metrics: bytes, layouts: dict):
             keys = [k for k in texts if any(m(k) for m in alt)]
             if not keys:
                 break
-            by_len = max(keys, key=lambda k: len(texts[k]))
-            by_px = max(keys, key=lambda k: width(texts[k], metrics))
-            worst_len += len(texts[by_len])
-            worst_px += width(texts[by_px], metrics)
+            by_len = max(keys, key=lambda k: n_bytes(texts[k]))
+            by_px = max(keys, key=lambda k: n_px(texts[k]))
+            worst_len += n_bytes(texts[by_len])
+            worst_px += n_px(texts[by_px])
             names.append(by_len if by_len == by_px else f"{by_len}/{by_px}")
         else:
             where = f"{c['id']} ({c['source']})"

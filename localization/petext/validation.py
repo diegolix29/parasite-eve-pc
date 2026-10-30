@@ -45,9 +45,10 @@ def structure(raw: bytes):
     return [c for c in commands(raw) if c[0] >= 0xF8]
 
 
-def check(raw: bytes, source: str):
+def check(raw: bytes, source):
+    """source: the English text, or its structure already (a list, from the source manifest)."""
     actual = structure(raw)
-    expected = structure(gt.encode(source, extended=True))
+    expected = source if isinstance(source, list) else structure(gt.encode(source, extended=True))
     if actual != expected:
         raise ValueError('control commands must match the source in count, order and operands '
                          '(including waits, choices, names, numbers and pauses)')

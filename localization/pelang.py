@@ -43,12 +43,19 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from petext import gametext as gt, latin, validation, layout, menu  # noqa: E402
 from petext import modtext, cjk
+from petext import manifest as srcman  # noqa: E402
 from petext import wrap as wrapping  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
 HEADER = struct.Struct("<4sIII16s32s")
 ENTRY = struct.Struct("<II")
-COLUMNS = ["key", "english", "japanese", "translation", "box", "widest_px", "rooms", "notes"]
+# Context columns go last so older CSVs keep their columns where they were.
+COLUMNS = ["key", "english", "japanese", "translation", "box", "widest_px", "rooms", "notes",
+           "speaker", "before", "after"]
+# What a contributor submits (localization/translations/<lang>.csv): no source text in it.
+SUBMISSION_COLUMNS = ["key", "translation", "notes"]
+SOURCE_COLUMNS = ("english", "japanese", "before", "after")
+SPEAKER = re.compile(r"^\s*(\{name\}|[A-Z][A-Za-z.' ]{1,24}):")
 
 
 def fnv1a(key: str) -> int:
@@ -76,9 +83,20 @@ def menu_limits(key: str, layouts: dict) -> str:
     return "; ".join(out)
 
 
+def speaker(text: str) -> str:
+    """Who says a dialogue page, from its "Name:" prefix ({name} is Aya)."""
+    m = SPEAKER.match(text)
+    return "" if not m else ("Aya" if m.group(1) == "{name}" else m.group(1).strip())
+
+
 def template_rows(strings: dict[str, dict]) -> list[dict]:
+    """The translator CSV. It holds the game's English and Japanese for reference, so it stays on
+    the translator's machine; `export` writes the file that is submitted."""
     out, layouts = [], menu.load_layouts()
-    for key, r in sorted(strings.items()):
+    keys = sorted(strings)
+    bank_of = lambda k: k.rsplit("/", 1)[0] if k.startswith("dlg/") else None
+    for n, key in enumerate(keys):
+        r = strings[key]
         dialogue = key.startswith("dlg/")
         if dialogue:
             box = "; ".join(r.get("boxes") or [])
@@ -86,10 +104,56 @@ def template_rows(strings: dict[str, dict]) -> list[dict]:
             box = f"mod label: {r['max_glyphs']} glyphs, {r['width']} px, single line"
         else:
             box = menu_limits(key, layouts)
+        # The pages before and after in the same bank: a page's scene, for whoever translates it.
+        near = lambda m: strings[keys[m]]["text"][:160] if 0 <= m < len(keys) and bank_of(keys[m]) == bank_of(key) else ""
         out.append({"key": key, "english": r["text"], "japanese": r.get("japanese") or "", "translation": "",
                     "box": box,
                     "widest_px": r["menu_px"] if "menu_px" in r else max(r.get("lines_px") or [0]),
-                    "rooms": " ".join((r.get("rooms") or [])[:6]), "notes": ""})
+                    "rooms": " ".join((r.get("rooms") or [])[:6]), "notes": "",
+                    "speaker": speaker(r["text"]) if dialogue else "",
+                    "before": near(n - 1) if dialogue else "", "after": near(n + 1) if dialogue else ""})
+    return out
+
+
+def cmd_export(a) -> int:
+    """The submission: key, translation and notes of the translated rows, no source text."""
+    rows = [r for r in read_csv(a.csv) if r.get("translation")]
+    with open(a.out, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=SUBMISSION_COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    print(f"wrote {len(rows)} translated rows to {a.out} (key, translation, notes: no source text)")
+    return 0
+
+
+def cmd_manifest(a) -> int:
+    strings = load_strings(a.strings)
+    banks = json.loads(a.strings.with_name("banks.json").read_text(encoding="utf-8"))
+    data = srcman.build(strings, banks, menu.load_metrics(a.strings))
+    a.out.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True), encoding="utf-8")
+    print(f"wrote {a.out}: {len(data['entries'])} keys, {len(banks)} banks, no game text")
+    return 0
+
+
+def consistency(entries_text: dict[str, str], strings: dict[str, dict], glossary: dict[str, str]) -> list[str]:
+    """Warnings for a translation that names things differently than the rest of the pack does:
+    a dialogue page that names an item (by its English name) but not as the item's own translation,
+    and glossary terms (english,translation) not translated as the glossary says. Case-insensitive;
+    languages that inflect names will see some of these on purpose."""
+    out = []
+    mentions = {k: r["mentions"] for k, r in strings.items() if r.get("mentions")}
+    if not mentions and any("text" in r for r in strings.values()):
+        mentions = srcman.item_mentions(strings)
+    for key, text in entries_text.items():
+        low = text.lower()
+        for item in mentions.get(key, ()):
+            name = entries_text.get(item)
+            if name and name.lower() not in low:
+                out.append(f"{key}: names {item}, translated \"{name}\", but that name isn't in this line")
+        english = strings.get(key, {}).get("text", "")
+        for term, tr in glossary.items():
+            if re.search(r"(?<![A-Za-z])" + re.escape(term) + r"(?![A-Za-z])", english, re.I) and tr.lower() not in low:
+                out.append(f"{key}: glossary: \"{term}\" should be \"{tr}\"")
     return out
 
 
@@ -171,7 +235,7 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
             msg += " (the font has A-Z, a-z, digits, basic punctuation, Latin Extended, Russian/Ukrainian/Belarusian Cyrillic, and CJK with --cjk-font)"
         return None, [msg], warnings
     try:
-        validation.check(raw, source["text"])
+        validation.check(raw, srcman.source_structure(source))
     except ValueError as e:
         return None, [str(e)], warnings
     for command in validation.commands(raw):
@@ -190,7 +254,7 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
     note = None
     limit = layout.box_limit(source) if wrap and key.startswith("dlg/") else None
     if limit and any(max(s) > limit[0] or len(s) > limit[1] for s in layout.screens(raw, name_px)):
-        english = bytes.fromhex(source["raw"]) if source.get("raw") else gt.encode(source["text"])
+        english = srcman.english_shape(source)
         wrapped, added = wrapping.wrap(raw, limit[0], limit[1], english, name_px, atlas.characters if atlas else None)
         if wrapped != raw:
             raw = wrapped
@@ -203,8 +267,14 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
 
 
 def cmd_build(a) -> int:
-    strings = modtext.load(getattr(a, "mod_strings", None), load_strings(a.strings))
-    metrics, layouts = menu.load_metrics(a.strings), menu.load_layouts()
+    from_manifest = srcman.is_manifest(a.strings)
+    if from_manifest:                       # no discs: the committed source manifest
+        base, banks, metrics = srcman.load(a.strings)
+    else:
+        base, metrics = load_strings(a.strings), menu.load_metrics(a.strings)
+        banks = json.loads(Path(a.banks or a.strings.with_name("banks.json")).read_text(encoding="utf-8"))
+    strings = modtext.load(getattr(a, "mod_strings", None), base)
+    layouts = menu.load_layouts()
     if metrics is None:
         print(f"note: no menu_glyphs.json beside {a.strings} (rerun extract_text.py): "
               "menu text is compared with the English only", file=sys.stderr)
@@ -217,6 +287,12 @@ def cmd_build(a) -> int:
     entries, errors, warnings = {}, [], []
     seen = set()
     rows = read_csv(a.csv)
+    if a.submission:
+        # A submitted file holds translations only: the game's text stays on the translator's machine.
+        leaked = sorted({c for r in rows for c in SOURCE_COLUMNS if (r.get(c) or "").strip()})
+        if leaked:
+            errors.append(f"{a.csv}: has source text in its {', '.join(leaked)} column(s); submit the file "
+                          "`pelang.py export` writes (key, translation, notes)")
     try:
         atlas = cjk.Atlas([r.get('translation','') for r in rows], getattr(a,'cjk_font',None))
     except (ValueError, OSError, struct.error) as e:
@@ -242,6 +318,10 @@ def cmd_build(a) -> int:
             continue
         raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px, metrics, layouts,
                                      wrap=not a.no_wrap, atlas=atlas)
+        src = strings[key]
+        same = text == src["text"] if "text" in src else srcman.english_hash(text) == src.get("english_hash")
+        if same and any(ch.isalpha() for ch in text):
+            warns.append("the translation is the English unchanged (leave it empty to keep the game's text)")
         if a.allow_overflow:
             # check_row returns raw only after control validation succeeds.
             if raw is not None:
@@ -253,17 +333,22 @@ def cmd_build(a) -> int:
             entries[key] = raw
     if metrics is not None:
         # Text the game joins (an item's name and a suffix in one buffer): the pack's longest of each.
-        resident = {k: bytes.fromhex(r["raw"]) for k, r in strings.items() if not k.startswith("dlg/") and r.get("raw")}
+        resident = {k: bytes.fromhex(r["raw"]) if r.get("raw") else (r["length"], r.get("menu_px", 0))
+                    for k, r in strings.items() if not k.startswith("dlg/") and (r.get("raw") or "length" in r)}
         resident.update({k: v for k, v in entries.items() if not k.startswith("dlg/")})
         joined = menu.check_combined(resident, metrics, layouts)
         (warnings if a.allow_overflow else errors).extend(f"joined text: {e}" for e in joined)
+    glossary = {}
+    if a.glossary:
+        glossary = {r["english"]: r["translation"] for r in read_csv(a.glossary) if r.get("english") and r.get("translation")}
+    texts = {r["key"]: r["translation"] for r in rows if r.get("translation") and r.get("key") in entries}
+    warnings += [f"consistency: {w}" for w in consistency(texts, strings, glossary)]
     # Dialogue pages keep the page end the game had (F9 instead of FF closes some boxes), and the
     # pack says which bank is which: "bank/<crc32>" holds that bank's key ("M001") in ASCII.
     for key, raw in list(entries.items()):
         end = strings[key].get("end", "FF")
         if key.startswith("dlg/") and end != "FF":
             entries[key] = raw + bytes([int(end, 16)])
-    banks = json.loads(Path(a.banks or a.strings.with_name("banks.json")).read_text(encoding="utf-8"))
     for b in banks:
         entries[f"bank/{b['crc32']}"] = b["key"].encode("ascii")
     hashes: dict[int, str] = {}
@@ -336,7 +421,12 @@ def main(argv=None) -> int:
     p.add_argument("-o", "--out", type=Path, required=True)
     b = sub.add_parser("build", help="check a translated CSV and write a .pelang pack")
     b.add_argument("csv", type=Path)
-    b.add_argument("--strings", type=Path, required=True, help="strings.json from extract_text.py")
+    b.add_argument("--strings", type=Path, required=True,
+                   help="strings.json from extract_text.py, or the committed data/manifest.json (no discs needed)")
+    b.add_argument("--submission", action="store_true",
+                   help="the file is a submission: refuse source text (english/japanese/context columns)")
+    b.add_argument("--glossary", type=Path, help="CSV of english,translation terms to keep consistent "
+                                                 "(checked where the English is known: with strings.json)")
     b.add_argument("--banks", type=Path, help="banks.json from extract_text.py (default: beside strings.json)")
     b.add_argument("--lang", required=True, help="language code, e.g. fr, pt-BR, en-x-jp, qps")
     b.add_argument("--name", required=True, help="the name the Language row shows, e.g. French")
@@ -348,6 +438,12 @@ def main(argv=None) -> int:
     b.add_argument("--no-wrap", action="store_true",
                    help="don't rewrap dialogue pages that overflow their box (by default they get line breaks at "
                         "spaces and, if still too tall, more screens)")
+    e = sub.add_parser("export", help="the file to submit: key, translation, notes (no source text)")
+    e.add_argument("csv", type=Path)
+    e.add_argument("-o", "--out", type=Path, required=True)
+    m = sub.add_parser("manifest", help="write the source manifest (no game text) from strings.json")
+    m.add_argument("strings", type=Path)
+    m.add_argument("-o", "--out", type=Path, required=True)
     h = sub.add_parser("latin-header", help="write the Latin Extended table the pe_lang mod composes "
                                             "from, and the test vectors its composer is checked with")
     h.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods" / "pe_lang" / "pe_lang_latin.h")
@@ -358,6 +454,7 @@ def main(argv=None) -> int:
     c.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods/pe_lang/pe_lang_cyrillic_data.h")
     a = ap.parse_args(argv)
     return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build,
+            "export": cmd_export, "manifest": cmd_manifest,
             "latin-header": cmd_latin_header, "cyrillic-header": cmd_cyrillic_header}[a.cmd](a)
 
 

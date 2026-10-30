@@ -48,6 +48,59 @@ class PelangTest(unittest.TestCase):
                             "--lang", "xx", "--name", "Test", "-o", str(out)])
         return code, out
 
+    def test_the_manifest_builds_the_same_pack_without_any_game_text(self):
+        manifest = self.dir / "manifest.json"
+        self.assertEqual(pelang.main(["manifest", str(self.strings), "-o", str(manifest)]), 0)
+        body = manifest.read_text(encoding="utf-8")
+        for r in STRINGS:                                    # no source text in it
+            self.assertNotIn(r["text"], body)
+        self.assertNotIn("Ammo", body)
+        csv_path = self.csv_with({"item/000": "Balles +6", "dlg/M001/003": "Salut."})
+        packs = []
+        for source in (self.strings, manifest):
+            out = self.dir / f"{source.stem}.pelang"
+            self.assertEqual(pelang.main(["build", str(csv_path), "--strings", str(source), "--lang", "xx",
+                                          "--name", "Test", "-o", str(out)]), 0)
+            packs.append(out.read_bytes())
+        self.assertEqual(packs[0], packs[1])
+        bad = self.csv_with({"dlg/M001/003": "Salut.{wait}"})   # controls are still checked
+        self.assertEqual(pelang.main(["build", str(bad), "--strings", str(manifest), "--lang", "xx",
+                                      "--name", "Test", "-o", str(self.dir / "bad.pelang")]), 1)
+
+    def test_export_and_submissions_carry_no_source_text(self):
+        work = self.csv_with({"item/000": "Balles +6"})
+        sub = self.dir / "xx.csv"
+        self.assertEqual(pelang.main(["export", str(work), "-o", str(sub)]), 0)
+        with open(sub, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(list(rows[0]), pelang.SUBMISSION_COLUMNS)
+        self.assertEqual([(r["key"], r["translation"]) for r in rows], [("item/000", "Balles +6")])
+        args = ["--strings", str(self.strings), "--lang", "xx", "--name", "Test", "-o", str(self.dir / "s.pelang"),
+                "--submission"]
+        self.assertEqual(pelang.main(["build", str(sub)] + args), 0)
+        self.assertEqual(pelang.main(["build", str(work)] + args), 1)      # the working file has the English
+
+    def test_template_gives_each_page_its_scene(self):
+        rows = {r["key"]: r for r in pelang.template_rows(pelang.load_strings(self.strings))}
+        self.assertEqual(rows["dlg/M001/003"]["before"], STRINGS[2]["text"])
+        self.assertEqual(rows["dlg/M001/002"]["after"], "Bye.")
+        self.assertEqual(pelang.speaker("{name}: Hi"), "Aya")
+        self.assertEqual(pelang.speaker("Daniel: Aya!"), "Daniel")
+        self.assertEqual(pelang.speaker("Hello there"), "")
+
+    def test_consistency_warnings(self):
+        strings = {"item/054": {"text": "Chrysler Key1"},
+                   "dlg/M001/003": {"text": "You found the Chrysler Key1."}}
+        texts = {"item/054": "Clé Chrysler1", "dlg/M001/003": "Tu as trouvé la clé."}
+        self.assertTrue(any("item/054" in w for w in pelang.consistency(texts, strings, {})))
+        texts["dlg/M001/003"] = "Tu as trouvé la Clé Chrysler1."
+        self.assertEqual(pelang.consistency(texts, strings, {}), [])
+        self.assertTrue(pelang.consistency(texts, strings, {"found": "découvert"}))
+        out = self.dir / "u.pelang"
+        same = self.csv_with({"item/054": "Chrysler Key1"})                 # submitted untranslated
+        code = pelang.main(["build", str(same), "--strings", str(self.strings), "--lang", "xx", "--name", "T", "-o", str(out)])
+        self.assertEqual(code, 0)
+
     def test_advances_are_the_games_table(self):
         # gametext.ADVANCE once lost an entry and gave every code from 10 on its neighbour's width.
         import re
