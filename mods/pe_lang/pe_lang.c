@@ -10,7 +10,9 @@
  * room and its pages looked up as dlg/<bank>/<page>. A bank the pack doesn't know (another disc
  * version, a modded room) keeps the game's text.
  *
- * Packs may use the Latin Extended letters (é, ñ, ß, « ...): while a pack is in use they are
+ * Packs may use Latin Extended and Russian/Ukrainian/Belarusian Cyrillic. Cyrillic art is
+ * installed only for packs that draw its new cells; Latin codes remain stable. Accented letters
+ * (é, ñ, ß, « ...): while a pack is in use they are
  * composed from the game's own letters into the dialogue font's empty cells, codes 0x4D on (as
  * the font goes to VRAM, PE_HOOK_TIM_UPLOAD, or at once when F1 picks a pack); the dialogue box
  * gets their widths through g_TextboxGlyphWidths, and the menus through the resident glyph
@@ -28,6 +30,7 @@
 #include "pe1/textbox.h"
 #include "pe_hooks.h"
 #include "pe_lang_font.h"
+#include "pe_lang_cyrillic.h"
 #include "pe_lang_pack.h"
 #include "pe_lang_selection.h"
 #include "pe_translate.h"
@@ -77,17 +80,18 @@ static int on_text_page(void *ctx, void *user) {
     return 0;
 }
 
-/* ---- the Latin Extended glyphs ---- */
+/* ---- Latin Extended and opt-in Cyrillic glyphs ---- */
 
 #define FONT_CODES 0xF1u                 /* single-byte glyph codes the box can draw: 0x00-0xF0 */
 #define FONT_BYTES (128u * 256u)         /* the page's 4-bit pixels: 64 words x 256 rows */
 static TextboxGlyphSpacing s_widths[FONT_CODES];
+static int s_font_cyrillic;              /* installed only when the selected pack uses new Cyrillic cells */
 static int s_font_added;                 /* the glyphs are in VRAM and their widths installed */
 /* The page as the game uploaded it. The glyphs go only into a copy, and only while a pack is in
  * use: the empty cells they take are drawn by the game too (the rename grids), so with Game text
  * the font, widths and menu metrics must stay exactly the game's. */
 static unsigned char s_font_original[FONT_BYTES], s_font_work[FONT_BYTES];
-static unsigned char s_metrics_original[PE_LATIN_COUNT];
+static unsigned char s_metrics_original[FONT_CODES];
 static int s_font_saved, s_metrics_saved;
 static const RECT kFontRect = {0x140, 0, 64, 256};
 
@@ -110,14 +114,23 @@ static void install_widths(void) {
     memcpy(s_widths, g_TextboxGlyphSpacing, sizeof g_TextboxGlyphSpacing);
     for (unsigned k = 0; k < PE_LATIN_COUNT; ++k)
         s_widths[kPeLatinGlyphs[k].code].right = (u8)pe_lang_font_advance(&kPeLatinGlyphs[k], advance);
+    if (s_font_cyrillic)
+        for (unsigned k = 0; k < PE_CYRILLIC_COUNT; ++k)
+            s_widths[kPeCyrillicGlyphs[k].code].right = kPeCyrillicGlyphs[k].advance;
     g_TextboxGlyphWidths = s_widths;
     g_TextboxGlyphCount = FONT_CODES;
     if (!g_ResidentDataPack.directory.glyphMetrics) return;     /* not loaded yet: next scene */
     metrics = &g_ResidentDataPack.bytes[g_ResidentDataPack.directory.glyphMetrics];
     for (unsigned k = 0; k < PE_LATIN_COUNT; ++k) {
-        if (!s_metrics_saved) s_metrics_original[k] = metrics[kPeLatinGlyphs[k].code];
+        if (!s_metrics_saved) s_metrics_original[kPeLatinGlyphs[k].code] = metrics[kPeLatinGlyphs[k].code];
         metrics[kPeLatinGlyphs[k].code] = pe_lang_font_metric(&kPeLatinGlyphs[k], metrics);
     }
+    if (s_font_cyrillic)
+        for (unsigned k = 0; k < PE_CYRILLIC_COUNT; ++k) {
+            unsigned code = kPeCyrillicGlyphs[k].code;
+            if (!s_metrics_saved) s_metrics_original[code] = metrics[code];
+            metrics[code] = (unsigned char)(kPeCyrillicGlyphs[k].advance << 4);
+        }
     s_metrics_saved = 1;
 }
 
@@ -127,7 +140,12 @@ static void remove_widths(void) {
     g_TextboxGlyphCount = sizeof g_TextboxGlyphSpacing / sizeof *g_TextboxGlyphSpacing;
     if (s_metrics_saved && g_ResidentDataPack.directory.glyphMetrics) {
         unsigned char *metrics = &g_ResidentDataPack.bytes[g_ResidentDataPack.directory.glyphMetrics];
-        for (unsigned k = 0; k < PE_LATIN_COUNT; ++k) metrics[kPeLatinGlyphs[k].code] = s_metrics_original[k];
+        for (unsigned k = 0; k < PE_LATIN_COUNT; ++k) metrics[kPeLatinGlyphs[k].code] = s_metrics_original[kPeLatinGlyphs[k].code];
+        if (s_font_cyrillic)
+            for (unsigned k = 0; k < PE_CYRILLIC_COUNT; ++k) {
+                unsigned code = kPeCyrillicGlyphs[k].code;
+                metrics[code] = s_metrics_original[code];
+            }
     }
     s_metrics_saved = 0;
 }
@@ -135,7 +153,11 @@ static void remove_widths(void) {
 /* Put the glyphs into `pixels` (the page on its way to VRAM, or a copy) when a pack is in use. */
 static void add_glyphs(unsigned char *pixels) {
     int added = pe_lang_font_fill(pixels, 128, 256);
-    if (!s_font_added && added) pe_mod_log(MOD_ID, "added %d Latin Extended glyphs to the dialogue font", added);
+    s_font_cyrillic = pe_lang_pack_uses_glyphs(active_pack(), PE_CYRILLIC_FIRST_CODE, PE_CYRILLIC_LAST_CODE);
+    int extra = s_font_cyrillic ? pe_lang_cyrillic_fill(pixels, 128, 256) : 0;
+    if (!s_font_added && added + extra)
+        pe_mod_log(MOD_ID, "added %d Latin Extended and %d Cyrillic glyphs to the dialogue font", added, extra);
+    added += extra;
     if (added) {
         s_font_added = 1;
         install_widths();
@@ -156,7 +178,10 @@ static int on_tim_upload(void *ctx, void *user) {
 /* After the choice changes in F1: the page in VRAM and the widths follow it now. */
 static void font_follow_choice(void) {
     if (!s_font_saved) return;                       /* not uploaded yet: on_tim_upload decides */
-    if (active_pack() && !s_font_added) {
+    int want_cyrillic = pe_lang_pack_uses_glyphs(active_pack(), PE_CYRILLIC_FIRST_CODE, PE_CYRILLIC_LAST_CODE);
+    if (active_pack() && (!s_font_added || want_cyrillic != s_font_cyrillic)) {
+        if (s_font_added) remove_widths();
+        s_font_added = 0;
         memcpy(s_font_work, s_font_original, FONT_BYTES);
         add_glyphs(s_font_work);
         LoadImage((RECT *)&kFontRect, (u_long *)s_font_work);
@@ -164,6 +189,7 @@ static void font_follow_choice(void) {
         LoadImage((RECT *)&kFontRect, (u_long *)s_font_original);
         remove_widths();
         s_font_added = 0;
+        s_font_cyrillic = 0;
     }
 }
 
@@ -286,6 +312,7 @@ static void lang_shutdown(void) {
     if (s_font_added) {
         remove_widths();
         s_font_added = 0;
+        s_font_cyrillic = 0;
     }
     s_font_saved = 0;
 }

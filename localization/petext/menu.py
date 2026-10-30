@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 
 from . import gametext as gt
-from . import latin
+from . import latin, cyrillic
 
 LAYOUTS = Path(__file__).resolve().parent.parent / "data" / "menu_layouts.json"
 
@@ -47,6 +47,8 @@ def width(raw: bytes, metrics: bytes) -> int:
         if glyph >= 256:
             glyph -= 19
         m = latin_metric(glyph, metrics) if latin.FIRST_CODE <= glyph < 0xC0 else None
+        if glyph in cyrillic.BY_CODE:
+            m = min(cyrillic.BY_CODE[glyph].advance, 15) << 4
         w += ((metrics[glyph % 0x1B9] if m is None else m) >> 4) + extra
     return w
 

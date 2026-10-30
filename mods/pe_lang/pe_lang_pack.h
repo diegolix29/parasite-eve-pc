@@ -19,6 +19,9 @@ typedef struct PeLangPack {
 
 /* FNV-1a 32 of the key's bytes, as pelang.py hashes it. */
 uint32_t pe_lang_hash(const char *key);
+/* Whether a validated pack draws a plain glyph in this inclusive range. Command operands
+ * and extra-page glyph operands do not select a single-byte font cell. */
+int pe_lang_pack_uses_glyphs(const PeLangPack *pack, unsigned first, unsigned last);
 
 /* Take `data` (malloc'd, `size` bytes) as a pack after checking every offset in it. Returns 0 and
  * owns the data, or -1 and frees it: a damaged pack is never half used. */

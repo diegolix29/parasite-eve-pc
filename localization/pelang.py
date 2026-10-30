@@ -168,7 +168,7 @@ def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], na
     except (ValueError, TypeError, OverflowError) as e:
         msg = "invalid text/tag: " + str(e)
         if "no glyph" in msg:
-            msg += " (the font has A-Z, a-z, digits, basic punctuation and the Latin Extended set in petext/latin.py)"
+            msg += " (the font has A-Z, a-z, digits, basic punctuation, Latin Extended and Russian/Ukrainian/Belarusian Cyrillic)"
         return None, [msg], warnings
     try:
         validation.check(raw, source["text"])
@@ -333,9 +333,18 @@ def main(argv=None) -> int:
     h.add_argument("--vectors", type=Path, default=ROOT.parent / "tests" / "pe_lang_font_vectors.h")
     for command in (t, p, b):
         command.add_argument("--mod-strings", type=Path, help="optional mod-owned key and layout manifest")
+    c = sub.add_parser("cyrillic-header", help="regenerate authored Cyrillic glyph data")
+    c.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods/pe_lang/pe_lang_cyrillic_data.h")
     a = ap.parse_args(argv)
     return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build,
-            "latin-header": cmd_latin_header}[a.cmd](a)
+            "latin-header": cmd_latin_header, "cyrillic-header": cmd_cyrillic_header}[a.cmd](a)
+
+
+def cmd_cyrillic_header(a) -> int:
+    from petext import cyrillic
+    cyrillic.write_c_header(a.out)
+    print(f"wrote {a.out}: {len(cyrillic.GLYPHS)} authored Cyrillic glyphs")
+    return 0
 
 
 def cmd_latin_header(a) -> int:

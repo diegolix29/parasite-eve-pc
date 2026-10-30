@@ -19,6 +19,21 @@ uint32_t pe_lang_hash(const char *key) {
     return h;
 }
 
+int pe_lang_pack_uses_glyphs(const PeLangPack *pack, unsigned first, unsigned last) {
+    if (!pack || !pack->data || first > last || last >= 0xF1) return 0;
+    for (unsigned i = 0; i < pack->count; ++i) {
+        const unsigned char *entry = pack->data + HEADER_SIZE + i * ENTRY_SIZE;
+        const unsigned char *p = pack->data + rd32(pack->data + 12) + rd32(entry + 4);
+        while (*p != 0xFF) {
+            unsigned c = *p++;
+            if (c < 0xF1) { if (c >= first && c <= last) return 1; }
+            else if (c == 0xFB) { unsigned sub = *p++; if (sub == 7 || sub == 9) ++p; }
+            else if (c == 0xFC || c == 0xFD) ++p;
+        }
+    }
+    return 0;
+}
+
 static void copy_field(char *out, const unsigned char *in, size_t size) {
     memcpy(out, in, size);
     out[size - 1] = '\0';

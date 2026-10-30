@@ -95,7 +95,7 @@ class PelangTest(unittest.TestCase):
         self.assertEqual(entries[pelang.fnv1a("dlg/M001/003")], gt.encode("Salut.") + b"\xf9")
 
     def test_build_refuses_missing_glyphs_and_changed_choices(self):
-        code, _ = self.build({"item/000": "Боеприпасы"})          # Cyrillic: not in the font yet
+        code, _ = self.build({"item/000": "日本語"})              # CJK: not in the game font yet
         self.assertEqual(code, 1)
         code, _ = self.build({"item/000": "Munitions é"})          # Latin Extended: fine
         self.assertEqual(code, 0)

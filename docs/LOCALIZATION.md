@@ -21,11 +21,12 @@ the [Parasite Eve Localization Mod Plan](https://claude.ai/artifact/2NpmecRhhgMB
 | Text drawn into images and text compiled into the port | Not keyed yet |
 | Accented letters (Latin Extended: French, German, Spanish, Italian, Portuguese, Polish, Czech, Turkish) | Done |
 | Japanese semantic proofreading | Pending human review; extraction/alignment does not establish translation accuracy |
-| Cyrillic | Not started |
+| Cyrillic | Russian, Ukrainian and Belarusian alphabets supported; modular authored glyphs and per-pack activation |
 | Chinese, Japanese, Korean | Needs the per-area glyph pages (phase 5) |
 
 A pack can use the US font's glyphs (A-Z, a-z, 0-9, space and `+ - % & ! ? " ' . : , /`) and the
-Latin Extended set below. The compiler names any other character it finds.
+Latin Extended set below and the Russian/Ukrainian/Belarusian Cyrillic alphabets. The compiler
+names unsupported characters; other extended Cyrillic alphabets and CJK are not implied.
 
 ## The Latin Extended letters
 
@@ -259,3 +260,54 @@ pages, image text and Japanese human proofreading are still separate milestones.
   own text renderer. Those language/font milestones remain pending.
 - The compiler still reports the two unproven phone-page layouts listed in the pilot README;
   neither warnings nor partial semantic coverage are described as a proofread full translation.
+
+## Cyrillic
+
+The Russian alphabet and Ukrainian/Belarusian additions are supported in both cases: **76 Unicode
+characters**. Visually identical ASCII/Latin forms share existing glyph codes (including Ё/ё with
+Ë/ë and Ї/ї with Ï/ï). The other **52 glyphs** are authored in `petext/cyrillic.py`, assigned
+`0xBC..0xEF`, after the stable Latin range `0x4D..0xBB` and below the command range starting at
+`0xF1`. Every new cell was verified empty in the retail USA font. No game font art is distributed.
+
+The compiler accepts these characters wherever existing extended text is allowed, including
+dialogue, item names, system strings and `pe_tr` mod labels. It uses the Cyrillic advances for
+dialogue layout and the runtime's metric bytes for menu layout. Mixed Latin/Cyrillic text is
+supported without a script flag or a new pack format. The Spanish pilot recompiles unchanged.
+Packs remain v1, and missing translations keep the original game text.
+
+`pe_lang_cyrillic.c/.h` renders the authored strokes and native-style shadow, checks page bounds
+and never overwrites occupied cells. `pe_lang_cyrillic_data.h` is generated from the Python module:
+
+```sh
+python -I localization/pelang.py cyrillic-header
+```
+
+The runtime scans validated pack strings for new single-byte glyph codes, skipping command and
+extra-page operands. A Latin-only pack does not install the new Cyrillic pixels or metrics.
+Switching between Cyrillic, Latin and Game text rebuilds from the saved original page and restores
+the previous metrics before applying the next set. Font uploads and scene changes reinstall the
+chosen set through the existing hooks. Existing Latin code assignments and pack identity are unchanged.
+
+Limits: this covers Russian, Ukrainian and Belarusian, not every letter in the Unicode Cyrillic
+blocks. Serbian, Macedonian, Kazakh and other extended sets need more font capacity/design work;
+the compiler rejects unsupported letters. CJK, image labels, translations/proofreading of complete
+languages and broader mod-message coverage remain separate milestones. Glyphs should be reviewed
+by fluent readers at the game's native resolution before publishing a language pack.
+
+### Cyrillic verification
+
+All new fixtures, vectors, previews and smoke packs stay in local `pe-native-debug`:
+
+- `tools/test_cyrillic.py`: all alphabets, aliases, code ranges, generated-header consistency,
+  dialogue/menu advances, descenders/shadows and an actual-disc font preview.
+- `tools/pe_cyrillic_test.c`: Python/native pixel equality for all 52 cells, occupied-cell and
+  bounds guards, neighbouring pixels, idempotence, command-operand skipping and Latin-only pack detection.
+- `tools/pe_cyrillic_switch_test.c`: production font-switching code restores exact pixels,
+  menu metrics and original dialogue-width pointers across Latin → Cyrillic → Latin → Game text.
+- Local headless suite with a mixed-script smoke pack: **11/11 passed**, including missing,
+  unselected and disabled-pack equivalence, inventory/phone text and Wayne's six menu lines.
+- The existing compiler/layout suite: **31 passed**; the existing native pack/font/selection checks:
+  **3 passed**. Its old unsupported-character sample was changed from Russian to still-unsupported
+  CJK; the new Cyrillic test suite was not added to the game repository.
+- Native game rebuild succeeded. Captured Cyrillic inventory, save-phone choice and Wayne menu
+  frames were visually reviewed. The test pack is not a Russian translation release.

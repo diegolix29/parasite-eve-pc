@@ -77,8 +77,9 @@ _TAG = re.compile(r"\{([gx][0-9A-F]{2}|[a-z/]+[0-9]*)(?: ([0-9A-Fa-f]+))?\}")
 
 def encode(text: str, extended: bool = False) -> bytes:
     """`text` in the game's glyph code. With `extended`, letters of the Latin Extended set
-    (petext/latin.py: é, ñ, ß, « ...) are allowed too; pe_lang adds their glyphs to the font."""
-    latin = _latin_codes() if extended else {}
+    (petext/latin.py: é, ñ, ß, « ...) and Cyrillic (petext/cyrillic.py) are allowed too;
+    pe_lang adds their glyphs to the font."""
+    extra = _latin_codes() if extended else {}
     out, i = bytearray(), 0
     while i < len(text):
         if text[i] == "{":
@@ -109,8 +110,8 @@ def encode(text: str, extended: bool = False) -> bytes:
             ch = text[i]
             if ch in CODE_OF:
                 out.append(CODE_OF[ch])
-            elif ch in latin:
-                out.append(latin[ch])
+            elif ch in extra:
+                out.append(extra[ch])
             else:
                 raise ValueError(f"no glyph for {ch!r}")
             i += 1
@@ -119,11 +120,15 @@ def encode(text: str, extended: bool = False) -> bytes:
 
 def _latin_codes() -> dict[str, int]:
     from . import latin
-    return latin.CODE_OF
+    from . import cyrillic
+    return {**latin.CODE_OF, **cyrillic.CODE_OF}
 
 
 def _latin_advance(code: int) -> int | None:
     from . import latin
+    from . import cyrillic
+    if code in cyrillic.BY_CODE:
+        return cyrillic.BY_CODE[code].advance
     g = latin.BY_CODE.get(code)
     if not g:
         return None
