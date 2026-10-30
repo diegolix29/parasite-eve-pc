@@ -89,18 +89,46 @@ static int pe_contains(const u8 *b, unsigned n, const char *ascii) {
 
 const u8 *pe_field_wayne_text(void);   /* pe_field_wayne.c: Warner's version of his menu */
 
+/* Wayne's menu is recognised by its English page ("Discard junk", "Hold equipment"). A language
+ * pack (pe_lang) shows another text for that page, so PE_HOOK_TEXT_PAGE notes the page while it
+ * is still the game's (before pe_lang) and the text its box will draw (after every handler). */
+static int s_page_is_wayne;
+static const u8 *s_wayne_page;   /* what a box shows for Wayne's menu page, in whatever language */
+
+static int pe_english_wayne(const u8 *msg) {
+    unsigned n = 0;
+    while (n < PE_GAMETEXT_MAX - 1 && msg[n] != G_END) ++n;
+    return pe_contains(msg, n, "Discard junk") || pe_contains(msg, n, "Hold equipment");
+}
+
+static int pe_on_page_game(void *ctx, void *user) {
+    PeHookTextPage *page = ctx;
+    (void)user;
+    s_page_is_wayne = page->message && *page->message && pe_english_wayne(*page->message);
+    return 0;
+}
+
+static int pe_on_page_drawn(void *ctx, void *user) {
+    PeHookTextPage *page = ctx;
+    (void)user;
+    if (page->message && s_page_is_wayne) s_wayne_page = *page->message;
+    else if (page->message && *page->message == s_wayne_page) s_wayne_page = NULL;   /* reused for another page */
+    s_page_is_wayne = 0;
+    return 0;
+}
+
 /* Is `msg` Wayne's menu (or Warner's)? Copies it into s_orig if so. */
 static int pe_is_wayne_menu(const u8 *msg) {
     unsigned n = 0, choice_at = PE_GAMETEXT_MAX;
     int count;
-    const int warner = msg && msg == pe_field_wayne_text();
+    const int known = msg && (msg == pe_field_wayne_text() || msg == s_wayne_page);
     if (!msg || msg == s_buf) return 0;
     while (n < PE_GAMETEXT_MAX - 1 && msg[n] != G_END) {
         if (n >= 2 && msg[n - 2] == G_CODE && msg[n - 1] == G_CHOICE && choice_at == PE_GAMETEXT_MAX) choice_at = n;
         ++n;
     }
     if (choice_at == PE_GAMETEXT_MAX || n >= PE_GAMETEXT_MAX - 1) return 0;
-    if (!warner && !pe_contains(msg, n, "Discard junk") && !pe_contains(msg, n, "Hold equipment")) return 0;
+    if (!known && !pe_english_wayne(msg)) return 0;
     count = msg[choice_at] & 7;
     if (count < 2 || count + 1 > PE_CHOICE_MAX) return 0;    /* room for Workshop */
     memcpy(s_orig, msg, n + 1);
@@ -558,11 +586,15 @@ static int pe_on_reset(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     pe_reset();
+    s_wayne_page = NULL;          /* a new room's bank can load where the last one was */
     return 0;
 }
 
 void pe_wayne_menu_register(const char *mod_id) {
     pe_hook_add(PE_HOOK_TEXTBOXES, pe_on_textboxes, NULL, PE_PRIORITY_NORMAL, mod_id);
+    /* around every other page handler (pe_lang's is EARLY): the game's page, then the drawn one */
+    pe_hook_add(PE_HOOK_TEXT_PAGE, pe_on_page_game, NULL, PE_PRIORITY_EARLY - 100, mod_id);
+    pe_hook_add(PE_HOOK_TEXT_PAGE, pe_on_page_drawn, NULL, PE_PRIORITY_LATE + 100, mod_id);
     pe_hook_add(PE_HOOK_SCENE_START, pe_on_reset, NULL, PE_PRIORITY_NORMAL, mod_id);
     pe_hook_add(PE_HOOK_SAVE_READ, pe_on_reset, NULL, PE_PRIORITY_NORMAL, mod_id);
 }
