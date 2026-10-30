@@ -133,6 +133,8 @@ int pe_lang_pack_load(PeLangPack *pack, const char *path) {
 }
 
 void pe_lang_pack_free(PeLangPack *pack) {
+    if (pack->utf8) for (unsigned i=0;i<pack->count;++i) free(pack->utf8[i]);
+    free(pack->utf8);
     free(pack->data);
     memset(pack, 0, sizeof *pack);
 }

@@ -35,6 +35,7 @@
 #include "pe1/mod_text.h"
 #include "pe_lang_pack.h"
 #include "pe_lang_selection.h"
+#include "pe_lang_text.h"
 #include "pe_translate.h"
 #include "pe_mod_host.h"
 #include "pe_mod_menu.h"
@@ -324,10 +325,26 @@ static const unsigned char *mod_text(const char *key) {
     return key && !strncmp(key, "mod/", 4) ? pe_lang_pack_find(active_pack(), key) : NULL;
 }
 static const PeTranslationsApi s_translations = {mod_text};
+static const char *interface_text(const char *source) {
+    char key[40];
+    snprintf(key,sizeof key,"mod/ui/%08x",pe_lang_hash(source));
+    return pe_lang_text_utf8((PeLangPack *)active_pack(),key);
+}
+static unsigned interface_encode(unsigned char *out,unsigned size,const char *text) {
+    return pe_lang_text_encode(active_pack(),out,size,text);
+}
+static const char *interface_item(unsigned id) {
+    char key[32];
+    if (!id || id>255) return NULL;
+    snprintf(key,sizeof key,"item/%03u",id-1);
+    return pe_lang_text_utf8((PeLangPack *)active_pack(),key);
+}
+static const PeInterfaceTextApi s_interface_text = {interface_text,interface_encode,interface_item};
 
 static int lang_init(void) {
     char dir[4096];
     pe_service_publish("translations", 1, &s_translations, MOD_ID);
+    pe_service_publish("interface_text", 1, &s_interface_text, MOD_ID);
     const char *base = SDL_GetBasePath();
     if (base) {
         snprintf(dir, sizeof dir, "%slang/", base);

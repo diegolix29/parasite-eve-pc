@@ -158,6 +158,8 @@ def consistency(entries_text: dict[str, str], strings: dict[str, dict], glossary
 
 
 def read_csv(path: Path) -> list[dict]:
+    if Path(path).is_dir():
+        return [row for module in sorted(Path(path).rglob('*.csv')) for row in read_csv(module)]
     with open(path, newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
 
@@ -452,7 +454,13 @@ def main(argv=None) -> int:
         command.add_argument("--mod-strings", type=Path, help="optional mod-owned key and layout manifest")
     c = sub.add_parser("cyrillic-header", help="regenerate authored Cyrillic glyph data")
     c.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods/pe_lang/pe_lang_cyrillic_data.h")
+    u = sub.add_parser("interface-header", help="regenerate the mod interface Unicode bridge")
+    u.add_argument("out", type=Path, nargs="?", default=ROOT.parent / "mods/pe_lang/pe_lang_text_data.h")
     a = ap.parse_args(argv)
+    if a.cmd == "interface-header":
+        from petext import interfaces
+        interfaces.write_header(a.out)
+        return 0
     return {"template": cmd_template, "pseudo": cmd_pseudo, "build": cmd_build,
             "export": cmd_export, "manifest": cmd_manifest,
             "latin-header": cmd_latin_header, "cyrillic-header": cmd_cyrillic_header}[a.cmd](a)

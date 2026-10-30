@@ -8,6 +8,7 @@
 #include "pe_gametext.h"
 #include "pe1/mod_text.h"
 #include "pe_mod_host.h"
+#include "pe_localize.h"
 
 typedef struct PeTranslationsApi {
     const unsigned char *(*find)(const char *key);
@@ -36,5 +37,19 @@ static inline void pe_t_tr(PeText *t, const char *key, const char *english, unsi
     }
     if (!text) { pe_t_str(t, english); return; }
     for (unsigned i = 0; i < n; ++i) pe_t_byte(t, text[i]);
+}
+/* Player-facing UTF-8 builders opt in here. The old ASCII helpers stay dependency-free,
+ * and v1 pe_tr callers retain their existing ABI and explicit-key contracts. */
+static inline unsigned char *pe_tr_ascii(unsigned char *out, unsigned size, const char *source) {
+    const PeInterfaceTextApi *api = pe_interface_text();
+    if (!size) return out;
+    const char *text = pe_l10n_ui(source);
+    if (api && api->encode) { api->encode(out, size, text); return out; }
+    return pe_text_from_ascii(out, size, text);
+}
+static inline void pe_t_ui(PeText *t, const char *source) {
+    unsigned char text[PE_GAMETEXT_MAX];
+    pe_tr_ascii(text, sizeof text, source);
+    for (unsigned i=0; text[i] != G_END; ++i) pe_t_byte(t,text[i]);
 }
 #endif

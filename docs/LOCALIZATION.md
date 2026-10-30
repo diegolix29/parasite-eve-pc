@@ -16,8 +16,8 @@ the [Parasite Eve Localization Mod Plan](https://claude.ai/artifact/2NpmecRhhgMB
 | Translator template, test language, pack compiler (`pelang.py`) | Done |
 | `pe_lang` mod: F1 > Language, item names and descriptions | Done |
 | System messages, misc table, room dialogue | Done: `PE_HOOK_TEXT_LOOKUP` from every table, `PE_HOOK_TEXT_PAGE` |
-| Spanish pilot | 174 draft entries: 103 system, 21 item names, 30 dialogue pages and 20 mod labels; partial, needs Spanish-speaker review |
-| Mod-owned text (`pe_tr`) | Optional translation service and strict single-line manifest; Wayne/Workshop labels integrated first |
+| Spanish pilot | Latin American Spanish: 1,349 entries across eleven modules for menus, items and mod interfaces; draft, needs Spanish-speaker review |
+| Mod-owned text (`pe_tr`) | Explicit-key fragments plus optional UTF-8 interface translation, checked printf templates, Catalog/shops/inventory/collection integration |
 | Text drawn into images and text compiled into the port | Not keyed yet |
 | Accented letters (Latin Extended: French, German, Spanish, Italian, Portuguese, Polish, Czech, Turkish) | Done |
 | Japanese semantic proofreading | Pending human review; extraction/alignment does not establish translation accuracy |
@@ -442,3 +442,19 @@ All new test source, packs, fonts previews, native executables and captures rema
 
 The smoke pack is not a published translation. It retains the Spanish pilot's two unproven
 phone-layout warnings (`dlg/M026/006` and `dlg/M290/006`); those pages still need in-game review.
+
+
+## Latin American Spanish expansion
+
+The active Spanish pack is `localization/pilots/es-419/`, with separate CSV modules for native
+menus, names, descriptions, effects/help, Wayne fragments and interface ownership areas. See
+[pilot scope, build steps, vocabulary and verification](../localization/pilots/es-419/README.md).
+The original `es.csv` remains as a historical pilot; the new pack has identity `es-419` /
+`Español latino` and does not replace a user's selected language automatically.
+
+`pe_localize.h` exposes optional display-only UTF-8 translations through `interface_text` v1.
+`pe_lang_text.c/.h` supplies a bounded game-glyph/UTF-8 bridge and per-pack label cache. Existing
+v1/v2 pack formats and the explicit `translations` v1 API remain compatible. Shared printf
+contracts and Unicode-header generation live in `petext/interfaces.py`. Native/F1 renderers opt
+in at presentation boundaries; settings paths, save IDs and collection keys are not translated.
+New tests, test shims, packs and visual evidence stay in the local debug repository.

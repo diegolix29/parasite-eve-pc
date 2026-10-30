@@ -10,6 +10,7 @@
 
 #include "pe_ui.h"
 #include "pe_utf8.h"
+#include "pe_localize.h"
 
 const PeColor pe_ui_panel = {0.075f, 0.082f, 0.102f, 0.96f};
 const PeColor pe_ui_border = {1.0f, 1.0f, 1.0f, 0.10f};
@@ -79,6 +80,7 @@ void pe_ui_fill_round_rect(PeSurface *s, float x, float y, float w, float h, flo
 }
 
 float pe_ui_text_width(const char *text, float em) {
+    text = pe_l10n_ui(text);
     const float scale = stbtt_ScaleForMappingEmToPixels(&s_font, em);
     float width = 0.0f;
     while (*text) {
@@ -90,6 +92,7 @@ float pe_ui_text_width(const char *text, float em) {
 }
 
 void pe_ui_draw_text(PeSurface *s, float x, float baseline, float em, const char *text, PeColor c, PeAlign align) {
+    text = pe_l10n_ui(text);
     enum { GLYPH_MAX = 256 };
     static uint8_t glyph[GLYPH_MAX * GLYPH_MAX];
     const float scale = stbtt_ScaleForMappingEmToPixels(&s_font, em);

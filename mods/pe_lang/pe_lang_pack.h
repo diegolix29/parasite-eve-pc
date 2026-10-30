@@ -16,6 +16,7 @@ typedef struct PeLangPack {
     unsigned count;
     unsigned entries_at, cjk_offset, cjk_count;
     char lang[16], name[32];
+    char **utf8; /* optional decoded plain interface labels, owned; never serialized */
 } PeLangPack;
 
 /* FNV-1a 32 of the key's bytes, as pelang.py hashes it. */

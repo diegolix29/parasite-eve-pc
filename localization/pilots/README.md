@@ -1,4 +1,9 @@
-# Spanish pilot
+# Spanish pilots
+
+The active expanded draft is [Latin American Spanish](es-419/README.md): 1,349 entries covering
+menus, items and player-facing mod interfaces. The section below documents the historical pilot.
+
+## Original pilot
 
 `es.csv` is a partial Spanish draft with **174 entries**: 103 system/menu/save strings, 21 item
 names, 30 dialogue pages (opening, phone/inventory choices and Wayne's storage menus), and 20
