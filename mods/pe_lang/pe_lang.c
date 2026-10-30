@@ -31,6 +31,8 @@
 #include "pe_hooks.h"
 #include "pe_lang_font.h"
 #include "pe_lang_cyrillic.h"
+#include "pe_lang_cjk.h"
+#include "pe1/mod_text.h"
 #include "pe_lang_pack.h"
 #include "pe_lang_selection.h"
 #include "pe_translate.h"
@@ -54,6 +56,12 @@ static int on_text_lookup(void *ctx, void *user) {
     PeHookTextLookup *lookup = ctx;
     const unsigned char *text = pe_lang_pack_table(active_pack(), lookup->table, lookup->index);
     (void)user;
+    if (text && lookup->persistent) {
+        /* IDs in the CJK dictionary belong to this pack, not to the save format.
+         * Rename defaults must remain readable after switching/removing a pack. */
+        for (const unsigned char *p = text; *p != 0xFF; ++p)
+            if (Pe_ExtendedGlyph(p, NULL)) return 0;
+    }
     if (text) *lookup->text = (void *)text;
     return 0;
 }
@@ -93,6 +101,9 @@ static int s_font_added;                 /* the glyphs are in VRAM and their wid
 static unsigned char s_font_original[FONT_BYTES], s_font_work[FONT_BYTES];
 static unsigned char s_metrics_original[FONT_CODES];
 static int s_font_saved, s_metrics_saved;
+static PeCjkCache s_cjk;
+static const PeLangPack *s_font_pack;
+static int s_cjk_warned;
 static const RECT kFontRect = {0x140, 0, 64, 256};
 
 /* The US dialogue font page: 4-bit, its image at VRAM 0x140,0 (64 x 256 words), its palette at
@@ -172,6 +183,9 @@ static int on_tim_upload(void *ctx, void *user) {
     s_font_saved = 1;
     s_font_added = 0;
     if (active_pack()) add_glyphs(pixels);
+    s_font_pack = active_pack();
+    pe_cjk_reset(&s_cjk, s_font_pack, s_font_original);
+    s_cjk_warned = 0;
     return 0;
 }
 
@@ -179,17 +193,24 @@ static int on_tim_upload(void *ctx, void *user) {
 static void font_follow_choice(void) {
     if (!s_font_saved) return;                       /* not uploaded yet: on_tim_upload decides */
     int want_cyrillic = pe_lang_pack_uses_glyphs(active_pack(), PE_CYRILLIC_FIRST_CODE, PE_CYRILLIC_LAST_CODE);
-    if (active_pack() && (!s_font_added || want_cyrillic != s_font_cyrillic)) {
+    if (active_pack() && (!s_font_added || want_cyrillic != s_font_cyrillic || s_font_pack != active_pack())) {
         if (s_font_added) remove_widths();
         s_font_added = 0;
         memcpy(s_font_work, s_font_original, FONT_BYTES);
         add_glyphs(s_font_work);
+        DrawSync(0);
         LoadImage((RECT *)&kFontRect, (u_long *)s_font_work);
     } else if (!active_pack() && s_font_added) {
+        DrawSync(0);
         LoadImage((RECT *)&kFontRect, (u_long *)s_font_original);
         remove_widths();
         s_font_added = 0;
         s_font_cyrillic = 0;
+    }
+    if (s_font_pack != active_pack()) {
+        s_font_pack = active_pack();
+        pe_cjk_reset(&s_cjk, s_font_pack, s_font_original);
+        s_cjk_warned = 0;
     }
 }
 
@@ -200,6 +221,37 @@ static int on_scene_start(void *ctx, void *user) {
     (void)user;
     s_bank = NULL;
     if (s_font_added) install_widths();
+    return 0;
+}
+
+static void cjk_sync(void *user) { (void)user; DrawSync(0); }
+static int cjk_upload(unsigned cell, const unsigned char *pixels, void *user) {
+    (void)user;
+    RECT r = {(short)(0x140 + cell%21*3), (short)(cell/21*12), 3, 12};
+    /* LoadImage's source is word-aligned even when pack text has odd byte length. */
+    unsigned int aligned[18];
+    memcpy(aligned, pixels, sizeof aligned);
+    return LoadImage(&r, aligned);
+}
+static int on_text_glyph(void *ctx, void *user) {
+    PeHookTextGlyph *g = ctx;
+    unsigned id, cell = 0x2C; /* visible '?' if the frame exhausts its cache */
+    const PeLangPack *pack = active_pack();
+    (void)user;
+    if (!pack || !Pe_ExtendedGlyph(g->text, &id) || id >= pack->cjk_count) return 0;
+    g->bytes = 4; g->advance = 12;
+    if (g->draw && (!s_font_saved || !pe_cjk_resolve(&s_cjk,id,&cell,cjk_sync,cjk_upload,NULL))) {
+        if (!s_cjk_warned) {
+            pe_mod_log(MOD_ID,"CJK glyph cache unavailable/full (%u eligible cells); showing ?",s_cjk.count);
+            s_cjk_warned = 1;
+        }
+    }
+    g->u = (unsigned char)(cell%21*12); g->v = (unsigned char)(cell/21*12);
+    return 1;
+}
+static int on_cjk_frame(void *ctx, void *user) {
+    (void)ctx; (void)user;
+    pe_cjk_frame(&s_cjk);
     return 0;
 }
 
@@ -218,7 +270,7 @@ static void load_dir(const char *dir) {
         PeLangPack loaded, *pack = &loaded;
         snprintf(path, sizeof path, "%s%s", dir, files[i]);
         if (pe_lang_pack_load(pack, path)) {
-            pe_mod_log(MOD_ID, "skipped %s: invalid or unsafe version %u language pack", path, PE_LANG_PACK_VERSION);
+            pe_mod_log(MOD_ID, "skipped %s: invalid/unsafe pack or unsupported format (supported: v1/v2)", path);
             continue;
         }
         PeLangSelection id;
@@ -293,6 +345,8 @@ static int lang_init(void) {
     pe_hook_add(PE_HOOK_TEXT_PAGE, on_text_page, NULL, PE_PRIORITY_EARLY, MOD_ID);
     pe_hook_add(PE_HOOK_SCENE_START, on_scene_start, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     pe_hook_add(PE_HOOK_TIM_UPLOAD, on_tim_upload, NULL, PE_PRIORITY_NORMAL, MOD_ID);
+    pe_hook_add(PE_HOOK_TEXT_GLYPH, on_text_glyph, NULL, PE_PRIORITY_NORMAL, MOD_ID);
+    pe_hook_add(PE_HOOK_FRAME_DRAWN, on_cjk_frame, NULL, PE_PRIORITY_NORMAL, MOD_ID);
 
     pe_menu_begin("Language");
     pe_menu_top_page("Language", "Play with the game's text from a language pack.", 0);
@@ -315,6 +369,8 @@ static void lang_shutdown(void) {
         s_font_cyrillic = 0;
     }
     s_font_saved = 0;
+    s_font_pack = NULL;
+    pe_cjk_reset(&s_cjk, NULL, NULL);
 }
 
 const PeMod pe_mod_pe_lang = {MOD_ID, "Language packs", "0.1", NULL, lang_init, lang_shutdown};

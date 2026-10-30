@@ -29,12 +29,18 @@ def _is_choice(c: bytes) -> bool:
     return c[0] == 0xFB and c[1] == CHOICE
 
 
-def _wrap_line(line: list[bytes], width: int, name_px: int, indent: bool) -> list[list[bytes]]:
+def _wrap_line(line: list[bytes], width: int, name_px: int, indent: bool, characters=None) -> list[list[bytes]]:
     """One line's commands as the lines they fill when broken at spaces."""
     out, cur, cur_w = [], [], 0
     words, word = [], []
     for c in line:                           # words keep their leading spaces
-        if c[0] == SPACE and word and word[-1][0] != SPACE:
+        chars = characters or {}
+        prev = chars.get(word[-1], '') if word else ''
+        current = chars.get(c, '')
+        cjk_break = bool(word and (prev or current) and
+                         (not prev or prev not in '（［｛〈《「『【〔〖〘〚“‘') and
+                         (not current or current not in '、。，．！？：；）］｝〉》」』】〕〗〙〛”’ー々ぁぃぅぇぉっゃゅょァィゥェォッャュョ'))
+        if (c[0] == SPACE and word and word[-1][0] != SPACE) or cjk_break:
             words.append(word)
             word = []
         word.append(c)
@@ -56,7 +62,7 @@ def _wrap_line(line: list[bytes], width: int, name_px: int, indent: bool) -> lis
     return out
 
 
-def wrap(raw: bytes, width: int, lines: int, english: bytes, name_px: int = NAME_WIDTH) -> tuple[bytes, int]:
+def wrap(raw: bytes, width: int, lines: int, english: bytes, name_px: int = NAME_WIDTH, characters=None) -> tuple[bytes, int]:
     """(the page rewrapped to the box, the number of screens added)."""
     indent_line, indent_screen = indents(english)
     screens, cur = [], []
@@ -83,7 +89,7 @@ def wrap(raw: bytes, width: int, lines: int, english: bytes, name_px: int = NAME
             if choice_at is not None and i > choice_at:
                 wrapped.append(r)            # a choice row
             else:
-                wrapped += _wrap_line(r, width, name_px, indent_line)
+                wrapped += _wrap_line(r, width, name_px, indent_line, characters)
         groups = [wrapped]
         if choice_at is None and len(wrapped) > lines:
             groups = [wrapped[i:i + lines] for i in range(0, len(wrapped), lines)]

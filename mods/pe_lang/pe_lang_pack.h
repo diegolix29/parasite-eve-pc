@@ -8,12 +8,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define PE_LANG_PACK_VERSION 1u
+#define PE_LANG_PACK_VERSION 1u /* original format; readers additionally accept CJK v2 */
 
 typedef struct PeLangPack {
     unsigned char *data;    /* the whole file, owned by the pack */
     size_t size;
     unsigned count;
+    unsigned entries_at, cjk_offset, cjk_count;
     char lang[16], name[32];
 } PeLangPack;
 

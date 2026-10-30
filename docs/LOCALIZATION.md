@@ -22,11 +22,12 @@ the [Parasite Eve Localization Mod Plan](https://claude.ai/artifact/2NpmecRhhgMB
 | Accented letters (Latin Extended: French, German, Spanish, Italian, Portuguese, Polish, Czech, Turkish) | Done |
 | Japanese semantic proofreading | Pending human review; extraction/alignment does not establish translation accuracy |
 | Cyrillic | Russian, Ukrainian and Belarusian alphabets supported; modular authored glyphs and per-pack activation |
-| Chinese, Japanese, Korean | Needs the per-area glyph pages (phase 5) |
+| Chinese, Japanese, Korean | Optional external-font compilation, v2 glyph dictionaries and a native cache; see CJK scope and limits below |
 
 A pack can use the US font's glyphs (A-Z, a-z, 0-9, space and `+ - % & ! ? " ' . : , /`) and the
 Latin Extended set below and the Russian/Ukrainian/Belarusian Cyrillic alphabets. The compiler
-names unsupported characters; other extended Cyrillic alphabets and CJK are not implied.
+names unsupported characters. CJK requires an explicit font input and uses the separate encoding
+described below; other extended Cyrillic alphabets are not implied.
 
 ## The Latin Extended letters
 
@@ -161,7 +162,8 @@ through.
 
 ## Pack format
 
-Little-endian, version 1 (`pelang.py` writes it, `mods/pe_lang/pe_lang_pack.c` reads it):
+Little-endian, original version 1 (`pelang.py` writes it, `mods/pe_lang/pe_lang_pack.c` reads it).
+CJK uses the v2 extension documented below; non-CJK output retains this format:
 
 | Part | Layout |
 | --- | --- |
@@ -229,7 +231,8 @@ There is no dependency requiring economy mods to install or enable pe_lang.
 The key and layout catalogue is `localization/data/mod_strings.json`. Each entry supplies the
 mod's own fallback text, a glyph limit and a pixel limit. Add it explicitly with `--mod-strings`
 to `pelang.py template`, `pseudo` or `build`. It is merged with extracted game keys in memory;
-duplicate keys, unknown keys and namespace collisions are rejected. The pack format stays v1.
+duplicate keys, unknown keys and namespace collisions are rejected. Non-CJK packs stay v1; CJK
+mod labels use the same optional v2 dictionary as game text.
 `petext/modtext.py` owns this validation separately from game dialogue and menu checks. A mod label
 cannot contain controls even when deliberate layout overflow is enabled. Fragment limits cover
 the fragment itself; a complete message that combines names, counts and fragments still needs an
@@ -242,8 +245,8 @@ totals under translation. Other mod messages, effect names, F1 overlay strings a
 labels remain future coverage; this API does not imply they are already translated.
 
 The headless scenario suite and new mod-text contract checks stay local in `pe-native-debug`, which
-has no remote. Existing repository unit tests remain where they already were. Cyrillic, CJK font
-pages, image text and Japanese human proofreading are still separate milestones.
+has no remote. Existing repository unit tests remain where they already were. See the Cyrillic and CJK sections below for font support added after the pilot. Image text and
+Japanese human proofreading remain separate milestones.
 
 ### Pilot verification (October 29, 2026)
 
@@ -273,7 +276,7 @@ The compiler accepts these characters wherever existing extended text is allowed
 dialogue, item names, system strings and `pe_tr` mod labels. It uses the Cyrillic advances for
 dialogue layout and the runtime's metric bytes for menu layout. Mixed Latin/Cyrillic text is
 supported without a script flag or a new pack format. The Spanish pilot recompiles unchanged.
-Packs remain v1, and missing translations keep the original game text.
+Latin/Cyrillic-only packs remain v1, and missing translations keep the original game text.
 
 `pe_lang_cyrillic.c/.h` renders the authored strokes and native-style shadow, checks page bounds
 and never overwrites occupied cells. `pe_lang_cyrillic_data.h` is generated from the Python module:
@@ -290,7 +293,7 @@ chosen set through the existing hooks. Existing Latin code assignments and pack 
 
 Limits: this covers Russian, Ukrainian and Belarusian, not every letter in the Unicode Cyrillic
 blocks. Serbian, Macedonian, Kazakh and other extended sets need more font capacity/design work;
-the compiler rejects unsupported letters. CJK, image labels, translations/proofreading of complete
+the compiler rejects unsupported letters. See below for CJK. Image labels, translations/proofreading of complete
 languages and broader mod-message coverage remain separate milestones. Glyphs should be reviewed
 by fluent readers at the game's native resolution before publishing a language pack.
 
@@ -311,3 +314,125 @@ All new fixtures, vectors, previews and smoke packs stay in local `pe-native-deb
   CJK; the new Cyrillic test suite was not added to the game repository.
 - Native game rebuild succeeded. Captured Cyrillic inventory, save-phone choice and Wayne menu
   frames were visually reviewed. The test pack is not a Russian translation release.
+
+
+## CJK (Chinese, Japanese and Korean)
+
+This is font/encoding support for translator-authored packs, not a completed translation.
+The compiler accepts Han (including supported supplementary ranges), hiragana, katakana,
+Hangul syllables and jamo, Bopomofo, CJK punctuation, fullwidth and halfwidth forms listed in
+`petext/cjk.py:supported`. It does not claim coverage of every historical Unicode CJK block.
+Korean packs should normally use precomposed Hangul syllables: this renderer does not shape or
+compose separate jamo into syllable blocks. Unsupported characters still fail compilation.
+
+### Build a CJK pack
+
+Install Pillow in the Python environment used for compilation. Supply an external TTF/OTF/TTC
+font with `--cjk-font`; repeat the flag to provide fallbacks. TTC uses face zero. The compiler
+checks Unicode cmap coverage before rasterizing, so missing characters are errors rather than
+silently accepted replacement boxes. The first font covering a character wins. Choose the
+appropriate locale font first: Han shapes differ between Chinese, Japanese and Korean fonts.
+
+```sh
+python -I localization/pelang.py build ja.csv \
+  --strings localization/out/text/strings.json \
+  --mod-strings localization/data/mod_strings.json \
+  --lang ja --name "Japanese" --cjk-font /path/to/NotoSansJP-Regular.ttf \
+  -o ja.pelang
+```
+
+Use a Chinese or Korean font for those languages. Fonts are build inputs only. Packs embed a
+dictionary of glyph pixels, not a font file or reference to a machine's font path; players do
+not need those fonts installed. This change includes no third-party font binary. Pack authors
+must follow the chosen font's license when distributing derived glyph images (and include any
+required notices). Local smoke tests used the installed Noto Sans JP/KR/SC fonts.
+
+The glyphs use 12×12 native cells and a fixed 12 px advance, with ink and a one-pixel shadow.
+Rasterization uses a shared em box to retain punctuation alignment; it must still be reviewed
+at native resolution by fluent readers. This does not add CJK to the separate F1 overlay font
+or translate text embedded in images. Use an ASCII/Latin display name for the F1 language row.
+
+### Modular implementation
+
+- `localization/petext/cjk.py`: supported ranges, sfnt/TTC Unicode coverage, rasterization and
+  deterministic pack-local IDs. Only CJK compilation imports Pillow.
+- `validation`, `layout`, `menu`, `wrap` and `modtext`: treat a CJK token as one glyph, four
+  bytes and 12 px. Word wrapping adds CJK boundaries and basic Japanese/Chinese punctuation
+  restrictions. Choice rows retain their existing protection from automatic reflow/splitting.
+- `mods/pe_lang/pe_lang_pack.c`: validates both existing v1 packs and the v2 dictionary.
+- `mods/pe_lang/pe_lang_cjk.c/.h`: cache state independent of SDL/game globals, with injected
+  synchronization/upload callbacks for local tests.
+- `mods/pe_lang/pe_lang.c`: connects the active pack, native font uploads and frame boundaries
+  to the cache. Pack changes reset IDs even when the Latin/Cyrillic font mode stays the same.
+- `include/pe1/mod_text.h` and `PE_HOOK_TEXT_GLYPH`: small optional encoding/render hook. Native
+  menu/dialogue renderers retain packet allocation, clipping behavior, ordering, dimming,
+  highlighting and their original palettes. With no provider, the original byte path is used.
+- `pe_tr` and item-name fragments copy complete tokens; their existing fallback behavior remains.
+
+### Format and compatibility
+
+Non-CJK packs remain **v1**, byte-for-byte compatible with the previous compiler. CJK packs use
+**v2** and require this runtime (older runtimes reject them). The first 64 bytes keep the v1
+field positions, with version=2. Four additional little-endian u32 fields at offsets 64/68/72/76
+are the absolute glyph-dictionary offset, glyph count, record size=76, and reserved=0. Entries
+start at byte 80; their layout, ordering and text-relative offsets are unchanged. Text ends at
+the dictionary offset, not the file end. The dictionary exactly fills the remaining file.
+
+Each record contains a u32 Unicode scalar followed by 72 packed 4bpp bytes (12 rows, six bytes
+per row; left pixel in the low nibble). Values are 0 transparent, 1 ink, 2 shadow. Records have
+strictly increasing unique scalars. The reader checks lengths, offsets, record stride, reserved
+field, scalar validity, pixels and every token index before exposing any text.
+
+The glyph token is `F1 C5 hi lo`, with `hi`/`lo` both below 240 and dictionary index
+`hi*240+lo`. Maximum dictionary size is **57,600 glyphs**. The magic prevents native rename-grid
+F1 bytes from being mistaken for tokens; operands contain neither terminators nor commands.
+The compiler supplies the ordinary FF/F9 page endings and keeps control-sequence validation.
+Existing Latin/Cyrillic codes and v1 selection identities are unchanged.
+
+The cache uses only originally empty cells **250..440** of the USA base font: **191 eligible
+cells** on the tested disc. Cells through 249 are reserved because the menu renderer and rename
+grids can address those as ordinary bytes. Area font page 1 and the base page's palette row are
+untouched. Nonempty candidate cells are excluded rather than overwritten. The whole dictionary
+stays in CPU memory; successive scenes can use different cachefuls.
+
+Cells referenced by the current frame are pinned. A miss waits for the previous GPU frame
+before uploading, then uses an unpinned slot; frame completion clears pins for the next build.
+If a frame needs more distinct CJK glyphs than eligible cells, the extra glyphs show `?` and a
+single warning is logged, rather than overwriting a glyph still referenced by a visible packet.
+The original font page is restored when choosing Game text. Native byte buffers, layout limits
+and packet-pool limits still apply; four bytes per glyph means fewer characters in fixed byte
+fields. This feature does not increase menu sizes or change save formats.
+
+**Player names and rename grids:** CJK default player names (`sys/030`) are rejected, because
+pack-local IDs must not be persisted into the save format's eight-byte name field. Keep Aya's
+original name. The fixed one-byte rename grids also reject CJK translations. Weapon/armor
+rename defaults use `Text_LookupEditableName` (the existing lookup hook with `persistent=1`):
+if the translated default contains CJK IDs, `pe_lang` leaves the original native name in that
+editor. Inventory/equipment display names remain translated. This prevents pack-local IDs
+from being copied into saved equipment names. Existing translated
+dialogue may still insert the saved original name with `{name}`. These checks are not bypassed
+by `--allow-overflow`. Future CJK name input needs a separately designed stable save encoding.
+
+### CJK verification
+
+All new test source, packs, fonts previews, native executables and captures remain in the local
+`pe-native-debug` repository, which has no remote. No CJK test suite is added to this repository.
+
+- Eight local Python checks: Japanese/Chinese/Korean encoding and widths; explicit font and
+  actual font coverage; malformed tokens; punctuation-aware wrapping; control validation;
+  saved-name/rename-grid guards; mod-label contracts; v1/v2 serialization and index bounds.
+- Native cache/parser fixture: a 250-glyph dictionary across frames, pinned-slot exhaustion,
+  eviction, upload synchronization, occupied-cell exclusion, upload failure, corrupted v2
+  headers/dictionary/pixels/tokens, and skipping token operands when detecting Cyrillic.
+- Production provider/switch fixture: measurement performs no upload, uploaded pixels match
+  the dictionary, switching between two CJK dictionaries clears old IDs, and switching through
+  Spanish to Game text restores original pixels, menu metrics and dialogue widths exactly.
+  Editable-name lookups reject pack-local IDs while display-only lookups retain translations.
+- Local headless suite: 11/11 passed with a mixed CJK smoke pack. Missing, unselected and
+  disabled packs remain pixel-identical to the baseline; inventory names, save-phone prompts
+  and Wayne's translated mod rows render, and all six Wayne menu lines remain present.
+- Existing suites: 31 Python compiler tests and three native pack/font/selection tests pass.
+  The native mod build succeeds. The Spanish pilot retains its previous v1 bytes.
+
+The smoke pack is not a published translation. It retains the Spanish pilot's two unproven
+phone-layout warnings (`dlg/M026/006` and `dlg/M290/006`); those pages still need in-game review.

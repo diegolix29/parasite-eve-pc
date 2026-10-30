@@ -24,7 +24,7 @@ def advance(c: bytes, name_width: int = NAME_WIDTH) -> int:
         return name_width
     if op == 0xFB:
         return gt.WIDE if c[1] <= 3 else NUMBER_WIDTH if c[1] == 8 else 0
-    if op in (0xFC, 0xFD):
+    if op in (0xF1, 0xFC, 0xFD):
         return gt.WIDE
     if op < 0xF1:
         return gt.BOX_ADVANCE[op] if op < len(gt.BOX_ADVANCE) else (gt._latin_advance(op) or gt.WIDE)
@@ -109,7 +109,7 @@ def unproven(pages, source: dict):
 
 def name_width(raw: bytes) -> int:
     """How wide {name} draws when the default name is these glyph bytes (a sys/030 entry)."""
-    return sum(gt.BOX_ADVANCE[g] if g < len(gt.BOX_ADVANCE) else (gt._latin_advance(g) or gt.WIDE) for g in raw[:8])
+    return sum(advance(c) for c in commands(raw[:8]))
 
 
 def check(key: str, raw: bytes, source: dict, widest_table: dict, name_px: int = NAME_WIDTH,

@@ -1,4 +1,5 @@
-/* Reading .pelang language packs: a 64-byte header, a key table sorted by hash, then the text.
+/* Reading .pelang packs: v1 header 64 bytes, v2 header 80 bytes plus a CJK bitmap dictionary.
+ * Both have a key table sorted by hash, then the text.
  * Every offset is checked once at load, so lookups can trust the table. */
 #include "pe_lang_pack.h"
 
@@ -22,11 +23,12 @@ uint32_t pe_lang_hash(const char *key) {
 int pe_lang_pack_uses_glyphs(const PeLangPack *pack, unsigned first, unsigned last) {
     if (!pack || !pack->data || first > last || last >= 0xF1) return 0;
     for (unsigned i = 0; i < pack->count; ++i) {
-        const unsigned char *entry = pack->data + HEADER_SIZE + i * ENTRY_SIZE;
+        const unsigned char *entry = pack->data + pack->entries_at + i * ENTRY_SIZE;
         const unsigned char *p = pack->data + rd32(pack->data + 12) + rd32(entry + 4);
         while (*p != 0xFF) {
             unsigned c = *p++;
             if (c < 0xF1) { if (c >= first && c <= last) return 1; }
+            else if (c == 0xF1) p += 3;
             else if (c == 0xFB) { unsigned sub = *p++; if (sub == 7 || sub == 9) ++p; }
             else if (c == 0xFC || c == 0xFD) ++p;
         }
@@ -41,14 +43,18 @@ static void copy_field(char *out, const unsigned char *in, size_t size) {
 
 /* Validate complete commands, with FF at the exact entry end. F9 may only
  * precede that FF (the compiler preserves the original dialogue page end). */
-static int valid_text(const unsigned char *p, size_t n) {
+static int valid_text(const unsigned char *p, size_t n, unsigned glyphs) {
     size_t i = 0;
     while (i < n) {
         unsigned c = p[i++];
         if (c == 0xFF) return i == n;
         if (c == 0xF9) return i + 1 == n && p[i] == 0xFF;
         if (c < 0xF1 || c == 0xF7 || c == 0xF8 || c == 0xFA) continue;
-        if (c == 0xFB) {
+        if (c == 0xF1) {
+            if (n-i < 3 || p[i] != 0xC5 || p[i+1] >= 240 || p[i+2] >= 240 ||
+                p[i+1]*240u+p[i+2] >= glyphs) return 0;
+            i += 3;
+        } else if (c == 0xFB) {
             if (i >= n || p[i] > 9) return 0;
             unsigned sub = p[i++];
             if (sub != 7 && sub != 9) continue;
@@ -64,24 +70,43 @@ static int valid_text(const unsigned char *p, size_t n) {
 
 int pe_lang_pack_parse(PeLangPack *pack, unsigned char *data, size_t size) {
     memset(pack, 0, sizeof *pack);
-    if (!data || size < HEADER_SIZE || memcmp(data, "PELG", 4) || rd32(data + 4) != PE_LANG_PACK_VERSION)
+    if (!data || size < HEADER_SIZE || memcmp(data, "PELG", 4) || (rd32(data + 4) != 1 && rd32(data + 4) != 2))
         goto bad;
     if (size > UINT32_MAX || !data[16] || !data[32] ||
         !memchr(data + 16, 0, 16) || !memchr(data + 32, 0, 32)) goto bad;
+    unsigned header = rd32(data+4) == 2 ? 80 : 64;
+    if (size < header) goto bad;
+    uint32_t glyphs = 0, text_end = (uint32_t)size;
+    if (header == 80) {
+        text_end = rd32(data+64); glyphs = rd32(data+68);
+        if (!glyphs || glyphs > 57600 || rd32(data+72) != 76 || rd32(data+76) ||
+            text_end > size || size-text_end != (size_t)glyphs*76) goto bad;
+        uint32_t previous = 0;
+        for (unsigned k=0; k<glyphs; ++k) {
+            const unsigned char *g = data+text_end+k*76;
+            uint32_t cp = rd32(g);
+            if (cp <= previous || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) goto bad;
+            previous = cp;
+            for (unsigned j=4;j<76;++j) if ((g[j]&15)>2 || (g[j]>>4)>2) goto bad;
+        }
+    }
     uint32_t count = rd32(data + 8), text = rd32(data + 12);
-    if (count > (size - HEADER_SIZE) / ENTRY_SIZE || text < HEADER_SIZE + count * ENTRY_SIZE || text > size)
+    if (count > (size - header) / ENTRY_SIZE || text < header + count * ENTRY_SIZE || text > text_end)
         goto bad;
     for (uint32_t i = 0; i < count; ++i) {
-        const unsigned char *e = data + HEADER_SIZE + i * ENTRY_SIZE;
+        const unsigned char *e = data + header + i * ENTRY_SIZE;
         uint32_t at = rd32(e + 4);
         if (i && rd32(e) <= rd32(e - ENTRY_SIZE)) goto bad;     /* sorted, no duplicate hashes */
-        uint32_t end = i + 1 < count ? rd32(e + ENTRY_SIZE + 4) : (uint32_t)(size - text);
-        if ((!i && at) || at >= end || end > size - text ||
-            !valid_text(data + text + at, end - at)) goto bad;
+        uint32_t end = i + 1 < count ? rd32(e + ENTRY_SIZE + 4) : (uint32_t)(text_end - text);
+        if ((!i && at) || at >= end || end > text_end - text ||
+            !valid_text(data + text + at, end - at, glyphs)) goto bad;
     }
     pack->data = data;
     pack->size = size;
     pack->count = count;
+    pack->entries_at = header;
+    pack->cjk_count = glyphs;
+    pack->cjk_offset = text_end;
     copy_field(pack->lang, data + 16, sizeof pack->lang);
     copy_field(pack->name, data + 32, sizeof pack->name);
     return 0;
@@ -117,7 +142,7 @@ const unsigned char *pe_lang_pack_find(const PeLangPack *pack, const char *key) 
     uint32_t want = pe_lang_hash(key), lo = 0, hi = pack->count;
     while (lo < hi) {
         uint32_t mid = lo + (hi - lo) / 2;
-        const unsigned char *e = pack->data + HEADER_SIZE + mid * ENTRY_SIZE;
+        const unsigned char *e = pack->data + pack->entries_at + mid * ENTRY_SIZE;
         uint32_t h = rd32(e);
         if (h == want) return pack->data + rd32(pack->data + 12) + rd32(e + 4);
         if (h < want) lo = mid + 1;

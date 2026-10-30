@@ -14,6 +14,10 @@ def commands(raw: bytes):
         i += 1
         if c < 0xF1 or c in (0xF7, 0xF8, 0xFA):
             pass
+        elif c == 0xF1:
+            if i+3 > len(raw) or raw[i] != 0xC5 or raw[i+1] >= 240 or raw[i+2] >= 240:
+                raise ValueError(f'invalid CJK token at byte {start}')
+            i += 3
         elif c == 0xFB:
             if i == len(raw) or raw[i] > 9:
                 raise ValueError(f'invalid or incomplete FB command at byte {start}')

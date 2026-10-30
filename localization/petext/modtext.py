@@ -22,11 +22,13 @@ def load(path, strings):
 
 def check(raw, source, metrics=None):
     from . import menu
-    if any(c >= 0xF1 for c in raw):
+    from .validation import commands
+    glyphs = list(commands(raw))
+    if any(c[0] > 0xF1 for c in glyphs):
         return ["mod labels cannot contain line breaks, waits or commands"]
     errors = []
-    if len(raw) > source["max_glyphs"]:
-        errors.append(f'mod label has {len(raw)} glyphs; limit is {source["max_glyphs"]}')
+    if len(glyphs) > source["max_glyphs"]:
+        errors.append(f'mod label has {len(glyphs)} glyphs; limit is {source["max_glyphs"]}')
     width = menu.width(raw, metrics) if metrics is not None else max(gt.lines(raw))
     if width > source["width"]:
         errors.append(f'mod label is {width} px; limit is {source["width"]} px')

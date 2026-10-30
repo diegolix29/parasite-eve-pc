@@ -42,7 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from petext import gametext as gt, latin, validation, layout, menu  # noqa: E402
-from petext import modtext
+from petext import modtext, cjk
 from petext import wrap as wrapping  # noqa: E402
 
 MAGIC, VERSION = b"PELG", 1
@@ -157,32 +157,41 @@ def cmd_pseudo(a) -> int:
 
 
 def check_row(key: str, text: str, source: dict, widest_name: dict[str, int], name_px: int = layout.NAME_WIDTH,
-              metrics: bytes | None = None, layouts: dict | None = None, wrap: bool = True):
+              metrics: bytes | None = None, layouts: dict | None = None, wrap: bool = True, atlas=None):
     """(glyph bytes or None, errors, warnings) for one translated row. name_px: how wide {name}
     draws, from the pack's sys/030 (Aya's default name); metrics: the menus' glyph widths
     (menu_glyphs.json), without which menu text is only compared with the English. wrap: a
     dialogue page that overflows its box gets line breaks and screens (petext/wrap.py)."""
     errors, warnings = [], []
     try:
-        raw = gt.encode(text, extended=True)
+        raw = gt.encode(text, extended=True, cjk_codes=atlas.codes if atlas else None)
     except (ValueError, TypeError, OverflowError) as e:
         msg = "invalid text/tag: " + str(e)
         if "no glyph" in msg:
-            msg += " (the font has A-Z, a-z, digits, basic punctuation, Latin Extended and Russian/Ukrainian/Belarusian Cyrillic)"
+            msg += " (the font has A-Z, a-z, digits, basic punctuation, Latin Extended, Russian/Ukrainian/Belarusian Cyrillic, and CJK with --cjk-font)"
         return None, [msg], warnings
     try:
         validation.check(raw, source["text"])
     except ValueError as e:
         return None, [str(e)], warnings
+    for command in validation.commands(raw):
+        if command[0] == 0xF1 and (not atlas or cjk.index(command) >= len(atlas.chars)):
+            return None, ["CJK token has no glyph in this pack's dictionary"], []
+    if key in ("sys/115", "sys/116", "sys/117") and b"\xf1\xc5" in raw:
+        return None, ["CJK cannot be used in the one-byte rename grids"], []
     if source.get("mod_label"):
-        if any(c >= 0xF1 for c in raw):
+        if any(c[0] > 0xF1 for c in validation.commands(raw)):
             return None, ["mod labels cannot contain line breaks, waits or commands"], []
         return raw, modtext.check(raw, source, metrics), []
+    if key == "sys/030" and b"\xf1\xc5" in raw:
+        return None, ["CJK player names cannot be stored safely in the legacy save name field; keep the original name"], []
+    if key == "sys/030" and len(raw) > 8:
+        return None, ["default player name exceeds the save format's 8-byte field"], []
     note = None
     limit = layout.box_limit(source) if wrap and key.startswith("dlg/") else None
     if limit and any(max(s) > limit[0] or len(s) > limit[1] for s in layout.screens(raw, name_px)):
         english = bytes.fromhex(source["raw"]) if source.get("raw") else gt.encode(source["text"])
-        wrapped, added = wrapping.wrap(raw, limit[0], limit[1], english, name_px)
+        wrapped, added = wrapping.wrap(raw, limit[0], limit[1], english, name_px, atlas.characters if atlas else None)
         if wrapped != raw:
             raw = wrapped
             note = "wrapped to fit the box" + (f", {added} screen(s) added" if added else "") + "; check the breaks"
@@ -208,11 +217,16 @@ def cmd_build(a) -> int:
     entries, errors, warnings = {}, [], []
     seen = set()
     rows = read_csv(a.csv)
+    try:
+        atlas = cjk.Atlas([r.get('translation','') for r in rows], getattr(a,'cjk_font',None))
+    except (ValueError, OSError, struct.error) as e:
+        print(f'error: CJK font: {e}')
+        return 1
     name_px = layout.NAME_WIDTH
     for r in rows:
         if r.get("key") == "sys/030" and r.get("translation"):
             try:
-                name_px = layout.name_width(gt.encode(r["translation"], extended=True))
+                name_px = layout.name_width(gt.encode(r["translation"], extended=True, cjk_codes=atlas.codes))
             except (ValueError, TypeError, OverflowError):
                 pass                                  # reported with the row below
     for r in rows:
@@ -227,7 +241,7 @@ def cmd_build(a) -> int:
             errors.append(f"{key}: no such key in {a.strings}")
             continue
         raw, errs, warns = check_row(key, text, strings[key], widest_name, name_px, metrics, layouts,
-                                     wrap=not a.no_wrap)
+                                     wrap=not a.no_wrap, atlas=atlas)
         if a.allow_overflow:
             # check_row returns raw only after control validation succeeds.
             if raw is not None:
@@ -267,12 +281,12 @@ def cmd_build(a) -> int:
           f"{len(warnings)} warning(s), {len(errors)} error(s)")
     if errors:
         return 1
-    write_pack(a.out, a.lang, a.name, entries)
+    write_pack(a.out, a.lang, a.name, entries, atlas)
     print(f"wrote {a.out}")
     return 0
 
 
-def write_pack(path: Path, lang: str, name: str, entries: dict[str, bytes]) -> None:
+def write_pack(path: Path, lang: str, name: str, entries: dict[str, bytes], atlas=None) -> None:
     lang_b, name_b = lang.encode("utf-8"), name.encode("utf-8")
     if not lang_b or not name_b or b"\0" in lang_b + name_b or len(lang_b) > 15 or len(name_b) > 31:
         raise SystemExit("--lang and --name must be nonempty, without NUL; at most 15 and 31 bytes")
@@ -281,19 +295,25 @@ def write_pack(path: Path, lang: str, name: str, entries: dict[str, bytes]) -> N
     for key in order:
         table += ENTRY.pack(fnv1a(key), len(text))
         text += entries[key] + b"\xff"
-    head = HEADER.pack(MAGIC, VERSION, len(order), HEADER.size + len(table), lang_b, name_b)
-    Path(path).write_bytes(head + table + text)
+    extra = b''
+    records = bytes(atlas.records) if atlas else b''
+    version = 2 if records else 1
+    header_size = 80 if records else 64
+    if records:
+        extra = struct.pack('<IIII',header_size+len(table)+len(text),len(atlas.chars),cjk.RECORD,0)
+    head = HEADER.pack(MAGIC, version, len(order), header_size + len(table), lang_b, name_b)
+    Path(path).write_bytes(head + extra + table + text + records)
 
 
 def read_pack(path: Path) -> tuple[str, str, dict[int, bytes]]:
     """(lang, name, hash -> glyph bytes) of a pack: the reader the tests check the writer with."""
     data = Path(path).read_bytes()
     magic, version, count, text_at, lang, name = HEADER.unpack_from(data, 0)
-    if magic != MAGIC or version != VERSION:
-        raise ValueError("not a version 1 .pelang pack")
+    if magic != MAGIC or version not in (1,2):
+        raise ValueError("not a version 1/2 .pelang pack")
     out = {}
     for i in range(count):
-        h, off = ENTRY.unpack_from(data, HEADER.size + i * ENTRY.size)
+        h, off = ENTRY.unpack_from(data, (80 if version == 2 else 64) + i * ENTRY.size)
         start = text_at + off
         out[h] = data[start:data.index(b"\xff", start)]
     return lang.rstrip(b"\0").decode(), name.rstrip(b"\0").decode(), out
@@ -321,6 +341,7 @@ def main(argv=None) -> int:
     b.add_argument("--lang", required=True, help="language code, e.g. fr, pt-BR, en-x-jp, qps")
     b.add_argument("--name", required=True, help="the name the Language row shows, e.g. French")
     b.add_argument("-o", "--out", type=Path, required=True)
+    b.add_argument("--cjk-font", type=Path, action="append", help="external TTF/OTF/TTC face 0; repeat for fallback fonts")
     b.add_argument("--max-messages", type=int, default=50)
     b.add_argument("--allow-overflow", action="store_true",
                    help="emit known layout overflows as warnings for deliberate in-game testing; controls stay strict")

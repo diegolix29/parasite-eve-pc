@@ -75,7 +75,7 @@ def decode(b: bytes) -> str:
 _TAG = re.compile(r"\{([gx][0-9A-F]{2}|[a-z/]+[0-9]*)(?: ([0-9A-Fa-f]+))?\}")
 
 
-def encode(text: str, extended: bool = False) -> bytes:
+def encode(text: str, extended: bool = False, cjk_codes=None) -> bytes:
     """`text` in the game's glyph code. With `extended`, letters of the Latin Extended set
     (petext/latin.py: é, ñ, ß, « ...) and Cyrillic (petext/cyrillic.py) are allowed too;
     pe_lang adds their glyphs to the font."""
@@ -112,6 +112,8 @@ def encode(text: str, extended: bool = False) -> bytes:
                 out.append(CODE_OF[ch])
             elif ch in extra:
                 out.append(extra[ch])
+            elif cjk_codes and ch in cjk_codes:
+                out += cjk_codes[ch]
             else:
                 raise ValueError(f"no glyph for {ch!r}")
             i += 1
@@ -151,6 +153,8 @@ def lines(b: bytes) -> list[int]:
             elif sub == 8:
                 w += WIDE * 5      # TextboxNumber has up to five rendered digits
             i += 1 + (1 if sub in (7, 9) else 0)
+        elif c == 0xF1 and b[i:i+2] == b"\xf1\xc5":
+            w += WIDE; i += 3
         elif c in (0xFC, 0xFD):
             w += WIDE; i += 1
         elif c < len(BOX_ADVANCE):

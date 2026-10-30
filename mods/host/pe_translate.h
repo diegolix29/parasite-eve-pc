@@ -6,6 +6,7 @@
  * on pe_lang: an absent/inactive provider or missing entry leaves the original bytes intact.
  * Returned text is in the game's glyph encoding, not UTF-8 or a printf format string. */
 #include "pe_gametext.h"
+#include "pe1/mod_text.h"
 #include "pe_mod_host.h"
 
 typedef struct PeTranslationsApi {
@@ -24,8 +25,14 @@ static inline void pe_t_tr(PeText *t, const char *key, const char *english, unsi
     const unsigned char *text = pe_tr(key);
     unsigned n = 0;
     if (text) {
-        while (n <= max_glyphs && text[n] < 0xF1u) ++n;
-        if (!n || n > max_glyphs || text[n] != G_END || n > PE_GAMETEXT_MAX - 2u - t->n) text = NULL;
+        unsigned glyphs = 0;
+        while (glyphs <= max_glyphs && n < PE_GAMETEXT_MAX && text[n] != G_END) {
+            if (text[n] < 0xF1u) ++n;
+            else if (Pe_ExtendedGlyph(text+n, NULL)) n += 4;
+            else break;
+            ++glyphs;
+        }
+        if (!glyphs || glyphs > max_glyphs || text[n] != G_END || n > PE_GAMETEXT_MAX - 2u - t->n) text = NULL;
     }
     if (!text) { pe_t_str(t, english); return; }
     for (unsigned i = 0; i < n; ++i) pe_t_byte(t, text[i]);
