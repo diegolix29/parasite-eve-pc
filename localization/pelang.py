@@ -418,7 +418,7 @@ def main(argv=None) -> int:
     t.add_argument("strings", type=Path)
     t.add_argument("-o", "--out", type=Path, required=True)
     t.add_argument("--merge", type=Path, help="carry the translations of an older CSV over, by key")
-    p = sub.add_parser("pseudo", help="a test language: every entry, marked and ~30% longer")
+    p = sub.add_parser("pseudo", help="a test language: every entry, marked and ~30%% longer")
     p.add_argument("strings", type=Path)
     p.add_argument("-o", "--out", type=Path, required=True)
     b = sub.add_parser("build", help="check a translated CSV and write a .pelang pack")

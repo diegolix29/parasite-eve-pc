@@ -87,6 +87,7 @@ u32 g_BootHostVBlankCount;
 u32 g_BootHostControlAt;
 u32 g_BootHostCrashAt;
 int g_BootHostCrashAbort;
+void (*g_BootHostHdOptions)(int, const char *);
 void (*g_BootHostGraphicsOptions)(int, int, int);
 const char *g_BootHostVramPath;
 const char *g_BootHostFramePath;
@@ -625,6 +626,17 @@ static void Boot_ReadHostControlCommand(void) {
     if (!strcmp(line, "quit")) {
         BOOT_WRITE_PROFILE();
         _Exit(EXIT_SUCCESS);
+    }
+    if (!strncmp(line,"backgrounds ",12)) {
+        const char *backend=SDL_GetEnvironmentVariable(SDL_GetEnvironment(),"PSYZ_HEADLESS");
+        if (!backend || strcmp(backend,"gpu") || !g_BootHostHdOptions ||
+            (line[12]!='0' && line[12]!='1') || line[13]!=' ' || !line[14] ||
+            g_BootHostVBlankLimit-g_BootHostVBlankCount<=8) {
+            fprintf(stderr,"Invalid backgrounds control command\n");fflush(stderr);_Exit(2);
+        }
+        g_BootHostHdOptions(line[12]-'0',line+14);
+        g_BootHostControlAt=g_BootHostVBlankCount+8;
+        return;
     }
     if (!strncmp(line, "graphics ", 9)) {
         int geometry, antialiasing, filtering;

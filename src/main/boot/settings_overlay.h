@@ -32,7 +32,8 @@ enum {
     OVERLAY_PAGE_CONTROLS = 1,
     OVERLAY_PAGE_AUDIO = 2,
     OVERLAY_PAGE_DISCS = 3,
-    OVERLAY_PAGE_COUNT = 4,
+    OVERLAY_PAGE_MODS = 4,
+    OVERLAY_PAGE_COUNT = 5,
     OVERLAY_ACTION_ROWS = 2,
     OVERLAY_VISIBLE_CONTROLS = 7,
 
@@ -188,7 +189,7 @@ static const OverlaySetting kAudio[] = {
 };
 
 static const char *const kPageNames[OVERLAY_PAGE_COUNT] = {
-    "Graphics", "Controls", "Audio", "Discs"
+    "Graphics", "Controls", "Audio", "Discs", "Mods"
 };
 
 static const char *OverlayPageName(int page) {
@@ -213,6 +214,7 @@ static int Host_SettingsPureRowCount(int page) {
     if (page == OVERLAY_PAGE_GRAPHICS) return COUNT_OF(kGraphics);
     if (page == OVERLAY_PAGE_CONTROLS) return 2 + HOST_BINDING_COUNT;
     if (page == OVERLAY_PAGE_AUDIO) return COUNT_OF(kAudio);
+    if (page == OVERLAY_PAGE_MODS) return 3;
     return 2;
 }
 
@@ -717,6 +719,13 @@ static void PaintRows(const Painter *p) {
                         PaintSpeedLabel(p, mid, baseline, selected, label);
                     }
                 }
+            } else if (page == OVERLAY_PAGE_MODS) {
+                const char *names[]={"HD backgrounds","Background pack","Integrity check"};
+                if(row==0)PaintValueRow(p,names[row],Host_HdValue(row),mid,baseline,selected,0,label);
+                else {
+                    DrawText(p->surface,OVERLAY_PAD*s,baseline,17*s,names[row],label,ALIGN_LEFT);
+                    DrawText(p->surface,OverlayValueCentre()*s,baseline,17*s,Host_HdValue(row),selected?kAccent:kText,ALIGN_CENTRE);
+                }
             } else if (page == OVERLAY_PAGE_DISCS) {
                 char discLabel[32];
                 snprintf(discLabel, sizeof(discLabel), "Disc %d", row + 1);
@@ -732,6 +741,18 @@ static void PaintRows(const Painter *p) {
         }
     }
 
+    if(page==OVERLAY_PAGE_MODS) {
+        float x=OVERLAY_PAD*s,y=(OVERLAY_HEADER_H+5*OVERLAY_ROW_H)*s,w=(OVERLAY_PANEL_W-2*OVERLAY_PAD)*s;
+        if(Host_HdBusy()) {
+            char text[80];snprintf(text,sizeof(text),"Downloading / verifying: %d%%",Host_HdPercent());
+            DrawText(p->surface,x,y,15*s,text,kText,ALIGN_LEFT);
+            FillRoundRect(p->surface,x,y+18*s,w,10*s,5*s,WithAlpha(kText,.12f));
+            FillRoundRect(p->surface,x,y+18*s,w*Host_HdPercent()/100.f,10*s,5*s,kAccent);
+        } else {
+            char text[96];snprintf(text,sizeof(text),"Installed version: %s",*host_hd.version?host_hd.version:host_hd.development?"local preview":"none");
+            DrawText(p->surface,x,y,15*s,text,kMuted,ALIGN_LEFT);
+        }
+    }
     if (page == OVERLAY_PAGE_CONTROLS) {
         int scroll = Host_ClampControlsScroll(p->state->scroll);
         float trackTop = (OverlayRowTop(visibleSettings, 1) + 4.0f) * s;
@@ -799,7 +820,7 @@ static void PaintFooter(const Painter *p, int visibleRowCount) {
              14.0f * s, help, kMuted, ALIGN_LEFT);
     DrawText(p->surface, (float)OVERLAY_PAD * s, footerTop + 54.0f * s,
              13.0f * s,
-             "Up/Down select   Left/Right change   PgUp/PgDn page   Esc resume",
+             p->state->page==OVERLAY_PAGE_MODS?"Enter / click activate   PgUp/PgDn page   Esc resume":"Up/Down select   Left/Right change   PgUp/PgDn page   Esc resume",
              WithAlpha(kMuted, 0.7f), ALIGN_LEFT);
 }
 

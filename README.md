@@ -18,7 +18,11 @@ Keep each CUE file next to its BIN file.
 
 1. Launch Parasite Eve and select your disc images. Selecting both discs enables automatic switching.
 2. You can start with either disc. If the other is needed, the game asks for it by name.
-3. Press **Escape** for graphics, controls, audio and disc settings. You can add the other disc there later.
+3. Press **Escape** for graphics, controls, audio, disc and mod settings. You can add the other disc there later.
+
+**HD backgrounds:** open **Escape → Mods → Background pack** to download or update the optional artwork.
+The game shows download progress and checks the files before installing. Use **2x or higher** in Graphics; the artwork applies immediately.
+You can also [download the pack manually](https://pe.polanka.ovh/).
 
 **Enter** is START and skips movies; in a story movie, START pauses it and asks whether to skip. View or change all bindings in **Escape → Controls**. A **speed** button can be bound there too: the game runs at 2x while it is held, or 3x or 4x with the arrows either side of the number (Left/Right on that row). It is unbound until you choose a key or button, and keeps your VSync setting.
 The left stick provides analog movement. **Escape → Controls → Field run threshold** sets how far to push it before Aya runs (85% by default).
@@ -72,7 +76,7 @@ Mod builds are experimental; a passing build or test does not establish full in-
 
 ## Build
 
-Requires Git, CMake 3.21 or newer and a C11 compiler.
+Requires Git, CMake 3.21 or newer and a C11 compiler. Linux builds also need libcurl development headers (`libcurl4-openssl-dev` on Ubuntu).
 
 ```sh
 git clone https://github.com/khasinski/parasite-eve-pc
@@ -92,6 +96,6 @@ cmake --build build-mods --parallel
 ./build-mods/parasite-eve-pc
 ```
 
-`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection`).
+`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp`).
 
 For development details, see [code organization](docs/CODE_ORGANIZATION.md).

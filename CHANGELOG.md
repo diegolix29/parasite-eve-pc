@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.8
+
+- Added optional HD backgrounds, including the title screen. Download or update them in **Escape → Mods**, with progress, cancellation and file verification. Failed updates keep the previous copy; installation and on/off apply immediately.
+- Fixed HD installation and settings paths containing accented or non-Latin characters on Windows.
+- Reduced the background pack to about 327 MB using high-quality WebP and lossless reference data. Original backgrounds remain available with the mod off.
+- Added reviewed widescreen side artwork for the first two views; other scenes retain their existing framing.
+- Fixed native pointer and callback errors affecting field effects, inventory menus and late-game effects.
+- Hardened effect allocation failures and validated saved equipment slot counts.
+
 - Handle effect allocation failures without leaving incomplete effects active.
 
 - Improved inventory menu safety and corrected 64-bit game/SDK call signatures, including Windows crashes in Liberty Island effects.

@@ -567,6 +567,7 @@ s32 MenuCard_RunListScreen(void) {
         g_RenderDispEnvArray[1].screen.y = packedColor;
         g_RenderDispEnvArray[0].screen.y = packedColor;
     }
+    Psyz_VideoSetRgb24Backdrop(NULL,NULL,0,0,0,0);
     MemCard_SetDialogActive(0);
     Draw_SetPresentEnabled(0);
     return result;
