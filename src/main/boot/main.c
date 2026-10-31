@@ -43,6 +43,8 @@ static struct {
     int antialiasing;
     int model_filtering;
     int widescreen;
+    int dynamic_lighting;
+    int effect_geometry_correction;
     int hd_backgrounds;
     int fullscreen;
     /* 2..PSYZ_SPEED_MAX, used while the speed binding is held */
@@ -440,6 +442,16 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
                 return 0;
             }
             host_options.geometry_correction = v;
+        } else if (!strcmp(key, "dynamic_lighting")) {
+            if (v > 1) {
+                return 0;
+            }
+            host_options.dynamic_lighting = v;
+        } else if (!strcmp(key, "effect_geometry_correction")) {
+            if (v > 1) {
+                return 0;
+            }
+            host_options.effect_geometry_correction = v;
         }
     } else if (!strcmp(section,"mods") && !strcmp(key,"hd_backgrounds")) {
         if(v<0||v>1)return 0;host_options.hd_backgrounds=v;
@@ -572,7 +584,9 @@ static int Host_SaveOptions(void) {
         "frame_interpolation = %s\n"
         "antialiasing = %s\n"
         "model_filtering = %s\n"
-        "widescreen = %s\n\n"
+        "widescreen = %s\n"
+        "dynamic_lighting = %s\n"
+        "effect_geometry_correction = %s\n\n"
         "[audio]\n"
         "volume = %u\n\n"
         "[game]\n"
@@ -590,6 +604,8 @@ static int Host_SaveOptions(void) {
         host_options.antialiasing ? "true" : "false",
         host_options.model_filtering ? "true" : "false",
         host_options.widescreen ? "true" : "false",
+        host_options.dynamic_lighting ? "true" : "false",
+        host_options.effect_geometry_correction ? "true" : "false",
         host_options.volume,
         host_options.speed_factor,
         host_options.analog_run_threshold
@@ -778,6 +794,8 @@ static void Host_InitOptions(int enabled) {
     host_options.antialiasing = 0;
     host_options.model_filtering = 0;
     host_options.widescreen = 0;
+    host_options.dynamic_lighting = 0;
+    host_options.effect_geometry_correction = 0;
     host_options.hd_backgrounds = 1;
     host_options.volume = 100;
     host_options.speed_factor = 2;
@@ -857,6 +875,8 @@ static void Host_ApplyOptions(SDL_Window *window) {
     Psyz_VideoSetGeometryCorrection(host_options.geometry_correction != 0);
     Psyz_VideoSetAntialiasing(host_options.antialiasing != 0);
     Psyz_VideoSetModelFiltering(host_options.model_filtering != 0);
+    Psyz_VideoSetDynamicLighting(host_options.dynamic_lighting != 0);
+    Psyz_VideoSetEffectGeometryCorrection(host_options.effect_geometry_correction != 0);
     /* An allocation failure keeps the last working renderer configuration.
      * Before window creation the getters do not yet reflect pending options. */
     if (window) {
@@ -864,6 +884,8 @@ static void Host_ApplyOptions(SDL_Window *window) {
         host_options.antialiasing = Psyz_VideoGetAntialiasing();
         host_options.geometry_correction = Psyz_VideoGetGeometryCorrection();
         host_options.model_filtering = Psyz_VideoGetModelFiltering();
+        host_options.dynamic_lighting = Psyz_VideoGetDynamicLighting();
+        host_options.effect_geometry_correction = Psyz_VideoGetEffectGeometryCorrection();
     }
     Psyz_VideoSetWidescreen(host_options.widescreen != 0);
     Psyz_AudioSetOutputVolume(host_options.volume);
@@ -1252,10 +1274,11 @@ static void Host_ControlHd(int enabled,const char *directory) {
 static void Host_ControlGraphics(int geometry, int antialiasing, int filtering) {
     const int values[3] = {geometry, antialiasing, filtering};
     HostOverlayState state = {.open=1, .page=HOST_PAGE_GRAPHICS};
+    SDL_Window *window = Psyz_GetWindow_SDL3();
     for (int i=0;i<3;++i) {
         state.row=4+i;
         if (kGraphics[state.row].get()!=values[i])
-            Host_ApplySettingsAction(&state, 1, 0, NULL);
+            Host_ApplySettingsAction(&state, 1, 0, window);
     }
 }
 
@@ -1942,7 +1965,8 @@ static void Host_DescribeCrash(char *out, size_t size) {
                      "\r\n== Settings ==\r\n"
                      "Settings file: %s\r\n"
                      "Graphics: render resolution %ux (renderer %ux), fullscreen %s, aspect ratio %s, "
-                     "dithering %s, geometry correction %s, antialiasing %s, model textures %s\r\n"
+                     "dithering %s, geometry correction %s, antialiasing %s, model textures %s, "
+                     "dynamic lighting %s, effect geometry %s\r\n"
                      "Audio: master volume %u%%\r\n"
                      "Controls: speed-up %ux while held, field run threshold %u\r\n"
                      "Discs: disc 1 %s, disc 2 %s\r\n",
@@ -1951,7 +1975,10 @@ static void Host_DescribeCrash(char *out, size_t size) {
                      host_options.scale, Psyz_VideoGetInternalResolution(), kSwitchNames[host_options.fullscreen != 0],
                      kAspectNames[host_options.aspect != 0], kDitherNames[host_options.dither != 0],
                      kSwitchNames[host_options.geometry_correction != 0], kAntialiasNames[host_options.antialiasing != 0],
-                     kFilterNames[host_options.model_filtering != 0], host_options.volume, host_options.speed_factor,
+                     kFilterNames[host_options.model_filtering != 0],
+                     kSwitchNames[host_options.dynamic_lighting != 0],
+                     kSwitchNames[host_options.effect_geometry_correction != 0],
+                     host_options.volume, host_options.speed_factor,
                      host_options.analog_run_threshold, Host_CrashFileName(host_options.discs[0]),
                      Host_CrashFileName(host_options.discs[1]));
     Host_CrashAppend(out, size, &used, "Keyboard:");
@@ -2078,6 +2105,7 @@ static void Host_PrintHelp(const char *program_name) {
     printf(
         "Usage: %s [--disc <USA Disc 1 CUE/BIN>] [--disc2 <USA Disc 2 CUE/BIN>] [--choose-discs] "
         "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] [--frame-interpolation 0|1] "
+        "[--dynamic-lighting 0|1] [--effect-geometry-correction 0|1] [--soft-shadows 0|1] "
         "[--headless | --headless-gpu] [--internal-resolution 1..8] [--frame-limit N] [--control-at N] "
         "[--dump-vram PATH] [--dump-frame PATH] [--dump-audio PATH] [--pad-at VBLANK:BUTTON_MASK ...] "
         "[--test-crash-after N | --test-abort-after N]\n",
@@ -2226,11 +2254,15 @@ int main(int argc, char **argv) {
                    !strcmp(argv[arg], "--antialiasing") ||
                    !strcmp(argv[arg], "--model-filtering") ||
                    !strcmp(argv[arg], "--widescreen") ||
-                   !strcmp(argv[arg], "--frame-interpolation")) {
+                   !strcmp(argv[arg], "--frame-interpolation") ||
+                   !strcmp(argv[arg], "--dynamic-lighting") ||
+                   !strcmp(argv[arg], "--effect-geometry-correction")) {
             unsigned effect = !strcmp(argv[arg], "--geometry-correction") ? 1u :
                               !strcmp(argv[arg], "--antialiasing") ? 2u :
                               !strcmp(argv[arg], "--model-filtering") ? 4u :
-                              !strcmp(argv[arg], "--widescreen") ? 8u : 16u;
+                              !strcmp(argv[arg], "--widescreen") ? 8u :
+                              !strcmp(argv[arg], "--frame-interpolation") ? 16u :
+                              !strcmp(argv[arg], "--dynamic-lighting") ? 32u : 64u;
             if ((effect_arguments & effect) || arg + 1 >= argc ||
                 (strcmp(argv[arg+1], "0") && strcmp(argv[arg+1], "1"))) {
                 fprintf(stderr, "Missing, invalid or duplicate graphics effect (use 0 or 1)\n");
@@ -2242,7 +2274,9 @@ int main(int argc, char **argv) {
             else if (effect == 2u) host_options.antialiasing = enabled;
             else if (effect == 4u) host_options.model_filtering = enabled;
             else if(effect==8u) host_options.widescreen = enabled;
-            else host_options.frame_interpolation=enabled;
+            else if (effect == 16u) host_options.frame_interpolation=enabled;
+            else if (effect == 32u) host_options.dynamic_lighting = enabled;
+            else host_options.effect_geometry_correction = enabled;
         } else if (!strcmp(argv[arg], "--frame-limit")) {
             char *end = NULL;
             errno = 0;
@@ -2498,18 +2532,22 @@ images_ready:;
         Psyz_VideoSetAntialiasing(host_options.antialiasing);
         Psyz_VideoSetModelFiltering(host_options.model_filtering);
         Psyz_VideoSetWidescreen(host_options.widescreen);
+        Psyz_VideoSetDynamicLighting(host_options.dynamic_lighting != 0);
+        Psyz_VideoSetEffectGeometryCorrection(host_options.effect_geometry_correction != 0);
     }
     /* Widescreen reads background texels to find where a room's picture
      * ends (mesh_list.c); kept on so switching it on mid-game works. */
     Psyz_GpuSetVramCopy(1);
     Boot_InitSystem();
-    if (Psyz_VideoGetInternalResolution() != internal_resolution) {
+    if ((!interactive || resolution_argument) &&
+        Psyz_VideoGetInternalResolution() != internal_resolution) {
         fprintf(stderr, "Requested internal resolution unavailable\n");
         goto shutdown;
     }
     if (interactive) {
         SDL_Window *window = Psyz_GetWindow_SDL3();
         Host_ApplyOptions(window);
+        Host_SaveOptions();
     }
     mode = 0;
 

@@ -161,6 +161,12 @@ static const char *const kFrameRateNames[]={"30 Hz (original)","60 Hz (interpola
 ACCESSORS(FrameInterpolation,host_options.frame_interpolation!=0,
           host_options.frame_interpolation=i)
 
+ACCESSORS(DynamicLighting, host_options.dynamic_lighting != 0,
+          host_options.dynamic_lighting = i)
+
+ACCESSORS(EffectGeometryCorrection, host_options.effect_geometry_correction != 0,
+          host_options.effect_geometry_correction = i)
+
 static const OverlaySetting kGraphics[] = {
     SETTING("Render resolution", "Higher values increase image detail and GPU load.",
             kScaleNames, Scale),
@@ -178,6 +184,10 @@ static const OverlaySetting kGraphics[] = {
             kFilterNames, ModelFiltering),
     SETTING("Gameplay display", "Interpolate models and scrolling between original game frames. Game speed and input timing stay original.",
             kFrameRateNames, FrameInterpolation),
+    SETTING("Dynamic lighting", "Smooth 3D directional lighting on characters and monsters.",
+            kSwitchNames, DynamicLighting),
+    SETTING("Effect geometry", "Subpixel vertex precision for spell and particle effects.",
+            kSwitchNames, EffectGeometryCorrection),
 };
 
 /* audio */
@@ -1139,7 +1149,7 @@ static void Host_WriteOverlayQuad(
 
 static int Host_UploadOverlaySurfaceAndVertices(SDL_GPUDevice *device) {
     if (s_overlaySurface.w <= 0 || s_overlaySurface.h <= 0 || s_overlayWindowW <= 0 ||
-        s_overlayWindowH <= 0) {
+        s_overlayWindowH <= 0 || s_overlayVertexBuffer == NULL) {
         return 0;
     }
     if (s_overlayTexture == NULL || s_overlayTextureW != s_overlaySurface.w ||
@@ -1157,11 +1167,13 @@ static int Host_UploadOverlaySurfaceAndVertices(SDL_GPUDevice *device) {
         info.layer_count_or_depth = 1;
         info.num_levels = 1;
         s_overlayTexture = SDL_CreateGPUTexture(device, &info);
-        s_overlayTextureW = s_overlaySurface.w;
-        s_overlayTextureH = s_overlaySurface.h;
         if (s_overlayTexture == NULL) {
+            s_overlayTextureW = 0;
+            s_overlayTextureH = 0;
             return 0;
         }
+        s_overlayTextureW = s_overlaySurface.w;
+        s_overlayTextureH = s_overlaySurface.h;
     }
 
     OverlayGpuVertex verts[12];
@@ -1267,10 +1279,10 @@ static void Host_OverlayRefreshGPU(
     } else {
         OverlayPaint(&s_overlaySurface, state, &layout);
     }
-    if (Host_EnsureOverlayPipeline(device, SDL_GetGPUSwapchainTextureFormat(device, window))) {
-        Host_UploadOverlaySurfaceAndVertices(device);
+    if (Host_EnsureOverlayPipeline(device, SDL_GetGPUSwapchainTextureFormat(device, window)) &&
+        Host_UploadOverlaySurfaceAndVertices(device)) {
+        state->dirty = 0;
     }
-    state->dirty = 0;
 }
 
 static void Host_OverlayRenderGPU(SDL_GPUCommandBuffer *command, SDL_GPURenderPass *pass) {

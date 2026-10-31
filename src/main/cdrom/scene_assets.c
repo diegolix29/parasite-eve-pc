@@ -284,7 +284,7 @@ void Draw_ClearOnFlag(void) {
 #include <stdarg.h>
 #include <string.h>
 #include <SDL3/SDL_stdinc.h>
-static FILE *Disc_Utf8File(const char *path,const char *mode) {
+FILE *Disc_Utf8File(const char *path,const char *mode) {
 #ifdef _WIN32
     wchar_t *wide_path=(wchar_t *)SDL_iconv_string("UTF-16LE","UTF-8",path,strlen(path)+1);
     wchar_t *wide_mode=(wchar_t *)SDL_iconv_string("UTF-16LE","UTF-8",mode,strlen(mode)+1);

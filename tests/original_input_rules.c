@@ -794,6 +794,29 @@ int main(int argc, char **argv) {
     assert(kGraphics[7].get==GetFrameInterpolation && kGraphics[7].count==2);
     host_options.frame_interpolation=0;
 
+    assert(host_options.dynamic_lighting == 0);
+    assert(host_options.effect_geometry_correction == 0);
+    assert(Host_ParseOptionValue("graphics", "dynamic_lighting", enabled_effect));
+    assert(Host_ParseOptionValue("graphics", "effect_geometry_correction", enabled_effect));
+    assert(Host_SaveOptions());
+    host_options.dynamic_lighting = host_options.effect_geometry_correction = 0;
+    Host_LoadOptions(host_options.user_file);
+    assert(host_options.dynamic_lighting == 1 &&
+           host_options.effect_geometry_correction == 1);
+    assert(!Host_ParseOptionValue("graphics", "dynamic_lighting", invalid_effect));
+    assert(!Host_ParseOptionValue("graphics", "effect_geometry_correction", invalid_effect));
+    assert(kGraphics[8].get == GetDynamicLighting && kGraphics[8].count == 2 && kGraphics[8].get() == 1);
+    assert(kGraphics[9].get == GetEffectGeometryCorrection && kGraphics[9].count == 2 && kGraphics[9].get() == 1);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 1 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 1);
+    kGraphics[8].set(0);
+    kGraphics[9].set(0);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 0 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 0);
+    assert(Host_SaveOptions());
+
     char invalid[4096];
     snprintf(invalid, sizeof(invalid), "%s/invalid.toml", test_directory);
     FILE *f = fopen(invalid, "w");
