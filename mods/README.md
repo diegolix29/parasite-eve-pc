@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -50,6 +50,7 @@ mods/
   pe_economy/          Junk and loot, Mod Catalog / Dismantle / Rebuild, Requisition, Wayne and Warner
   pe_collection/       Bestiary and Wardrobe registries, skins, Wardrobe menu (packs register here)
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
+  pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
   pe_hello/            example mod (not built by default)
 ```
 
@@ -63,6 +64,12 @@ gives one copy), INVENTORY_REBUILD (duplicates fold into one slot), SLOT_DRAWN (
 rounds column). Only base items of kinds 10 and 12..15 stack; Junk stays out while pe_economy's
 Junk economy is on. Saved as the `pe_stacks.counts` record (204 bytes, up to 100 stacks). With the
 mod or the option off, extra copies go back into free slots as plain items.
+
+## Warp (pe_warp)
+
+F1 > Warp: pick a story checkpoint and Warp. It sets script variable 74 (story progress) to that
+point and runs the field script's own room transfer (Script_EncodeBarcode) on the next free field
+frame, never during a battle, an event, a room change or a movie.
 
 ## A mod
 
