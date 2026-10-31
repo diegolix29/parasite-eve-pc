@@ -5,7 +5,7 @@
 A native PC port of Parasite Eve, built from the original game code with
 [our PsyZ fork](https://github.com/khasinski/parasite-eve-psyz).
 
-![Parasite Eve running in the native port](docs/images/gameplay.png)
+![Parasite Eve running in the native port](docs/images/gameplay.png?v=3)
 
 ## Play
 
