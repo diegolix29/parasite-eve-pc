@@ -51,6 +51,8 @@ mods/
   pe_collection/       Bestiary and Wardrobe registries, skins, Wardrobe menu (packs register here)
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
   pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
+  pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
+                       by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
 ```
 
