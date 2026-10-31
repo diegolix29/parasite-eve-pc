@@ -29,6 +29,8 @@ The left stick provides analog movement. **Escape → Controls → Field run thr
 Settings and selected disc paths are saved automatically. Memory cards are kept in `memory-cards` beside your user preferences. Older `bu00`/`bu10` cards from the launch or executable folder are imported once, keeping the original files.
 **Escape → Graphics** includes geometry correction, antialiasing, model texture filtering and an optional **Widescreen** aspect ratio. Widescreen shows more of the original background where available; narrow scenes and movies stay in 4:3.
 
+For smoother motion, enable **Escape → Graphics → Gameplay display → 60 Hz (interpolated)**. This optional setting smooths models and camera movement while keeping the original game speed. It is off by default.
+
 If the game crashes, it saves a report and shows where to find it. Attach that file when reporting the problem on Discord.
 
 ## Mods
@@ -99,3 +101,4 @@ cmake --build build-mods --parallel
 `PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp`).
 
 For development details, see [code organization](docs/CODE_ORGANIZATION.md).
+[Parasite Eve Lighting Lab](tools/lighting-editor/README.md) is a separate desktop tool for experimenting with room lighting. Download it from [Releases](https://github.com/khasinski/parasite-eve-pc/releases). Lighting profiles are not yet used in the game.

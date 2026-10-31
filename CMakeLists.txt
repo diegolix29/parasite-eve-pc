@@ -4,7 +4,7 @@ if(CMAKE_HOST_APPLE AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET
    AND (NOT DEFINED CMAKE_SYSTEM_NAME OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"))
     set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum supported macOS version")
 endif()
-project(parasite-eve-pc VERSION 0.8.0 LANGUAGES C)
+project(parasite-eve-pc VERSION 0.9.0 LANGUAGES C)
 option(PE_MACOS_BUNDLE "Package the macOS application bundle" OFF)
 
 set(CMAKE_C_STANDARD 11)
@@ -572,9 +572,16 @@ if(BUILD_TESTING)
     set_tests_properties(original-game-hd-backgrounds PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "game-assets;gpu;hd-assets")
     find_package(Python3 QUIET COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME lighting-editor-assets COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/lighting-editor/test_assets.py)
+        set_tests_properties(lighting-editor-assets PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 LABELS "tools")
         add_test(NAME hd-mod-download-safety COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tests/hd_mod_download.py $<TARGET_FILE:parasite-eve-pc>)
         set_tests_properties(hd-mod-download-safety PROPERTIES TIMEOUT 90 LABELS "downloads")
+        add_test(NAME original-game-frame-interpolation COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tests/frame_interpolation.py $<TARGET_FILE:parasite-eve-pc>)
+        set_tests_properties(original-game-frame-interpolation PROPERTIES SKIP_RETURN_CODE 77
+            TIMEOUT 420 LABELS "game-assets;gpu")
         add_test(NAME original-game-hd-hot-apply COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tests/hd_hot_apply.py $<TARGET_FILE:parasite-eve-pc>)
         set_tests_properties(original-game-hd-hot-apply PROPERTIES SKIP_RETURN_CODE 77
@@ -824,9 +831,22 @@ if(BUILD_TESTING)
         $<TARGET_OBJECTS:parasite-eve-original-shadow>)
     target_compile_definitions(test-original-shadow PRIVATE __psyz)
     if(PSYZ_RENDERER STREQUAL "sdl3_gpu")
+        add_executable(test-psyz-interpolation
+            third_party/psyz/psyz/tests/test_main.c
+            third_party/psyz/psyz/tests/test_libgpu.c
+            third_party/psyz/psyz/tests/frontbuffer_psyz.c
+            third_party/psyz/ztest/ztest.c)
+        target_include_directories(test-psyz-interpolation PRIVATE third_party/psyz/ztest)
+        target_compile_definitions(test-psyz-interpolation PRIVATE __psyz PSYZ_TEST_SDL_GPU=1)
+        target_link_libraries(test-psyz-interpolation PRIVATE psyz)
+        add_test(NAME original-gpu-frame-interpolation COMMAND test-psyz-interpolation --filter=gpu::interpolated*)
+        set_tests_properties(original-gpu-frame-interpolation PROPERTIES TIMEOUT 90 LABELS "gpu"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/third_party/psyz/psyz/tests"
+            SKIP_REGULAR_EXPRESSION "requires SDL GPU"
+            ENVIRONMENT "PSYZ_HEADLESS=gpu;SDL_AUDIODRIVER=dummy;PSYZ_VSYNC_LIMITLESS=1")
         add_executable(test-gpu-resource-failures tests/gpu_resource_failures.c)
         target_link_libraries(test-gpu-resource-failures PRIVATE psyz)
-        foreach(mode upload readback reset)
+        foreach(mode upload readback reset resize swapchain-resize)
             add_test(NAME original-gpu-resource-${mode} COMMAND test-gpu-resource-failures --${mode})
             set_tests_properties(original-gpu-resource-${mode} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60
                 LABELS "gpu" ENVIRONMENT "PSYZ_HEADLESS=gpu;SDL_AUDIO_DRIVER=dummy")

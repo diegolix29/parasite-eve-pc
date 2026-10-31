@@ -884,7 +884,49 @@ int main(int argc, char **argv) {
     assert(host_options.widescreen && !host_options.aspect && kGraphics[2].get() == 2);
     kGraphics[2].set(0);
     assert(!host_options.widescreen && !host_options.aspect && kGraphics[2].get() == 0);
-    assert(COUNT_OF(kGraphics) <= OVERLAY_VISIBLE_CONTROLS);
+    assert(COUNT_OF(kGraphics) <= Host_SettingsVisibleSettingCount(HOST_PAGE_GRAPHICS));
+    assert(host_options.frame_interpolation==0);
+    assert(Host_ParseOptionValue("graphics","frame_interpolation",enabled_effect));
+    assert(Host_SaveOptions());host_options.frame_interpolation=0;
+    Host_LoadOptions(host_options.user_file);assert(host_options.frame_interpolation==1);
+    assert(!Host_ParseOptionValue("graphics","frame_interpolation",invalid_effect));
+    assert(kGraphics[7].get==GetFrameInterpolation && kGraphics[7].count==2);
+    host_options.frame_interpolation=0;
+
+    assert(kGraphics[0].get == GetScale && kGraphics[0].count == 5);
+    const unsigned expected_scales[5] = {1, 2, 4, 6, 8};
+    for (int i = 0; i < 5; ++i) {
+        kGraphics[0].set(i);
+        assert(host_options.scale == expected_scales[i] && kGraphics[0].get() == i);
+    }
+    char odd_scale[] = "5";
+    assert(Host_ParseOptionValue("graphics", "internal_resolution", odd_scale));
+    assert(host_options.scale == 6 && kGraphics[0].get() == 3);
+    kGraphics[0].set(0);
+    assert(host_options.scale == 1);
+
+    assert(host_options.dynamic_lighting == 0);
+    assert(host_options.effect_geometry_correction == 0);
+    assert(Host_ParseOptionValue("graphics", "dynamic_lighting", enabled_effect));
+    assert(Host_ParseOptionValue("graphics", "effect_geometry_correction", enabled_effect));
+    assert(Host_SaveOptions());
+    host_options.dynamic_lighting = host_options.effect_geometry_correction = 0;
+    Host_LoadOptions(host_options.user_file);
+    assert(host_options.dynamic_lighting == 1 &&
+           host_options.effect_geometry_correction == 1);
+    assert(!Host_ParseOptionValue("graphics", "dynamic_lighting", invalid_effect));
+    assert(!Host_ParseOptionValue("graphics", "effect_geometry_correction", invalid_effect));
+    assert(kGraphics[8].get == GetDynamicLighting && kGraphics[8].count == 2 && kGraphics[8].get() == 1);
+    assert(kGraphics[9].get == GetEffectGeometryCorrection && kGraphics[9].count == 2 && kGraphics[9].get() == 1);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 1 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 1);
+    kGraphics[8].set(0);
+    kGraphics[9].set(0);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 0 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 0);
+    assert(Host_SaveOptions());
 
     char invalid[4096];
     snprintf(invalid, sizeof(invalid), "%s/invalid.toml", test_directory);

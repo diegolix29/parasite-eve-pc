@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.9
+
+- Keep the last working graphics resolution when a GPU allocation fails, and show the actual settings in the menu.
+- Recreate Direct3D 12 window buffers safely when switching fullscreen or resizing the window.
+- Added optional 60 Hz interpolated gameplay presentation, dynamic actor lighting and effect geometry PGXP in **Escape → Graphics**.
+- Fixed 1px vertical seams on HD widescreen backgrounds and removed odd internal resolution multipliers (`3x`, `5x`, `7x`) that produced tile seam artifacts.
+- Fixed widescreen background edge detection past black cutouts and straightened Aya's mirror line in the rehearsal room (`M319`).
+- Fixed a battle crash when a delayed hit lands on an already released target.
+- Memory cards: import saves copied beside the game after the first launch, and automatically open the active memory card in the save editor.
+- Redesigned Mod Catalog with native Tune Up panels and independent scrolling, and upgraded the Wardrobe menu with a Bestiary-style browser and 3D previews.
+- Added optional stacked consumables (`pe_stacks`) and story checkpoint Warp menu (`pe_warp`) mods.
+- Added optional language pack support (`pe_lang`) with multilingual fonts, localization build tools and a Latin American Spanish interface pilot.
 
 ## 0.8
 

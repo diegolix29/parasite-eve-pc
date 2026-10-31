@@ -103,6 +103,8 @@ static void Render_LoadHdWidescreen(void) {
             if(size>=0 && (size_t)size<sizeof(filename))loaded=Psyz_GpuLoadSpriteAtlas(key,filename)==1;
         }
         if(!loaded){valid=0;break;}
+        for(unsigned n=0;n<count;++n)
+            Psyz_GpuRegisterInterpolationBackgroundPair(&hd_wide[group].packets[0][n].r,&hd_wide[group].packets[1][n].r);
         hd_wide[group].count=(unsigned)count;hd_wide[group].key=key;
         hd_wide[group].left=l;hd_wide[group].right=r;
     }
@@ -149,6 +151,7 @@ void Render_LinkHdWidescreenBackdrop(int slot,RenderNativeTag *ordering) {
 /* Hash immutable descriptors before scripts animate the native entries. The
  * exporter hashes the same little-endian fields, independent of host pointers. */
 void Render_PrepareHdBackgrounds(void) {
+    Psyz_GpuResetInterpolation();
     const uint64_t previous_key=hd_geometry_key;
     Render_ResetHdWidescreen();
     const char *pack=SDL_getenv("PE_HD_BACKGROUNDS");
@@ -248,6 +251,8 @@ int Render_LoadMeshEntry(GeomEntry *entry, RenderTilePacket *buffer, void **end)
         }
         if (!loaded) atlas_key=0;
     }
+    for(unsigned i=0;i<count;++i)
+        Psyz_GpuRegisterInterpolationBackgroundPair(&buffer[i].r,&buffer[count+i].r);
     entry->u30.prim = buffer;
     /* The page pointer and disp_x are stored through pointers to the fields.
      * GCC 2.7 lets a load of a fixed scalar pass a structure field store, but
