@@ -794,6 +794,18 @@ int main(int argc, char **argv) {
     assert(kGraphics[7].get==GetFrameInterpolation && kGraphics[7].count==2);
     host_options.frame_interpolation=0;
 
+    assert(kGraphics[0].get == GetScale && kGraphics[0].count == 5);
+    const unsigned expected_scales[5] = {1, 2, 4, 6, 8};
+    for (int i = 0; i < 5; ++i) {
+        kGraphics[0].set(i);
+        assert(host_options.scale == expected_scales[i] && kGraphics[0].get() == i);
+    }
+    char odd_scale[] = "5";
+    assert(Host_ParseOptionValue("graphics", "internal_resolution", odd_scale));
+    assert(host_options.scale == 6 && kGraphics[0].get() == 3);
+    kGraphics[0].set(0);
+    assert(host_options.scale == 1);
+
     assert(host_options.dynamic_lighting == 0);
     assert(host_options.effect_geometry_correction == 0);
     assert(Host_ParseOptionValue("graphics", "dynamic_lighting", enabled_effect));

@@ -130,11 +130,18 @@ static const char *const kSwitchNames[] = {"Off", "On"};
 
 /* graphics */
 
+static const unsigned kScaleValues[] = {1, 2, 4, 6, 8};
 static const char *const kScaleNames[] = {
-    "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x"
+    "1x", "2x", "4x", "6x", "8x"
 };
-ACCESSORS(Scale, ClampIndex((int)host_options.scale - 1, COUNT_OF(kScaleNames)),
-          host_options.scale = (unsigned)(i + 1))
+static int ScaleIndex(unsigned scale) {
+    for (int i = 0; i < COUNT_OF(kScaleValues); ++i) {
+        if (scale <= kScaleValues[i]) return i;
+    }
+    return COUNT_OF(kScaleValues) - 1;
+}
+ACCESSORS(Scale, ScaleIndex(host_options.scale),
+          host_options.scale = kScaleValues[ClampIndex(i, COUNT_OF(kScaleValues))])
 
 ACCESSORS(Fullscreen, host_options.fullscreen != 0,
           host_options.fullscreen = i)

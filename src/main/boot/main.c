@@ -410,6 +410,9 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
             if (v < 1 || v > 8) {
                 return 0;
             }
+            if (v > 1 && (v & 1)) {
+                ++v;
+            }
             host_options.scale = (unsigned)v;
         } else if (!strcmp(key, "fullscreen")) {
             if (v > 1) {
@@ -2105,7 +2108,7 @@ static void Host_PrintHelp(const char *program_name) {
     printf(
         "Usage: %s [--disc <USA Disc 1 CUE/BIN>] [--disc2 <USA Disc 2 CUE/BIN>] [--choose-discs] "
         "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] [--frame-interpolation 0|1] "
-        "[--dynamic-lighting 0|1] [--effect-geometry-correction 0|1] [--soft-shadows 0|1] "
+        "[--dynamic-lighting 0|1] [--effect-geometry-correction 0|1] "
         "[--headless | --headless-gpu] [--internal-resolution 1..8] [--frame-limit N] [--control-at N] "
         "[--dump-vram PATH] [--dump-frame PATH] [--dump-audio PATH] [--pad-at VBLANK:BUTTON_MASK ...] "
         "[--test-crash-after N | --test-abort-after N]\n",
