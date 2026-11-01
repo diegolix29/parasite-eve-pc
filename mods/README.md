@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave;pe_cheats` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -52,6 +52,7 @@ mods/
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
   pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
   pe_quicksave/        10 quick save slots in the game's own save format (F10 / F11 / F12)
+  pe_cheats/           god mode, infinite ammo and PE, instant win, all PE powers
   pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
                        by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
@@ -82,6 +83,11 @@ in the free field and kept beside the preferences as quicksave_<slot>.mcd. Loadi
 way Save_LoadCardFileIntoRuntime does, without the card menu's dialogs, then runs the field
 script's room transfer to the saved room: the room starts again as after a loaded save. It holds
 what a save holds, not Aya's place in the room or a fight in progress.
+
+## Cheats (pe_cheats)
+
+F1 > Cheats: God mode, Infinite ammo and PE, Win this battle, and Learn all / Restore PE powers.
+All off until chosen; while they are off the mod writes nothing.
 
 ## A mod
 
