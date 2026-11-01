@@ -32,7 +32,8 @@ enum {
     OVERLAY_PAGE_CONTROLS = 1,
     OVERLAY_PAGE_AUDIO = 2,
     OVERLAY_PAGE_DISCS = 3,
-    OVERLAY_PAGE_COUNT = 4,
+    OVERLAY_PAGE_MODS = 4,
+    OVERLAY_PAGE_COUNT = 5,
     OVERLAY_ACTION_ROWS = 2,
     OVERLAY_VISIBLE_CONTROLS = 7,
 
@@ -129,11 +130,18 @@ static const char *const kSwitchNames[] = {"Off", "On"};
 
 /* graphics */
 
+static const unsigned kScaleValues[] = {1, 2, 4, 6, 8};
 static const char *const kScaleNames[] = {
-    "1x", "2x", "3x", "4x", "5x", "6x", "7x", "8x"
+    "1x", "2x", "4x", "6x", "8x"
 };
-ACCESSORS(Scale, ClampIndex((int)host_options.scale - 1, COUNT_OF(kScaleNames)),
-          host_options.scale = (unsigned)(i + 1))
+static int ScaleIndex(unsigned scale) {
+    for (int i = 0; i < COUNT_OF(kScaleValues); ++i) {
+        if (scale <= kScaleValues[i]) return i;
+    }
+    return COUNT_OF(kScaleValues) - 1;
+}
+ACCESSORS(Scale, ScaleIndex(host_options.scale),
+          host_options.scale = kScaleValues[ClampIndex(i, COUNT_OF(kScaleValues))])
 
 ACCESSORS(Fullscreen, host_options.fullscreen != 0,
           host_options.fullscreen = i)
@@ -156,6 +164,16 @@ static const char *const kFilterNames[] = {"Original", "Bilinear"};
 ACCESSORS(ModelFiltering, host_options.model_filtering != 0,
           host_options.model_filtering = i)
 
+static const char *const kFrameRateNames[]={"30 Hz (original)","60 Hz (interpolated)"};
+ACCESSORS(FrameInterpolation,host_options.frame_interpolation!=0,
+          host_options.frame_interpolation=i)
+
+ACCESSORS(DynamicLighting, host_options.dynamic_lighting != 0,
+          host_options.dynamic_lighting = i)
+
+ACCESSORS(EffectGeometryCorrection, host_options.effect_geometry_correction != 0,
+          host_options.effect_geometry_correction = i)
+
 static const OverlaySetting kGraphics[] = {
     SETTING("Render resolution", "Higher values increase image detail and GPU load.",
             kScaleNames, Scale),
@@ -171,6 +189,12 @@ static const OverlaySetting kGraphics[] = {
             kAntialiasNames, Antialiasing),
     SETTING("Model textures", "Bilinear filtering for 3D models; backgrounds and text keep original sampling.",
             kFilterNames, ModelFiltering),
+    SETTING("Gameplay display", "Interpolate models and scrolling between original game frames. Game speed and input timing stay original.",
+            kFrameRateNames, FrameInterpolation),
+    SETTING("Dynamic lighting", "Smooth 3D directional lighting on characters and monsters.",
+            kSwitchNames, DynamicLighting),
+    SETTING("Effect geometry", "Subpixel vertex precision for spell and particle effects.",
+            kSwitchNames, EffectGeometryCorrection),
 };
 
 /* audio */
@@ -188,7 +212,7 @@ static const OverlaySetting kAudio[] = {
 };
 
 static const char *const kPageNames[OVERLAY_PAGE_COUNT] = {
-    "Graphics", "Controls", "Audio", "Discs"
+    "Graphics", "Controls", "Audio", "Discs", "Mods"
 };
 
 static const char *OverlayPageName(int page) {
@@ -213,6 +237,7 @@ static int Host_SettingsPureRowCount(int page) {
     if (page == OVERLAY_PAGE_GRAPHICS) return COUNT_OF(kGraphics);
     if (page == OVERLAY_PAGE_CONTROLS) return 2 + HOST_BINDING_COUNT;
     if (page == OVERLAY_PAGE_AUDIO) return COUNT_OF(kAudio);
+    if (page == OVERLAY_PAGE_MODS) return 3;
     return 2;
 }
 
@@ -228,7 +253,7 @@ enum {
 
 static int Host_SettingsVisibleSettingCount(int page) {
     (void)page;
-    return OVERLAY_VISIBLE_CONTROLS;
+    return COUNT_OF(kGraphics)>OVERLAY_VISIBLE_CONTROLS ? COUNT_OF(kGraphics) : OVERLAY_VISIBLE_CONTROLS;
 }
 
 static int Host_SettingsVisibleRowCount(int page) {
@@ -717,6 +742,13 @@ static void PaintRows(const Painter *p) {
                         PaintSpeedLabel(p, mid, baseline, selected, label);
                     }
                 }
+            } else if (page == OVERLAY_PAGE_MODS) {
+                const char *names[]={"HD backgrounds","Background pack","Integrity check"};
+                if(row==0)PaintValueRow(p,names[row],Host_HdValue(row),mid,baseline,selected,0,label);
+                else {
+                    DrawText(p->surface,OVERLAY_PAD*s,baseline,17*s,names[row],label,ALIGN_LEFT);
+                    DrawText(p->surface,OverlayValueCentre()*s,baseline,17*s,Host_HdValue(row),selected?kAccent:kText,ALIGN_CENTRE);
+                }
             } else if (page == OVERLAY_PAGE_DISCS) {
                 char discLabel[32];
                 snprintf(discLabel, sizeof(discLabel), "Disc %d", row + 1);
@@ -732,6 +764,18 @@ static void PaintRows(const Painter *p) {
         }
     }
 
+    if(page==OVERLAY_PAGE_MODS) {
+        float x=OVERLAY_PAD*s,y=(OVERLAY_HEADER_H+5*OVERLAY_ROW_H)*s,w=(OVERLAY_PANEL_W-2*OVERLAY_PAD)*s;
+        if(Host_HdBusy()) {
+            char text[80];snprintf(text,sizeof(text),"Downloading / verifying: %d%%",Host_HdPercent());
+            DrawText(p->surface,x,y,15*s,text,kText,ALIGN_LEFT);
+            FillRoundRect(p->surface,x,y+18*s,w,10*s,5*s,WithAlpha(kText,.12f));
+            FillRoundRect(p->surface,x,y+18*s,w*Host_HdPercent()/100.f,10*s,5*s,kAccent);
+        } else {
+            char text[96];snprintf(text,sizeof(text),"Installed version: %s",*host_hd.version?host_hd.version:host_hd.development?"local preview":"none");
+            DrawText(p->surface,x,y,15*s,text,kMuted,ALIGN_LEFT);
+        }
+    }
     if (page == OVERLAY_PAGE_CONTROLS) {
         int scroll = Host_ClampControlsScroll(p->state->scroll);
         float trackTop = (OverlayRowTop(visibleSettings, 1) + 4.0f) * s;
@@ -799,7 +843,7 @@ static void PaintFooter(const Painter *p, int visibleRowCount) {
              14.0f * s, help, kMuted, ALIGN_LEFT);
     DrawText(p->surface, (float)OVERLAY_PAD * s, footerTop + 54.0f * s,
              13.0f * s,
-             "Up/Down select   Left/Right change   PgUp/PgDn page   Esc resume",
+             p->state->page==OVERLAY_PAGE_MODS?"Enter / click activate   PgUp/PgDn page   Esc resume":"Up/Down select   Left/Right change   PgUp/PgDn page   Esc resume",
              WithAlpha(kMuted, 0.7f), ALIGN_LEFT);
 }
 
@@ -1112,7 +1156,7 @@ static void Host_WriteOverlayQuad(
 
 static int Host_UploadOverlaySurfaceAndVertices(SDL_GPUDevice *device) {
     if (s_overlaySurface.w <= 0 || s_overlaySurface.h <= 0 || s_overlayWindowW <= 0 ||
-        s_overlayWindowH <= 0) {
+        s_overlayWindowH <= 0 || s_overlayVertexBuffer == NULL) {
         return 0;
     }
     if (s_overlayTexture == NULL || s_overlayTextureW != s_overlaySurface.w ||
@@ -1130,11 +1174,13 @@ static int Host_UploadOverlaySurfaceAndVertices(SDL_GPUDevice *device) {
         info.layer_count_or_depth = 1;
         info.num_levels = 1;
         s_overlayTexture = SDL_CreateGPUTexture(device, &info);
-        s_overlayTextureW = s_overlaySurface.w;
-        s_overlayTextureH = s_overlaySurface.h;
         if (s_overlayTexture == NULL) {
+            s_overlayTextureW = 0;
+            s_overlayTextureH = 0;
             return 0;
         }
+        s_overlayTextureW = s_overlaySurface.w;
+        s_overlayTextureH = s_overlaySurface.h;
     }
 
     OverlayGpuVertex verts[12];
@@ -1240,10 +1286,10 @@ static void Host_OverlayRefreshGPU(
     } else {
         OverlayPaint(&s_overlaySurface, state, &layout);
     }
-    if (Host_EnsureOverlayPipeline(device, SDL_GetGPUSwapchainTextureFormat(device, window))) {
-        Host_UploadOverlaySurfaceAndVertices(device);
+    if (Host_EnsureOverlayPipeline(device, SDL_GetGPUSwapchainTextureFormat(device, window)) &&
+        Host_UploadOverlaySurfaceAndVertices(device)) {
+        state->dirty = 0;
     }
-    state->dirty = 0;
 }
 
 static void Host_OverlayRenderGPU(SDL_GPUCommandBuffer *command, SDL_GPURenderPass *pass) {

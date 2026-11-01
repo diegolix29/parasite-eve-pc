@@ -49,8 +49,8 @@ typedef struct GteVector {
 GteMatrix *RotMatrix(GteShortVector *angles, GteMatrix *matrix);
 GteMatrix *RotMatrixYXZ(GteShortVector *angles, GteMatrix *matrix);
 GteMatrix *RotMatrixZYX(GteShortVector *angles, GteMatrix *matrix);
-GteMatrix *RotMatrixY(s32 angle, GteMatrix *matrix);
-GteMatrix *RotMatrixZ(s32 angle, GteMatrix *matrix);
+GteMatrix *RotMatrixY(long angle, GteMatrix *matrix);
+GteMatrix *RotMatrixZ(long angle, GteMatrix *matrix);
 
 GteShortVector *ApplyMatrixSV(const GteMatrix *matrix,
                             const GteShortVector *v, GteShortVector *out);
@@ -74,11 +74,11 @@ typedef union GteAtanEntryAddress {
     s16 *entry;
     u32 word;
 } GteAtanEntryAddress;
-int SquareRoot0(int value);
+long SquareRoot0(long value);
 void VectorNormal(GteVector *vector, GteVector *unit);
-void VectorNormalS(GteVector *vector, GteShortVector *unit);
-void OuterProduct12(void *matrix_column, void *vector, void *output);
-void SetFogNearFar(int near, int far, int h);
+long VectorNormalS(GteVector *vector, GteShortVector *unit);
+GteVector *OuterProduct12(void *matrix_column, void *vector, void *output);
+void SetFogNearFar(long near, long far, long h);
 /* Original REG03 register-transfer entry points. */
 void SetVertex0(void *vertex);
 void SetVertex1(void *vertex);
@@ -115,6 +115,6 @@ GteMatrix *CompMatrix(GteMatrix *m0, GteMatrix *m1, GteMatrix *m2);
 
 void RotTrans(const GteShortVector *v, GteVector *out, int *flag);
 
-int RotTransPers(const GteShortVector *v, int *sxy, int *p, int *flag);
+long RotTransPers(const GteShortVector *v, int *sxy, int *p, int *flag);
 
 #endif

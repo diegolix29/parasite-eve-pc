@@ -97,5 +97,6 @@ void Render_CentreWidescreenOverlay(int slot, RenderNativeTag *ordering, int top
  * not follow its point this frame. Call after the frame's packets are linked
  * and before Render_CommitWidescreenPicture, which hands the position on. */
 void Render_LinkFieldSubpixel(int slot, RenderNativeTag *ordering);
+void Render_LinkHdWidescreenBackdrop(int slot, RenderNativeTag *ordering);
 
 #endif

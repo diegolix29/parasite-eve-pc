@@ -1,3 +1,8 @@
+#include <psyz/video.h>
+#include <SDL3/SDL.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include "common.h"
 #include "pe1/boot_disc_check.h"
 #include "pe1/boot_display.h"
@@ -10,6 +15,22 @@
 
 void ResetGraph(int);
 
+/* Retain the immutable title reference; the disc workspace is reused later. */
+static unsigned char title_reference[320*204*3];
+static int title_reference_valid;
+void MenuCard_RefreshHdBackground(void) {
+    if (!title_reference_valid) return;
+    const char *pack=SDL_getenv("PE_HD_BACKGROUNDS");
+    if (pack && *pack) {
+        char filename[4096];const char *formats[]={"webp","png"};
+        for(unsigned format=0;format<2;++format) {
+            int length=snprintf(filename,sizeof(filename),"%s/title.%s",pack,formats[format]);
+            if(length>=0 && (size_t)length<sizeof(filename) &&
+               Psyz_VideoSetRgb24Backdrop(filename,title_reference,320,204,20,16)==1)break;
+        }
+    }
+}
+
 void MenuCard_FlipScreenPages(void) {
     int i;
     int page;
@@ -17,6 +38,9 @@ void MenuCard_FlipScreenPages(void) {
     MemcardScreenBuffer *screen;
     RECT main_rect;
 
+    memcpy(title_reference,g_MemcardImageBundle+g_MemcardImageOffsets[0]+sizeof(MemcardImage),sizeof(title_reference));
+    title_reference_valid=1;
+    MenuCard_RefreshHdBackground();
     for (i = 0; i < 2; i++) {
         page = g_MemcardScreenPage == 0;
         g_MemcardCurrentScreen = g_MemcardScreenBuffers[page];

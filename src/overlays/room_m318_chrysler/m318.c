@@ -102,7 +102,12 @@ int RoomM318_FanSweep(int mode, void *data, intptr_t argument) {
         FieldFx_PlaySoundAtOwner(0x5F4, 0x80);
         handles = FieldFx_InitCallbackList(g_FieldFxActiveTaskSlot->end, 0x10, 0x18,
                                 RoomM318_FanSweepSpark);
-        handles += FieldFx_AllocCallbackList(&sweep->pool, handles, 8, 0x12, RoomM318_FanSweepTrailCallback);
+        if (handles < 0) return handles;
+        {
+            int extra = FieldFx_AllocCallbackList(&sweep->pool, handles, 8, 0x12, RoomM318_FanSweepTrailCallback);
+            if (extra < 0) return extra;
+            handles += extra;
+        }
         return handles;
     case 1:
         if (g_FieldFxCurrentAge < 0x20 && (g_FieldFxCurrentAge & 1)) {

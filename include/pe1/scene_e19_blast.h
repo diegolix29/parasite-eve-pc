@@ -61,6 +61,6 @@ extern void *g_SceneE19BlastModel0, *g_SceneE19BlastModel1, *g_SceneE19BlastMode
 int SceneE19_Blast(int mode, void *memory, intptr_t argument);
 int rand(void);
 void FieldFx_ModelSetTexture(int page, int clut);
-void Geo_ClipAlternatingArcPoint(int mode, int count, int value);
+#include "pe1/field_ring_geometry.h"
 
 #endif

@@ -1,3 +1,66 @@
+/* Real pack integration: a changed rendered background must leave every
+ * original state field, PCM sample and native VRAM byte unchanged. */
+static int original_native_hd_backgrounds(const char *executable)
+{
+    const char *disc=getenv("PE_TEST_DISC"),*pack=getenv("PE_TEST_HD_BACKGROUNDS");
+    if(!disc || !*disc || !pack || !*pack)return 77;
+    if(!SDL_Init(SDL_INIT_EVENTS))return 1;
+    char resolved[3][4096];const char *paths[]={executable,disc,pack};
+    char *cwd=SDL_GetCurrentDirectory();if(!cwd)return 1;
+    for(unsigned i=0;i<3;++i){
+        bool absolute=paths[i][0]=='/' || paths[i][0]=='\\' || (paths[i][0] && paths[i][1]==':');
+        int n=snprintf(resolved[i],sizeof(resolved[i]),"%s%s",absolute?"":cwd,paths[i]);
+        if(n<0 || (size_t)n>=sizeof(resolved[i])){SDL_free(cwd);return 1;}
+    }
+    SDL_free(cwd);
+    char *reports[2]={0},*states[2]={0};unsigned char *captures[2][3]={{0}};size_t sizes[2][3]={{0}};int ok=1;
+    for(unsigned hd=0;hd<2 && ok;++hd){
+        char directory[4096],capture[3][4200],logpath[4200];
+        snprintf(directory,sizeof(directory),"%spe-hd-%llx-%u",SDL_GetBasePath(),(unsigned long long)SDL_GetPerformanceCounter(),hd);
+        if(!SDL_CreateDirectory(directory)){ok=0;break;}
+        const char *names[]={"frame.ppm","vram.bin","audio.pcm"};
+        for(unsigned i=0;i<3;++i)snprintf(capture[i],sizeof(capture[i]),"%s/%s",directory,names[i]);
+        SDL_Environment *env=SDL_CreateEnvironment(true);if(!env){ok=0;break;}
+        SDL_SetEnvironmentVariable(env,"SDL_AUDIO_DRIVER","dummy",true);
+        SDL_SetEnvironmentVariable(env,"PSYZ_AUDIO_CLOCK","video",true);
+        SDL_UnsetEnvironmentVariable(env,"PE_HD_BACKGROUNDS");
+        if(hd)SDL_SetEnvironmentVariable(env,"PE_HD_BACKGROUNDS",resolved[2],true);
+        const char *args[]={resolved[0],"--disc",resolved[1],"--headless-gpu","--internal-resolution","4",
+            "--geometry-correction","0","--antialiasing","0","--model-filtering","0",
+            "--frame-limit","24000","--dump-frame",capture[0],"--dump-vram",capture[1],"--dump-audio",capture[2],
+            "--pad-at","10000:8","--pad-at","10010:0","--pad-at","11000:16","--pad-at","11010:0",
+            "--pad-at","11500:16384","--pad-at","11510:0",NULL};
+        SDL_PropertiesID props=SDL_CreateProperties();SDL_SetPointerProperty(props,SDL_PROP_PROCESS_CREATE_ARGS_POINTER,(void *)args);
+        SDL_SetPointerProperty(props,SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER,env);
+        SDL_SetStringProperty(props,SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING,directory);
+        SDL_SetNumberProperty(props,SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER,SDL_PROCESS_STDIO_APP);
+        SDL_SetBooleanProperty(props,SDL_PROP_PROCESS_CREATE_STDERR_TO_STDOUT_BOOLEAN,true);
+        SDL_Process *child=SDL_CreateProcessWithProperties(props);SDL_DestroyProperties(props);SDL_DestroyEnvironment(env);
+        if(!child){ok=0;break;}
+        int status=-1;size_t bytes=0;reports[hd]=SDL_ReadProcess(child,&bytes,&status);SDL_DestroyProcess(child);
+        snprintf(logpath,sizeof(logpath),"%s/game.log",directory);
+        if(reports[hd])SDL_SaveFile(logpath,reports[hd],bytes);
+        states[hd]=reports[hd]?strstr(reports[hd],"{\"event\":\"frame_limit\""):NULL;
+        if(states[hd]){char *end=strchr(states[hd],'\n');if(end)*end=0;}
+        ok=status==0 && states[hd] && strstr(states[hd],"\"video_state\":0") &&
+            !strstr(reports[hd],"runtime error:") && !strstr(reports[hd],"AddressSanitizer");
+        for(unsigned i=0;i<3;++i){captures[hd][i]=SDL_LoadFile(capture[i],&sizes[hd][i]);if(!captures[hd][i])ok=0;}
+        if(!ok)fprintf(stderr,"HD replay failed: status=%d (artifacts %s)\n",status,directory);
+    }
+    if(ok){
+        ok=!strcmp(states[0],states[1]);
+        for(unsigned i=0;i<3;++i)if(sizes[0][i]!=sizes[1][i])ok=0;
+        if(ok){
+            ok=!memcmp(captures[0][1],captures[1][1],sizes[0][1]) && !memcmp(captures[0][2],captures[1][2],sizes[0][2]);
+            size_t differences=0;for(size_t i=0;i<sizes[0][0];++i)differences+=captures[0][0][i]!=captures[1][0][i];
+            printf("HD real scene: %zu changed rendered bytes; original state, native VRAM and PCM match\n",differences);
+            if(differences<1000)ok=0;
+        }
+    }
+    for(unsigned hd=0;hd<2;++hd){SDL_free(reports[hd]);for(unsigned i=0;i<3;++i)SDL_free(captures[hd][i]);}
+    return ok?0:1;
+}
+
 /* Exercise the menu actions after a real scene has already been rendered.
  * Startup-only comparisons miss precision lost in a deferred GPU queue. */
 static int original_native_graphics_controls(const char *executable)

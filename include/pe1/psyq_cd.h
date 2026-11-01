@@ -371,7 +371,7 @@ int CdReady(int mode, u8 *result);
 void DS_sync(u8 *result);
 void DS_ready(u8 *result);
 /* Data DMA synchronization: mode 0 waits; nonzero polls. */
-int CD_datasync(int mode);
+
 int CdDataSync(int mode);
 int CdStatus(void);
 int CdMode(void);
@@ -386,8 +386,8 @@ u32 StFreeRing(u32 *base);
 u32 StGetNext(u32 **addr, u32 **header);
 void StCdInterrupt(void);
 int DsDataSync(int mode);
-int DsGetSector();
-int DsGetSector2();
+int DsGetSector(void *address, int words);
+int DsGetSector2(void *address, int words);
 void DsReadBreak(void);
 DsCallback CdDataCallback(DsCallback callback);
 void DS_read_cbsync(u_char event);
@@ -461,7 +461,7 @@ extern u32 g_CdStatus;
 extern u32 g_CdStatus1; /* SDK CD_status1, also stored as a full word. */
 /* Counts status words that newly report the shell (lid) open. */
 extern int g_CdLidOpenCount;
-int CD_cw(int command, void *parameters, u8 *result, int mode);
+int CD_cw(u8 command, u8 *parameters, u8 *result, int mode);
 void dma_execute(int channel, void *address, int blockCount, int blockSize,
                  volatile u32 control, u8 interrupt, int reserved);
 /* The streaming caller supplies a fourth word; the copy helper ignores it. */
@@ -473,7 +473,7 @@ int CdMix(CdlATV *volume);
 int DsMix(CdlATV *volume);
 int CD_vol(CdlATV *volume);
 int CD_getsector(void *destination, int words);
-int CD_getsector2(void *destination, int words);
+
 int CdGetSector2(void *address, int size);
 int CdGetSector(void *address, int size);
 

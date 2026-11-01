@@ -1,4 +1,5 @@
 #include "common.h"
+#include <psyz/gpu.h>
 #include "pe1/akao_send.h"
 #include "pe1/battle_runtime.h"
 #include "pe1/battle_status.h"
@@ -39,14 +40,15 @@ void Field_HandleStateTransition(void);
 void Scene_UpdateEntityList(void);
 void Entity_FrameUpdate(void);
 void Draw_ClearOnFlag(void);
-void Render_Update(void);
+
 void FieldFx_UpdateScriptSprites(void);
 void Boot_FinishFrame(void);
 void Akao_Cmd_F1(void);
-void Render_Noop(int mode);
+
 int Asset_UnloadTableEntries(void);
 
 void Boot_FlushSceneFast(void) {
+    Psyz_GpuResetInterpolation();
     RECT rect;
     u32 status;
     u32 first_status;
@@ -59,8 +61,9 @@ void Boot_FlushSceneFast(void) {
         ClearImage(&rect, 0, 0, 1);
     }
     DrawSync(0);
+    Psyz_GpuClearInterpolationPackets();
     Akao_Cmd_F1();
-    Render_Noop(1);
+    Render_Noop();
     Asset_UnloadTableEntries();
     status = g_GameState.flags | 2;
     g_GameStateFlags = (g_GameStateFlags | 0x40) & ~0x3800;
@@ -122,6 +125,7 @@ int Boot_RunFrame(void)
         state = &g_GameState;
         fade = (RenderTintTargetView *)&g_ScreenTint.targetR;
         PE_HOOK(PE_HOOK_SCENE_START, NULL);
+        Psyz_GpuResetInterpolation();
         if (g_BootSceneStarted) g_BootSceneStarted();
         do {
             /* Geometry belongs to this game frame, not to each VBlank.
@@ -212,8 +216,9 @@ loop_end_check:
         ClearImage(&clear_rect, 0, 0, 1);
     }
     DrawSync(0);
+    Psyz_GpuClearInterpolationPackets();
     Akao_Cmd_F1();
-    Render_Noop(1);
+    Render_Noop();
     Asset_UnloadTableEntries();
     g_GameStateFlags = (g_GameStateFlags | 0x40) & ~0x3800u;
     status = g_GameStateFlagsWord | 2;

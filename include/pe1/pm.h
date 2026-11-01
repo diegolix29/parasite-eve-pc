@@ -43,8 +43,9 @@ int Pm_Exec(int slot);
 /* Stops the process in a slot; unless forced, only when owner matches. */
 int Pm_Stop(int slot, void *owner, int force);
 int Scene_FreeEntityTable(void *owner);
-/* Pm_StopAll and Pm_StopLowerHalf also return the first failing Pm_Stop
- * result; the battle headers declare them void. */
+/* Return the first failing Pm_Stop result. */
+s32 Pm_StopAll(void);
+s32 Pm_StopLowerHalf(void);
 s32 Pm_StopUpperHalf(void);
 void Pm_StopAllBoth(void);
 int Pm_RunPrimary(void);

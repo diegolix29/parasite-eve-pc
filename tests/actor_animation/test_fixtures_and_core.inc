@@ -610,7 +610,7 @@ static int glyph_asset_records(PeDisc *disc, const PeDiscFile *exe)
 
 /* Record positional sound requests; no replacement audio ships with the game. */
 static unsigned sounds;
-int Asset_Find08w(int id,int mode,int x,int y,int z)
+int Asset_Find08w(int id,int mode,s16 x,s16 y,s16 z)
 {
     (void)mode;(void)x;(void)y;(void)z;if(id==1000)++sounds;return 0;
 }

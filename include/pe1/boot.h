@@ -23,6 +23,7 @@ extern void (*g_BootSceneStarted)(void);
 extern u32 g_BootHostVBlankLimit,g_BootHostVBlankCount;
 /* Headless diagnostic boundary; stdin controls input and graphics settings. */
 extern u32 g_BootHostControlAt;
+extern void (*g_BootHostHdOptions)(int enabled, const char *directory);
 extern void (*g_BootHostGraphicsOptions)(int geometry, int antialiasing, int filtering);
 extern const char *g_BootHostVramPath;
 extern const char *g_BootHostFramePath;

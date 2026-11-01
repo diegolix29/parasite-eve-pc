@@ -12,6 +12,7 @@ void FieldFx_ModelSetTexture(int tpage, int clut);
 /* Scrolls the model's texture coordinates by the given offsets. */
 void FieldFx_ModelScrollUv(union FieldTexturedModel *model, u8 x_offset, u8 y_offset);
 void FieldFx_ModelSetSemiTrans(short value);
+void FieldFx_ModelSetDepthBias(short value);
 void FieldFx_ModelSaveColors(char *data);
 void FieldFx_ModelRestoreColors(char *data);
 void FieldFx_ModelScaleColors(char *data, u16 factor);
