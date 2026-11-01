@@ -47,6 +47,7 @@ PE1_STATIC_ASSERT(sizeof(FieldRingGeometry) == ((sizeof(void *) + 20 + _Alignof(
 
 /* Field engine: builds and draws one ring through placement; mode 0
  * composes the camera rotation first. */
+int Geo_ClipAlternatingArcPoint(int radius, int divisor, int segment);
 void FieldFx_BuildRingGeometry(FieldRingGeometry *ring);
 void FieldFx_DrawShadedRing(FieldRingGeometry *ring, GteMatrix *placement, u8 mode);
 

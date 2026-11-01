@@ -1,0 +1,40 @@
+[
+  {
+    "maps": [
+      "M162"
+    ],
+    "problem": "Road cobbles look twisted/unnatural and too glossy",
+    "status": "Applied to packed atlases and full-scene gallery; visual review pending"
+  },
+  {
+    "maps": [
+      "M005",
+      "M049",
+      "M050",
+      "M372"
+    ],
+    "problem": "Same theater lobby has inconsistent floor surfaces between views; visible invented tiles instead of nearly uniform original surface",
+    "status": "Applied to packed atlases and full-scene gallery; visual review pending"
+  },
+  {
+    "maps": [
+      "M075"
+    ],
+    "problem": "White lettering on red background must read INFORMATION",
+    "status": "Applied to packed atlases and full-scene gallery; visual review pending"
+  },
+  {
+    "maps": [
+      "M208"
+    ],
+    "problem": "Poster lettering is hallucinated; keep it deliberately soft, blurred and unreadable, preserving poster art/layout",
+    "status": "Applied to packed atlases and full-scene gallery; visual review pending"
+  },
+  {
+    "maps": [
+      "E15"
+    ],
+    "problem": "Lighting post must be behind railing; railing must occlude pole shaft",
+    "status": "Applied to packed atlases and full-scene gallery; visual review pending"
+  }
+]

@@ -1,0 +1,397 @@
+[
+  {
+    "room": "M005",
+    "group": 0,
+    "image": "corrections/theater-lobby/f811c4dacaebed6c602b56b6.png",
+    "polygons": [
+      [
+        [
+          0,
+          447
+        ],
+        [
+          320,
+          447
+        ],
+        [
+          320,
+          496
+        ],
+        [
+          0,
+          496
+        ]
+      ]
+    ],
+    "exclude": [
+      [
+        [
+          49,
+          435
+        ],
+        [
+          96,
+          435
+        ],
+        [
+          96,
+          464
+        ],
+        [
+          49,
+          464
+        ]
+      ],
+      [
+        [
+          171,
+          440
+        ],
+        [
+          227,
+          440
+        ],
+        [
+          227,
+          459
+        ],
+        [
+          171,
+          459
+        ]
+      ]
+    ],
+    "reason": "Consistent seamless dark theater floor",
+    "coherent_all_layers": true,
+    "preserve_black_material": false
+  },
+  {
+    "room": "M005",
+    "group": 1,
+    "image": "corrections/theater-lobby/floor-canonical.png",
+    "polygons": [
+      [
+        [
+          73,
+          146
+        ],
+        [
+          259,
+          146
+        ],
+        [
+          263,
+          155
+        ],
+        [
+          320,
+          174
+        ],
+        [
+          320,
+          224
+        ],
+        [
+          0,
+          224
+        ],
+        [
+          0,
+          184
+        ],
+        [
+          69,
+          184
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Consistent seamless dark theater floor",
+    "coherent_all_layers": true,
+    "preserve_black_material": false
+  },
+  {
+    "room": "M049",
+    "group": 0,
+    "image": "corrections/theater-lobby/f2ae58ba7fcb224471f9238b.png",
+    "polygons": [
+      [
+        [
+          0,
+          447
+        ],
+        [
+          320,
+          447
+        ],
+        [
+          320,
+          496
+        ],
+        [
+          0,
+          496
+        ]
+      ]
+    ],
+    "exclude": [
+      [
+        [
+          49,
+          435
+        ],
+        [
+          96,
+          435
+        ],
+        [
+          96,
+          464
+        ],
+        [
+          49,
+          464
+        ]
+      ],
+      [
+        [
+          171,
+          440
+        ],
+        [
+          227,
+          440
+        ],
+        [
+          227,
+          459
+        ],
+        [
+          171,
+          459
+        ]
+      ]
+    ],
+    "reason": "Consistent seamless dark theater floor",
+    "coherent_all_layers": true,
+    "preserve_black_material": false
+  },
+  {
+    "room": "M049",
+    "group": 1,
+    "image": "corrections/theater-lobby/4a24187bed7f681be5887e98.png",
+    "polygons": [
+      [
+        [
+          73,
+          146
+        ],
+        [
+          259,
+          146
+        ],
+        [
+          263,
+          155
+        ],
+        [
+          320,
+          174
+        ],
+        [
+          320,
+          224
+        ],
+        [
+          0,
+          224
+        ],
+        [
+          0,
+          184
+        ],
+        [
+          69,
+          184
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Consistent seamless dark theater floor",
+    "coherent_all_layers": true,
+    "preserve_black_material": false
+  },
+  {
+    "room": "M005",
+    "group": 2,
+    "image": "corrections/theater-lobby/10f33e8f66c6c395326021fb.png",
+    "polygons": [
+      [
+        [
+          81,
+          0
+        ],
+        [
+          170,
+          0
+        ],
+        [
+          178,
+          37
+        ],
+        [
+          220,
+          61
+        ],
+        [
+          269,
+          65
+        ],
+        [
+          320,
+          44
+        ],
+        [
+          320,
+          224
+        ],
+        [
+          0,
+          224
+        ],
+        [
+          0,
+          64
+        ],
+        [
+          76,
+          64
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Consistent seamless dark theater floor",
+    "coherent_all_layers": true,
+    "preserve_black_material": false
+  },
+  {
+    "room": "M075",
+    "group": 0,
+    "image": "corrections/M075/information-v2.png",
+    "polygons": [
+      [
+        [
+          179,
+          94
+        ],
+        [
+          215,
+          98
+        ],
+        [
+          215,
+          119
+        ],
+        [
+          179,
+          115
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Correct Information lettering"
+  },
+  {
+    "room": "M208",
+    "group": 0,
+    "image": "corrections/M208/poster-v2.png",
+    "polygons": [
+      [
+        [
+          231,
+          63
+        ],
+        [
+          281,
+          61
+        ],
+        [
+          281,
+          74
+        ],
+        [
+          231,
+          76
+        ]
+      ],
+      [
+        [
+          231,
+          100
+        ],
+        [
+          281,
+          103
+        ],
+        [
+          281,
+          107
+        ],
+        [
+          231,
+          104
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Unreadable softened poster lettering; preserve illustration"
+  },
+  {
+    "room": "E15",
+    "group": 0,
+    "image": "corrections/E15/railing-v2.png",
+    "polygons": [
+      [
+        [
+          115,
+          136
+        ],
+        [
+          135,
+          136
+        ],
+        [
+          135,
+          195
+        ],
+        [
+          115,
+          195
+        ]
+      ],
+      [
+        [
+          366,
+          136
+        ],
+        [
+          387,
+          136
+        ],
+        [
+          387,
+          195
+        ],
+        [
+          366,
+          195
+        ]
+      ]
+    ],
+    "exclude": [],
+    "reason": "Lamp shafts behind foreground railing",
+    "coherent_all_layers": true,
+    "preserve_black_material": false,
+    "feather_hd": 12
+  }
+]

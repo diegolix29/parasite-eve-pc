@@ -204,7 +204,7 @@ int main(void) {
             CHECK(entry->u30.prim==start);
             CHECK((u8 *)entry->u34.pagePackets==start+(size_t)count*2*sizeof(RenderTilePacket));
             RenderTilePacket *sprites=entry->u30.prim;
-            for(unsigned p=0;p<count*2;++p){CHECK(sprites[p].length==3);
+            for(unsigned p=0;p<count*2;++p){CHECK(sprites[p].length==7);
                 CHECK(entry->u34.pagePackets[p].length==1);}
             free(entry);++meshes;
         }

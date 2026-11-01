@@ -1,0 +1,7357 @@
+{
+  "views": 490,
+  "installed": 2,
+  "remaining": 488,
+  "records": [
+    {
+      "room": "E00",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E01",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E02",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E03",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E04",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E05",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E06",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E07",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E08",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E09",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E10",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E11",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E12",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E13",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E14",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E15",
+      "group": 0,
+      "active_size": [
+        464,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E15",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E15",
+      "group": 2,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E16",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E16",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E16",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E17",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E17",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E17",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E18",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E18",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E19",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E19",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E19",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E19",
+      "group": 3,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E20",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E20",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E21",
+      "group": 0,
+      "active_size": [
+        320,
+        64
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E22",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E22",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E22",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E23",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E24",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E25",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E26",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "E27",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M001",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "installed-static-candidate"
+    },
+    {
+      "room": "M002",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "installed-static-candidate"
+    },
+    {
+      "room": "M003",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M004",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M004",
+      "group": 1,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M005",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M005",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M005",
+      "group": 2,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M006",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M009",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M010",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M011",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M012",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M012",
+      "group": 1,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M013",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M014",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M014",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M016",
+      "group": 0,
+      "active_size": [
+        512,
+        440
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M017",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M018",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M018",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M020",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M021",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M022",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M023",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M023",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M023",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M024",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M025",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M026",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M027",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M028",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M029",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M030",
+      "group": 0,
+      "active_size": [
+        512,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M031",
+      "group": 0,
+      "active_size": [
+        512,
+        224
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M032",
+      "group": 0,
+      "active_size": [
+        512,
+        320
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M033",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M033",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M034",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M034",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M035",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M036",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M037",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-day1",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M038",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M039",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M040",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M041",
+      "group": 0,
+      "active_size": [
+        360,
+        300
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M042",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M043",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M043",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M044",
+      "group": 0,
+      "active_size": [
+        480,
+        360
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M044",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M044",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M045",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M046",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M047",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M047",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M048",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M048",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M049",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M049",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M050",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M050",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M051",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M051",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M052",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M052",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M053",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M054",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M054",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M055",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M055",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M056",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M057",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M058",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M058",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M059",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M060",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M061",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M062",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M063",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M064",
+      "group": 0,
+      "active_size": [
+        320,
+        336
+      ],
+      "controllers": 10,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M065",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M066",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M067",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M068",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M069",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M069",
+      "group": 1,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M070",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M070",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M071",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M072",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M073",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M074",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M074",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M075",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M076",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M077",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M078",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M079",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M080",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M081",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M082",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M083",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M084",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M085",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M086",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M087",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M088",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M089",
+      "group": 0,
+      "active_size": [
+        336,
+        240
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M090",
+      "group": 0,
+      "active_size": [
+        640,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M091",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M092",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M093",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M093",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M094",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M095",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M096",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M097",
+      "group": 0,
+      "active_size": [
+        512,
+        480
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M098",
+      "group": 0,
+      "active_size": [
+        360,
+        300
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M099",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M100",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M100",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M102",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M103",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M103",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M104",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M106",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M107",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M107",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M108",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M108",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M109",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M109",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M110",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M110",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M111",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M112",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M113",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 7,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M114",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M115",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M116",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M117",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M118",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 4,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M118",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M120",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M121",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M122",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M123",
+      "group": 0,
+      "active_size": [
+        480,
+        360
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M123",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M123",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M124",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M125",
+      "group": 0,
+      "active_size": [
+        511,
+        320
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M126",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M127",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M128",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M129",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M130",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M131",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M132",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M133",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M134",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M135",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M136",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M137",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 4,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M138",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M139",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M140",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M141",
+      "group": 0,
+      "active_size": [
+        512,
+        464
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M142",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M143",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M143",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M144",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 13,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M144",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 13,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M145",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M146",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M147",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M148",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M149",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M150",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M151",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M152",
+      "group": 0,
+      "active_size": [
+        512,
+        368
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M153",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M154",
+      "group": 0,
+      "active_size": [
+        512,
+        336
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M155",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M156",
+      "group": 0,
+      "active_size": [
+        512,
+        352
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M157",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M158",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 7,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M159",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M160",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M161",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M162",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M163",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M164",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M165",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M166",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M167",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M168",
+      "group": 0,
+      "active_size": [
+        320,
+        384
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M169",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M170",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M171",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M172",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M173",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M174",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M175",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M176",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M176",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M178",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M179",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M180",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M181",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M182",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M183",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M184",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M185",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M186",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M187",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M188",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M188",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M189",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M190",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M191",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M191",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M192",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M192",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M193",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M194",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M195",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M196",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M197",
+      "group": 0,
+      "active_size": [
+        512,
+        412
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M198",
+      "group": 0,
+      "active_size": [
+        464,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M199",
+      "group": 0,
+      "active_size": [
+        320,
+        480
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M199",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M200",
+      "group": 0,
+      "active_size": [
+        512,
+        400
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M201",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 11,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M202",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M203",
+      "group": 0,
+      "active_size": [
+        496,
+        448
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M204",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M205",
+      "group": 0,
+      "active_size": [
+        480,
+        416
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M206",
+      "group": 0,
+      "active_size": [
+        512,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M207",
+      "group": 0,
+      "active_size": [
+        432,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M208",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M209",
+      "group": 0,
+      "active_size": [
+        448,
+        448
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M209",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M210",
+      "group": 0,
+      "active_size": [
+        448,
+        448
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M211",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M212",
+      "group": 0,
+      "active_size": [
+        320,
+        416
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M213",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M214",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M215",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M216",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M217",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M218",
+      "group": 0,
+      "active_size": [
+        512,
+        400
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M219",
+      "group": 0,
+      "active_size": [
+        416,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M220",
+      "group": 0,
+      "active_size": [
+        512,
+        432
+      ],
+      "controllers": 7,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M221",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M221",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M222",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M223",
+      "group": 0,
+      "active_size": [
+        432,
+        480
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M224",
+      "group": 0,
+      "active_size": [
+        512,
+        480
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M225",
+      "group": 0,
+      "active_size": [
+        512,
+        400
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M226",
+      "group": 0,
+      "active_size": [
+        512,
+        400
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M227",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M228",
+      "group": 0,
+      "active_size": [
+        320,
+        400
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M229",
+      "group": 0,
+      "active_size": [
+        480,
+        368
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M230",
+      "group": 0,
+      "active_size": [
+        512,
+        368
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M231",
+      "group": 0,
+      "active_size": [
+        512,
+        368
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M232",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M233",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M234",
+      "group": 0,
+      "active_size": [
+        512,
+        400
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M235",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M236",
+      "group": 0,
+      "active_size": [
+        512,
+        368
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M237",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M237",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M238",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M239",
+      "group": 0,
+      "active_size": [
+        512,
+        432
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M239",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M239",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M240",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 11,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M241",
+      "group": 0,
+      "active_size": [
+        512,
+        432
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M241",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M241",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M242",
+      "group": 0,
+      "active_size": [
+        480,
+        448
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M243",
+      "group": 0,
+      "active_size": [
+        432,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M244",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M245",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M245",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M246",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M247",
+      "group": 0,
+      "active_size": [
+        464,
+        480
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M248",
+      "group": 0,
+      "active_size": [
+        400,
+        480
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M249",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M249",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M249",
+      "group": 2,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M249",
+      "group": 3,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M249",
+      "group": 4,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M250",
+      "group": 0,
+      "active_size": [
+        432,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M251",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M251",
+      "group": 1,
+      "active_size": [
+        320,
+        784
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M252",
+      "group": 0,
+      "active_size": [
+        512,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M253",
+      "group": 0,
+      "active_size": [
+        432,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M254",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M254",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M255",
+      "group": 0,
+      "active_size": [
+        512,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M255",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M256",
+      "group": 0,
+      "active_size": [
+        512,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M256",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M257",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 11,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M258",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M259",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M260",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M260",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M262",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M263",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M265",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M266",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M267",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M268",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M269",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M269",
+      "group": 1,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M271",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 4,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M271",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M272",
+      "group": 0,
+      "active_size": [
+        512,
+        224
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M273",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M273",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M273",
+      "group": 2,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M275",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M276",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M276",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M278",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M279",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M280",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M281",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M282",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M283",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M283",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M284",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M285",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M286",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M287",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M288",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M288",
+      "group": 1,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M290",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M291",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M292",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M293",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M294",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M295",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M296",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M297",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M298",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M299",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M300",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M301",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M302",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M303",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M304",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M305",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M306",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M307",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M308",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M309",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M310",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M311",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M312",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M313",
+      "group": 0,
+      "active_size": [
+        496,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M314",
+      "group": 0,
+      "active_size": [
+        480,
+        480
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M315",
+      "group": 0,
+      "active_size": [
+        464,
+        464
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M316",
+      "group": 0,
+      "active_size": [
+        448,
+        448
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M317",
+      "group": 0,
+      "active_size": [
+        432,
+        432
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M318",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M319",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M319",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M319",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M320",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M321",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M322",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M323",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M324",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 4,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M325",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M326",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M327",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M328",
+      "group": 0,
+      "active_size": [
+        512,
+        464
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M329",
+      "group": 0,
+      "active_size": [
+        320,
+        320
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M330",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M331",
+      "group": 0,
+      "active_size": [
+        511,
+        320
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M332",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M333",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M334",
+      "group": 0,
+      "active_size": [
+        512,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M335",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M337",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M339",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 3,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M340",
+      "group": 0,
+      "active_size": [
+        512,
+        416
+      ],
+      "controllers": 6,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M341",
+      "group": 0,
+      "active_size": [
+        480,
+        416
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M342",
+      "group": 0,
+      "active_size": [
+        512,
+        480
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M343",
+      "group": 0,
+      "active_size": [
+        512,
+        368
+      ],
+      "controllers": 5,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M344",
+      "group": 0,
+      "active_size": [
+        512,
+        432
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M344",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M344",
+      "group": 2,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M345",
+      "group": 0,
+      "active_size": [
+        448,
+        448
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M346",
+      "group": 0,
+      "active_size": [
+        512,
+        384
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M347",
+      "group": 0,
+      "active_size": [
+        320,
+        64
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M348",
+      "group": 0,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M348",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M349",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M349",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M350",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M350",
+      "group": 1,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M358",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M367",
+      "group": 0,
+      "active_size": [
+        512,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M371",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M371",
+      "group": 1,
+      "active_size": [
+        512,
+        496
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M372",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M372",
+      "group": 1,
+      "active_size": [
+        320,
+        224
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M373",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M374",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M377",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M378",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M379",
+      "group": 0,
+      "active_size": [
+        480,
+        448
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M380",
+      "group": 0,
+      "active_size": [
+        368,
+        288
+      ],
+      "controllers": 2,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M381",
+      "group": 0,
+      "active_size": [
+        512,
+        352
+      ],
+      "controllers": 1,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-animation-review"
+    },
+    {
+      "room": "M381",
+      "group": 1,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-animated",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M382",
+      "group": 0,
+      "active_size": [
+        320,
+        64
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M383",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M384",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M385",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M386",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M387",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M388",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M389",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M390",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M391",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M392",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M393",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M394",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M395",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M396",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M397",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M398",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M399",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M400",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M401",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M402",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M403",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M404",
+      "group": 0,
+      "active_size": [
+        400,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M405",
+      "group": 0,
+      "active_size": [
+        320,
+        512
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M406",
+      "group": 0,
+      "active_size": [
+        512,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M407",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M408",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    },
+    {
+      "room": "M409",
+      "group": 0,
+      "active_size": [
+        320,
+        240
+      ],
+      "controllers": 0,
+      "native_origin": [
+        0,
+        0
+      ],
+      "study": "hd-static",
+      "status": "pending-outpainting"
+    }
+  ]
+}

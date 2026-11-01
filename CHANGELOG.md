@@ -1,6 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.9
+
+- Keep the last working graphics resolution when a GPU allocation fails, and show the actual settings in the menu.
+- Recreate Direct3D 12 window buffers safely when switching fullscreen or resizing the window.
+- Added optional 60 Hz interpolated gameplay presentation, dynamic actor lighting and effect geometry PGXP in **Escape → Graphics**.
+- Fixed 1px vertical seams on HD widescreen backgrounds and removed odd internal resolution multipliers (`3x`, `5x`, `7x`) that produced tile seam artifacts.
+- Fixed widescreen background edge detection past black cutouts and straightened Aya's mirror line in the rehearsal room (`M319`).
+- Fixed a battle crash when a delayed hit lands on an already released target.
+- Memory cards: import saves copied beside the game after the first launch, and automatically open the active memory card in the save editor.
+- Redesigned Mod Catalog with native Tune Up panels and independent scrolling, and upgraded the Wardrobe menu with a Bestiary-style browser and 3D previews.
+- Added a **Hold / Toggle** mode for the speed-up button in **Escape → Controls**.
+- Added optional stacked consumables (`pe_stacks`), story checkpoint Warp (`pe_warp`), 10-slot quick save (`pe_quicksave`, F10/F11/F12) and Cheats (`pe_cheats`) mods.
+- Added optional language pack support (`pe_lang`) with multilingual fonts, localization build tools and a Latin American Spanish interface pilot.
+
+## 0.8
+
+- Added optional HD backgrounds, including the title screen. Download or update them in **Escape → Mods**, with progress, cancellation and file verification. Failed updates keep the previous copy; installation and on/off apply immediately.
+- Fixed HD installation and settings paths containing accented or non-Latin characters on Windows.
+- Reduced the background pack to about 327 MB using high-quality WebP and lossless reference data. Original backgrounds remain available with the mod off.
+- Added reviewed widescreen side artwork for the first two views; other scenes retain their existing framing.
+- Fixed native pointer and callback errors affecting field effects, inventory menus and late-game effects.
+- Hardened effect allocation failures and validated saved equipment slot counts.
+
+- Handle effect allocation failures without leaving incomplete effects active.
+
+- Improved inventory menu safety and corrected 64-bit game/SDK call signatures, including Windows crashes in Liberty Island effects.
 
 - Fixed a Windows x64 crash while drawing the beacon effect in the NYPD boss fight.
 - Added optional Junk economy, equipment dismantling/rebuilding and workshop services.

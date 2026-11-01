@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "pe1/display_env.h"
+#include "pe1/menu_widget.h"
 #include "pe1/psyq_gpu.h"
 
 /* Video display mode of each copied player (2 = 320 wide, 3 = 480 wide). */
@@ -19,6 +20,7 @@ void MenuCardFirst_ResetDisplayState(void);
 
 /* Prim list the memory card progress widget flushes; 0x40 marks a write. */
 extern int g_MemCardProgressPrimList;
+void MemCard_DrawProgress(MenuWidgetNode *node);
 
 
 #endif

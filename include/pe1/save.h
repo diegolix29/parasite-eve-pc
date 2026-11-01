@@ -23,6 +23,7 @@ PE1_STATIC_ASSERT(PE1_OFFSETOF(SaveRuntimeState, player) == 0x20,
 PE1_STATIC_ASSERT(PE1_OFFSETOF(SaveRuntimeState, player.runtime.inventory.equipment) == 0xCC,
                   save_equipment_records_offset);
 void Save_InitMetadataState(void);
+void Save_ResetMetadataWindow(void);
 /* Slot cell picked on the save screen and the deferred read/write of it. */
 extern int g_SaveSlotCellIndex;
 void Save_StartSelectedWriteSlot(void);

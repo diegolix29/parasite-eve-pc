@@ -21,7 +21,7 @@ s32 Render_ClampCameraPosition(s32 x, s32 y);
 int Render_InitViewState(void *matrix, void *screen);
 int Render_DrawMeshList(void *buffer, void **end);
 int Render_ResetAllEntries(void);
-void SetGeomScreen(int distance);
+void SetGeomScreen(long distance);
 int Render_PrepareFrame(void);
 
 int CdRom_SetSeekPos(unsigned int arg0);

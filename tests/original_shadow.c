@@ -1,4 +1,7 @@
 #include "pe1/render_shadow.h"
+#define SetLineF2 PeTest_SetLineF2
+#include "pe1/render_prim.h"
+#undef SetLineF2
 #include "pe1/room_fx_model.h"
 #include "pe1/render_matrix_slot.h"
 #include "pe1/render_buffers.h"
@@ -269,7 +272,7 @@ int main(int argc,char **argv)
         CHECK(Render_ScrollEntries()==0 && !memcmp(saved_entries,scrolling.entries,sizeof(saved_entries)));
     }
     g_GameStateFlags=0;
-    struct { RenderNativeTag tag; u8 r,g,b,code; u16 x,y; u8 u,v; u16 clut; } primitives[3][4];
+    struct { RenderNativeTag tag; u32 hd[4]; u8 r,g,b,code; u16 x,y; u8 u,v; u16 clut; } primitives[3][4];
     for(unsigned i=0;i<3;++i) {
         scrolling.entries[i].render.prim_count=2;
         scrolling.entries[i].render.u30.prim=primitives[i];
@@ -314,7 +317,7 @@ int main(int argc,char **argv)
         CHECK((s16)geometry.disp_src_x==expected_x && (s16)geometry.disp_src_y==expected_y && geometry.field26==50);
     }
     struct { GeomEntry entry; u32 positions[2]; u32 textures[4]; } mesh={0};
-    struct { RenderNativeTag tag; u8 r,g,b,code; u16 x,y; u8 u,v; u16 clut; } sprites[4]={0};
+    struct { RenderNativeTag tag; u32 hd[4]; u8 r,g,b,code; u16 x,y; u8 u,v; u16 clut; } sprites[4]={0};
     struct { RenderNativeTag tag; u32 command; } pages[4]={0};
     RenderNativeTag sprite_ordering[4096];
     mesh.entry.prim_count=2; mesh.entry.u30.prim=sprites;
@@ -336,18 +339,18 @@ int main(int argc,char **argv)
         CHECK(sprites[j].x==20 && sprites[j].y==30 && sprites[j+1].x==40 && sprites[j+1].y==50);
         CHECK(sprites[j].tag.length==3 && pages[j].tag.length==1);
     }
-    _Alignas(max_align_t) u8 mesh_work[4*sizeof(SPRT_16)+4*sizeof(pages[0])];
+    _Alignas(max_align_t) u8 mesh_work[4*sizeof(RenderTilePacket)+4*sizeof(pages[0])];
     mesh.entry.u2C.uv_ptr=(u8 *)mesh.textures-(u8 *)&mesh.entry;
     void *mesh_end=NULL;
     CHECK(Render_LoadMeshEntry(&mesh.entry,(void *)mesh_work,&mesh_end)==0);
     CHECK(mesh_end==mesh_work+sizeof(mesh_work));
     CHECK(mesh.entry.u30.prim==mesh_work);
     for(unsigned i=0;i<4;++i) {
-        SPRT_16 *sprite=(SPRT_16 *)mesh_work+i;
-        RenderNativeTag *page=(RenderNativeTag *)(mesh_work+4*sizeof(SPRT_16)+i*sizeof(pages[0]));
-        CHECK(((RenderNativeTag *)sprite)->length==3 && page->length==1);
-        CHECK(sprite->r0==128 && sprite->g0==128 && sprite->b0==128 && sprite->code==0x7c);
-        CHECK(sprite->x0==(i%2?40:20) && sprite->y0==(i%2?50:30));
+        RenderTilePacket *sprite=(RenderTilePacket *)mesh_work+i;
+        RenderNativeTag *page=(RenderNativeTag *)(mesh_work+4*sizeof(RenderTilePacket)+i*sizeof(pages[0]));
+        CHECK(((RenderNativeTag *)sprite)->length==7 && page->length==1);
+        CHECK(sprite->r==128 && sprite->g==128 && sprite->b==128 && sprite->code==0x7c);
+        CHECK(sprite->x==(i%2?40:20) && sprite->y==(i%2?50:30));
     }
     RenderShadowActor actor={0}; RenderObjectHeader model={0};
     RenderMatrix bone={0}; RenderShadowQuad packets[2]={0};
@@ -374,6 +377,25 @@ int main(int argc,char **argv)
         CHECK(linked==1 && q->tag.address!=(uintptr_t)q);
         CHECK(q->xy0!=q->xy1 && q->xy0!=q->xy2);
     }
+    CHECK(Psyz_VideoSetDynamicLighting(1)==0 && Psyz_VideoGetDynamicLighting()==1);
+    CHECK(Psyz_VideoSetEffectGeometryCorrection(1)==0 && Psyz_VideoGetEffectGeometryCorrection()==1);
+    Psyz_PgxpSetActive(1);
+    Psyz_GteSetPgxpEffectMode(1);
+    {
+        double m[3][3]={{1.0,0.0,0.0},{0.0,0.0,-1.0},{0.0,1.0,0.0}};
+        double t[3]={0.0,0.0,1024.0};
+        u32 fx_sxy=(163u)|((112u)<<16);
+        float sx=0.0f, sy=0.0f, sz=0.0f;
+        Psyz_GteSetPgxpMatrix(m, t);
+        Psyz_GteProjectFloatVertex(12.25, -8.5, 0.0, &fx_sxy, fx_sxy);
+        CHECK(Psyz_PgxpLookupVertex(&fx_sxy, fx_sxy, &sx, &sy, &sz)==2);
+        CHECK(sx > 163.0f && sx < 163.2f);
+        Psyz_VideoSetEffectGeometryCorrection(0);
+        CHECK(Psyz_PgxpLookupVertex(&fx_sxy, fx_sxy, &sx, &sy, &sz)==0);
+    }
+    Psyz_GteSetPgxpEffectMode(0);
+    Psyz_VideoSetEffectGeometryCorrection(0);
+    Psyz_VideoSetDynamicLighting(0);
     RenderShadowQuad saved=packets[1];
     actor.flags=0x400; CHECK(Render_DrawActorShadow(&actor)==0 && !memcmp(&saved,&packets[1],sizeof(saved)));
     actor.flags=0; actor.render_object.variant_visible=0;

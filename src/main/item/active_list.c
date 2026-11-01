@@ -50,8 +50,7 @@ void Akao_SetBgmVolumeFade(void) {
     g_AkaoPendingBgmVolumeFade = value;
 }
 
-/* Retail passes the window index although the reset ignores it. */
-void Save_ResetMetadataWindow(int);
+
 void Menu_ResetStateFlags(void);
 void Inv_SetDefaultItemId(void);
 void MenuWidget_InitPoolUnk(void);
@@ -84,7 +83,7 @@ void Inv_BoundsCheckAssertStub(int code, ...)
 
 void Menu_FullInit(void) {
     Menu_SetBattleEquipMode(0);
-    Save_ResetMetadataWindow(0);
+    Save_ResetMetadataWindow();
     g_SavedMenuMode.value = 0;
     g_MemCardDialogState = 0;
     g_MenuErrorSoundPending = 0;
@@ -101,7 +100,7 @@ void Menu_FullInit(void) {
     Save_InitMetadataState();
     BattleCmd_LoadWeaponModifiers();
     Menu_SaveBgInitFade();
-    Save_ResetMetadataWindow(1);
+    Save_ResetMetadataWindow();
     g_GameState.flags |= 0x40000000;
     Menu_SetEquipSlotIndex(1);
 }
@@ -585,6 +584,7 @@ void Menu_DrawActiveListSlot(s32 arg0) {
     }
     if (var_v0 != NULL) {
         Menu_DrawSlotRow(var_v0, saved_a1);
+        PE_HOOK(PE_HOOK_SLOT_DRAWN, (&(PeHookSlotDrawn){g_InvItemPtr, arg0}));
     }
 }
 
@@ -1001,20 +1001,26 @@ int Inv_PickRandomItem(int unused) {
     return g_InvItemPtr[g_InvPackedList[(g_InvPackedListCount * RandomByte()) >> 8]];
 }
 
-/* Historical name: formats the item message into the shared FF-terminated buffer. */
-static inline int CopyText(u8 *dest, const u8 *src) {
+/* Where reading `src` must stop: the end of the resident pack for its own text, none (the
+ * buffer's size still bounds the copy) for a text-lookup handler's replacement, 0 otherwise. */
+static inline uintptr_t TextReadEnd(const u8 *src) {
     uintptr_t begin = (uintptr_t)g_ResidentDataPack.bytes;
     uintptr_t end = begin + sizeof(g_ResidentDataPack.bytes);
-    if ((uintptr_t)src < begin || (uintptr_t)src >= end) return 0;
+    if ((uintptr_t)src >= begin && (uintptr_t)src < end) return end;
+    return Text_IsLookupReplacement(src) ? UINTPTR_MAX : 0;
+}
+/* Historical name: formats the item message into the shared FF-terminated buffer. */
+static inline int CopyText(u8 *dest, const u8 *src) {
+    uintptr_t end = TextReadEnd(src);
+    if (!end) return 0;
     for (unsigned i = 0; i < sizeof(g_InvItemMessageBuffer) && (uintptr_t)src < end; ++i) {
         if ((dest[i] = *src++) == 255) return 1;
     }
     return 0;
 }
 static inline int AppendText(u8 *dest, const u8 *src) {
-    uintptr_t begin = (uintptr_t)g_ResidentDataPack.bytes;
-    uintptr_t end = begin + sizeof(g_ResidentDataPack.bytes);
-    if ((uintptr_t)src < begin || (uintptr_t)src >= end) return 0;
+    uintptr_t end = TextReadEnd(src);
+    if (!end) return 0;
     unsigned i = 0;
     while (i < sizeof(g_InvItemMessageBuffer) && dest[i] != 255) ++i;
     for (; i < sizeof(g_InvItemMessageBuffer) && (uintptr_t)src < end; ++i) {

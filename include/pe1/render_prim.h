@@ -115,6 +115,9 @@ PE1_STATIC_ASSERT(PE1_OFFSETOF(RenderTexturedQuad, x3) == sizeof(RenderNativeTag
  * Address and command length occupy full native tag words. */
 typedef struct RenderTilePacket {
     uintptr_t address, length;
+    /* Queued presentation metadata; the original SPRT_16 follows unchanged.
+     * The NOP marker declares a packed command stream on LP64. */
+    u32 hd_command, hd_key_low, hd_key_high, packed_marker;
     u8 r, g, b, code;
     u16 x, y;
     u8 u, v;
@@ -142,8 +145,8 @@ typedef union RenderTileTexture {
     u8 bytes[8];
 } RenderTileTexture;
 
-PE1_STATIC_ASSERT(sizeof(RenderTilePacket) == ((sizeof(RenderNativeTag) + 12 + sizeof(void *) - 1) / sizeof(void *)) * sizeof(void *), render_tile_packet_size);
-PE1_STATIC_ASSERT(PE1_OFFSETOF(RenderTilePacket, clut) == sizeof(RenderNativeTag) + 10, render_tile_clut_offset);
+PE1_STATIC_ASSERT(sizeof(RenderTilePacket) == ((sizeof(RenderNativeTag) + 28 + sizeof(void *) - 1) / sizeof(void *)) * sizeof(void *), render_tile_packet_size);
+PE1_STATIC_ASSERT(PE1_OFFSETOF(RenderTilePacket, clut) == sizeof(RenderNativeTag) + 26, render_tile_clut_offset);
 PE1_STATIC_ASSERT(sizeof(RenderTexturePagePacket) == sizeof(RenderNativeTag) + sizeof(uintptr_t), render_texture_page_packet_size);
 PE1_STATIC_ASSERT(sizeof(RenderTileTexture) == 8, render_tile_texture_size);
 

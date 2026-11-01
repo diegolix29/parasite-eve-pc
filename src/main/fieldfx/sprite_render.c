@@ -1,4 +1,5 @@
 #include "common.h"
+#include <math.h>
 #include "pe1/field_billboard.h"
 #include "pe1/field_glow_layers.h"
 #include "pe1/field_oriented_sprite.h"
@@ -240,6 +241,7 @@ void FieldFx_DrawOrientedSprite(FieldOrientedSprite *sprite)
     gte_CompMatrix(&g_FieldFxScratch->matrix, &g_FieldFxScratch->local, &g_FieldFxScratch->matrix);
     gte_ldrotmatrix(&g_FieldFxScratch->matrix);
     gte_ldtransmatrix(&g_FieldFxScratch->matrix);
+    Psyz_GteSetPgxpEffectMode(1);
     gte_ldv3(g_FieldFxCellQuad, &g_FieldFxCellQuad[1], &g_FieldFxCellQuad[2]);
     gte_rtpt_padded();
     packet->tag.length = 9;
@@ -267,6 +269,7 @@ void FieldFx_DrawOrientedSprite(FieldOrientedSprite *sprite)
     packet->clut = GetClut(g_FieldFxSpriteClutX + g_FieldFxScratch->clutX,
                            g_FieldFxSpriteClutY + g_FieldFxScratch->clutY);
     gte_stsxy2(&packet->x3);
+    Psyz_GteSetPgxpEffectMode(0);
     packet->tag.address = STRIP_OT(g_FieldFxScratch->depth + sprite->depth)->address;
     link.tag = &packet->tag;
     STRIP_OT(g_FieldFxScratch->depth + sprite->depth)->address = link.word;
@@ -326,8 +329,11 @@ void FieldFx_DrawBillboard(FieldBillboard *board)
         gte_ldrotmatrix((const GteMatrixWords *)*slot);
         gte_ldtransmatrix((const GteMatrixWords *)*slot);
     }
+    Psyz_GteSetPgxpEffectMode(1);
     g_FieldFxBillboardScratch->depth = RotTransPers(&board->position, &g_FieldFxBillboardScratch->screen.word,
                                      &g_FieldFxBillboardScratch->p, &g_FieldFxBillboardScratch->flag);
+    float f_cx = 0.0f, f_cy = 0.0f, f_cw = 1.0f;
+    int has_pgxp = Psyz_GteGetLastPgxpVertex(&f_cx, &f_cy, &f_cw);
     g_FieldFxBillboardScratch->centerX = g_FieldFxBillboardScratch->screen.word;
     g_FieldFxBillboardScratch->centerY = g_FieldFxBillboardScratch->screen.xy.y;
     distance = g_GeomScroll.state.position.projectionDistance[0];
@@ -393,6 +399,44 @@ void FieldFx_DrawBillboard(FieldBillboard *board)
         packet->x3 = g_FieldFxBillboardScratch->centerX + halfWidth;
         packet->y3 = g_FieldFxBillboardScratch->centerY + halfHeight;
     }
+    if (has_pgxp) {
+        double f_w = (double)g_FieldFxSpriteCellUMax * (double)board->scaleX / 4096.0;
+        double f_h = (double)g_FieldFxSpriteCellVExtent * (double)board->scaleY / 4096.0;
+        double f_denom = (double)(g_FieldFxBillboardScratch->depth * 4 + distance);
+        if (f_denom > 1e-4) {
+            float f_hw = (float)(f_w * 16.0 * (double)distance / f_denom);
+            float f_hh = (float)(f_h * 16.0 * (double)distance / f_denom);
+            u32 sxy0, sxy1, sxy2, sxy3;
+            memcpy(&sxy0, &packet->x0, sizeof(sxy0));
+            memcpy(&sxy1, &packet->x1, sizeof(sxy1));
+            memcpy(&sxy2, &packet->x2, sizeof(sxy2));
+            memcpy(&sxy3, &packet->x3, sizeof(sxy3));
+            if (board->angle != 0) {
+                double ang = (double)board->angle * (6.28318530717958647692 / 4096.0);
+                float ca = (float)cos(ang);
+                float sa = (float)sin(ang);
+                /* RotMatrixZ has m[0][0]=cos, m[0][1]=-sin, m[1][0]=sin, m[1][1]=cos */
+                float x0_off = -f_hw * ca + f_hh * sa;
+                float y0_off = -f_hw * sa - f_hh * ca;
+                float x1_off =  f_hw * ca + f_hh * sa;
+                float y1_off =  f_hw * sa - f_hh * ca;
+                float x2_off = -f_hw * ca - f_hh * sa;
+                float y2_off = -f_hw * sa + f_hh * ca;
+                float x3_off =  f_hw * ca - f_hh * sa;
+                float y3_off =  f_hw * sa + f_hh * ca;
+                Psyz_GteStorePgxpVertex(&packet->x0, sxy0, f_cx + x0_off, f_cy + y0_off, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x1, sxy1, f_cx + x1_off, f_cy + y1_off, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x2, sxy2, f_cx + x2_off, f_cy + y2_off, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x3, sxy3, f_cx + x3_off, f_cy + y3_off, f_cw);
+            } else {
+                Psyz_GteStorePgxpVertex(&packet->x0, sxy0, f_cx - f_hw, f_cy - f_hh, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x1, sxy1, f_cx + f_hw, f_cy - f_hh, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x2, sxy2, f_cx - f_hw, f_cy + f_hh, f_cw);
+                Psyz_GteStorePgxpVertex(&packet->x3, sxy3, f_cx + f_hw, f_cy + f_hh, f_cw);
+            }
+        }
+    }
+    Psyz_GteSetPgxpEffectMode(0);
     packet->r0 = g_FieldFxBillboardScratch->rgb[0];
     packet->g0 = g_FieldFxBillboardScratch->rgb[1];
     packet->b0 = g_FieldFxBillboardScratch->rgb[2];
@@ -459,6 +503,7 @@ void FieldFx_DrawGlowSprite(FieldGlowSprite *sprite, GteMatrix *placement, u8 mo
         gte_ldtransmatrix((const GteMatrixWords *)placement);
     }
     FieldFx_ScaleColor((s16)sprite->depth, &sprite->r, &packet->r0);
+    Psyz_GteSetPgxpEffectMode(1);
     gte_ldv3(g_FieldFxCellQuad, &g_FieldFxCellQuad[1], &g_FieldFxCellQuad[2]);
     gte_rtpt_padded();
     g_FieldFxScratch->v = g_FieldFxSpriteCellVBase + (sprite->cell & 0xF0);
@@ -525,6 +570,7 @@ void FieldFx_DrawGlowSprite(FieldGlowSprite *sprite, GteMatrix *placement, u8 mo
         STRIP_OT(g_FieldFxScratch->depth)->address = link.word;
         g_DrawPacketOffset += sizeof(FieldStripPacket);
     }
+    Psyz_GteSetPgxpEffectMode(0);
 }
 
 /* Draw a quad with four independently shaded corners. */
@@ -573,6 +619,7 @@ void FieldFx_DrawShadedQuad(FieldShadedQuadColors *colors, GteMatrix *placement,
     FieldFx_ScaleColor(colors->brightness, colors->rgb[1], &packet->r1);
     FieldFx_ScaleColor(colors->brightness, colors->rgb[2], &packet->r2);
     FieldFx_ScaleColor(colors->brightness, colors->rgb[3], &packet->r3);
+    Psyz_GteSetPgxpEffectMode(1);
     gte_ldv3(g_FieldFxCellQuad, &g_FieldFxCellQuad[1], &g_FieldFxCellQuad[2]);
     gte_rtpt_padded();
     packet->tag.length = 8;
@@ -603,6 +650,7 @@ void FieldFx_DrawShadedQuad(FieldShadedQuadColors *colors, GteMatrix *placement,
         SHADED_QUAD_OT(g_FieldFxScratch->depth)->address = link.word;
         g_DrawPacketOffset += sizeof(FieldShadedQuadPacket);
     }
+    Psyz_GteSetPgxpEffectMode(0);
 }
 
 /* Lay out the inner and outer vertices of an annulus. */
@@ -682,6 +730,7 @@ void FieldFx_DrawShadedRing(FieldShadedRing *ring, GteMatrix *placement, u8 mode
     FieldFx_ScaleColor(ring->intensity, ring->color1, outer);
     FieldFx_ScaleColor(ring->intensity, ring->color0, inner);
     points = ring->source;
+    Psyz_GteSetPgxpEffectMode(1);
     for (i = 0; i < ring->mode; i++) {
         packet = (FieldRingPacket *)(g_RenderAnimBufferBase[g_ActiveDrawSlot] + g_DrawPacketOffset);
         g_DrawPacketOffset += sizeof(FieldRingPacket);
@@ -715,6 +764,7 @@ void FieldFx_DrawShadedRing(FieldShadedRing *ring, GteMatrix *placement, u8 mode
         link.tag->address = RING_OT(g_FieldFxScratch->depth + ring->offset)->address;
         RING_OT(g_FieldFxScratch->depth + ring->offset)->address = link.word;
     }
+    Psyz_GteSetPgxpEffectMode(0);
 }
 
 void FieldFx_BuildParticleChain(FieldChainRecord *record)
@@ -815,6 +865,7 @@ void FieldFx_DrawTexturedStrip(FieldTexturedStrip *strip)
     packet = (FieldStripPacket *)(g_RenderAnimBufferBase[g_ActiveDrawSlot] + g_DrawPacketOffset);
     g_FieldFxScratch->clutX = strip->clut << 4;
     g_FieldFxScratch->clutY = strip->clut >> 4;
+    Psyz_GteSetPgxpEffectMode(1);
     while (i < strip->count - 1) {
         cell = strip->cell;
         step = node->cellStep;
@@ -862,6 +913,7 @@ void FieldFx_DrawTexturedStrip(FieldTexturedStrip *strip)
         packet++;
         g_DrawPacketOffset += sizeof(FieldStripPacket);
     }
+    Psyz_GteSetPgxpEffectMode(0);
 }
 
 /* Original script sprite code embedded at USA E0060..E0808. Ordinary memory
@@ -914,9 +966,13 @@ static void FieldFx_EmitScriptSpriteQuad(void)
         g_DrawPacketOffset < 0 || g_DrawPacketOffset > RENDER_ANIM_BUFFER_BYTES - (int)sizeof(RenderTexturedQuad)) return;
     RenderTexturedQuad *packet = (RenderTexturedQuad *)(g_RenderAnimBufferBase[g_ActiveDrawSlot] + g_DrawPacketOffset);
     g_DrawPacketOffset += sizeof(*packet);
+    Psyz_GteSetPgxpEffectMode(1);
     gte_ldrotmatrix(g_ViewMatrixSlot.value);gte_ldtransmatrix(g_ViewMatrixSlot.value);
     gte_ldv0(&s_ScriptSpriteDraw.position);gte_rtps();
     u32 screen;gte_stsxy2(&screen);
+    float f_cx = 0.0f, f_cy = 0.0f, f_cw = 1.0f;
+    int has_pgxp = Psyz_GteGetLastPgxpVertex(&f_cx, &f_cy, &f_cw);
+    Psyz_GteSetPgxpEffectMode(0);
     u32 depth = Psyz_GteDataRead(19);
     s32 projection = *g_GeomScroll.state.position.projectionDistance;
     s32 numerator = (s32)(((u32)s_ScriptSpriteDraw.size << 5) * (u32)projection);
@@ -932,6 +988,20 @@ static void FieldFx_EmitScriptSpriteQuad(void)
     packet->v0=packet->v1=s_ScriptSpriteDraw.v;packet->v2=packet->v3=s_ScriptSpriteDraw.v+16;
     packet->x0=packet->x2=(u32)x-(u32)half;packet->x1=packet->x3=(u32)x+(u32)half;
     packet->y0=packet->y1=(u32)y-(u32)half;packet->y2=packet->y3=(u32)y+(u32)half;
+    if (has_pgxp) {
+        float f_half = (float)((double)numerator / ((double)denominator * 2.0));
+        u32 sxy0, sxy1, sxy2, sxy3;
+        memcpy(&sxy0, &packet->x0, sizeof(sxy0));
+        memcpy(&sxy1, &packet->x1, sizeof(sxy1));
+        memcpy(&sxy2, &packet->x2, sizeof(sxy2));
+        memcpy(&sxy3, &packet->x3, sizeof(sxy3));
+        Psyz_GteSetPgxpEffectMode(1);
+        Psyz_GteStorePgxpVertex(&packet->x0, sxy0, f_cx - f_half, f_cy - f_half, f_cw);
+        Psyz_GteStorePgxpVertex(&packet->x1, sxy1, f_cx + f_half, f_cy - f_half, f_cw);
+        Psyz_GteStorePgxpVertex(&packet->x2, sxy2, f_cx - f_half, f_cy + f_half, f_cw);
+        Psyz_GteStorePgxpVertex(&packet->x3, sxy3, f_cx + f_half, f_cy + f_half, f_cw);
+        Psyz_GteSetPgxpEffectMode(0);
+    }
     int layer = (int)(depth >> 2) - 8;
     if ((unsigned)layer < 4096) AddPrim(D_800B0E38.ordering[g_ActiveDrawSlot]+layer,packet);
 }

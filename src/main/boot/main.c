@@ -39,9 +39,13 @@ static struct {
     int aspect;
     int dither;
     int geometry_correction;
+    int frame_interpolation;
     int antialiasing;
     int model_filtering;
     int widescreen;
+    int dynamic_lighting;
+    int effect_geometry_correction;
+    int hd_backgrounds;
     int fullscreen;
     /* 2..PSYZ_SPEED_MAX, used while the speed binding is held (or toggled on) */
     unsigned speed_factor;
@@ -55,6 +59,8 @@ static struct {
     char user_file[4096];
     int enabled;
 } host_options;
+
+static int Host_SaveOptions(void);
 
 #define HOST_BINDING_COUNT 17
 #define HOST_SPEED_BINDING 16
@@ -97,13 +103,215 @@ typedef enum HostSettingsPage {
     HOST_PAGE_GRAPHICS = 0,
     HOST_PAGE_CONTROLS = 1,
     HOST_PAGE_AUDIO = 2,
-    HOST_PAGE_IMAGES = 3
+    HOST_PAGE_IMAGES = 3,
+    HOST_PAGE_MODS = 4
 } HostSettingsPage;
 
 typedef enum HostBindDevice {
     HOST_BIND_KEYBOARD = 0,
     HOST_BIND_CONTROLLER = 1
 } HostBindDevice;
+
+/* Versioned desktop background packs. Only a fully verified staging directory
+ * can replace the active pointer; failed/cancelled downloads keep the old pack. */
+/* curl imports WinSock and WinAPI; keep their historical typedefs separate
+ * from the original PS1 types used throughout this translation unit. */
+#ifdef _WIN32
+#define RECT HostWinRect
+#define byte HostWinByte
+#define u_long HostWinULong
+#ifdef __MINGW32__
+/* MinGW deliberately undefines u_long in _bsd_types.h. Supply its socket
+ * aliases here so it cannot replace the game's pointer-width word. */
+#ifndef _BSDTYPES_DEFINED
+#define _BSDTYPES_DEFINED
+typedef unsigned long HostWinULong;
+typedef unsigned long long u_int64;
+#endif
+#endif
+#endif
+#include <curl/curl.h>
+#ifdef _WIN32
+#undef RECT
+#undef byte
+#undef u_long
+#undef DrawText
+/* WinSock's IPv4 member alias also collides with the PS1 kernel's TCB. */
+#undef s_addr
+#endif
+#include <cJSON.h>
+#include <miniz.h>
+#ifndef PE_VERSION
+#define PE_VERSION "development"
+#endif
+#ifndef PE_BUILD_ID
+#define PE_BUILD_ID "development"
+#endif
+static struct {
+    SDL_Thread *thread;
+    SDL_AtomicInt busy,done,progress,cancel;
+    char root[4096],active[4096],version[32],archive_sha[65],message[180],result_message[180],result_path[4096],result_version[32],result_sha[65];
+    int enabled,development,verify_only,success,result_activate;
+} host_hd;
+
+typedef struct {uint32_t h[8];uint64_t bytes;unsigned used;unsigned char block[64];} HdSha;
+static uint32_t HdRor(uint32_t x,unsigned n){return (x>>n)|(x<<(32-n));}
+static void HdShaBlock(HdSha *s,const unsigned char *b){
+    static const uint32_t k[64]={0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+    uint32_t w[64];for(unsigned i=0;i<16;++i)w[i]=(uint32_t)b[i*4]<<24|(uint32_t)b[i*4+1]<<16|(uint32_t)b[i*4+2]<<8|b[i*4+3];
+    for(unsigned i=16;i<64;++i){uint32_t x=w[i-15],y=w[i-2];w[i]=w[i-16]+(HdRor(x,7)^HdRor(x,18)^(x>>3))+w[i-7]+(HdRor(y,17)^HdRor(y,19)^(y>>10));}
+    uint32_t a=s->h[0],c=s->h[2],b0=s->h[1],d=s->h[3],e=s->h[4],f=s->h[5],g=s->h[6],h=s->h[7];
+    for(unsigned i=0;i<64;++i){uint32_t t=h+(HdRor(e,6)^HdRor(e,11)^HdRor(e,25))+((e&f)^(~e&g))+k[i]+w[i];uint32_t u=(HdRor(a,2)^HdRor(a,13)^HdRor(a,22))+((a&b0)^(a&c)^(b0&c));h=g;g=f;f=e;e=d+t;d=c;c=b0;b0=a;a=t+u;}
+    s->h[0]+=a;s->h[1]+=b0;s->h[2]+=c;s->h[3]+=d;s->h[4]+=e;s->h[5]+=f;s->h[6]+=g;s->h[7]+=h;
+}
+static void HdShaInit(HdSha *s){*s=(HdSha){{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19},0,0,{0}};}
+static void HdShaAdd(HdSha *s,const void *ptr,size_t n){const unsigned char *p=ptr;s->bytes+=n;while(n){size_t k=64-s->used;if(k>n)k=n;memcpy(s->block+s->used,p,k);s->used+=(unsigned)k;p+=k;n-=k;if(s->used==64){HdShaBlock(s,s->block);s->used=0;}}}
+static void HdShaEnd(HdSha *s,char out[65]){uint64_t bits=s->bytes*8;unsigned char pad[128]={0x80};size_t n=s->used<56?56-s->used:120-s->used;HdShaAdd(s,pad,n);for(unsigned i=0;i<8;++i)pad[i]=(unsigned char)(bits>>(56-i*8));HdShaAdd(s,pad,8);for(unsigned i=0;i<8;++i)snprintf(out+i*8,9,"%08x",s->h[i]);}
+static int HdHashFile(const char *path,char out[65]){SDL_IOStream *f=SDL_IOFromFile(path,"rb");if(!f)return 0;unsigned char block[65536];HdSha s;HdShaInit(&s);size_t n;while((n=SDL_ReadIO(f,block,sizeof(block)))){if(SDL_GetAtomicInt(&host_hd.cancel)){SDL_CloseIO(f);return 0;}HdShaAdd(&s,block,n);}int ok=SDL_GetIOStatus(f)==SDL_IO_STATUS_EOF;SDL_CloseIO(f);HdShaEnd(&s,out);return ok;}
+static int HdPath(char *out,size_t n,const char *a,const char *b){int k=snprintf(out,n,"%s/%s",a,b);if(k<0||(size_t)k>=n){if(n)out[0]=0;return 0;}return 1;}
+static int HdHex(const char *s){if(!s||strlen(s)!=64)return 0;for(unsigned i=0;i<64;++i)if(!strchr("0123456789abcdef",s[i]))return 0;return 1;}
+static int HdName(const char *s){
+    if(!s)return 0;if(!strcmp(s,"manifest.json")||!strcmp(s,"title.webp")||!strcmp(s,"title.png"))return 1;
+    size_t n=strlen(s);if(n<20||n>25)return 0;for(unsigned i=0;i<16;++i)if(!strchr("0123456789abcdef",s[i]))return 0;
+    return !strcmp(s+16,".webp")||!strcmp(s+16,".png")||!strcmp(s+16,".ref.png")||!strcmp(s+16,"-wide.bin");
+}
+static const char *HdString(const cJSON *j,const char *key){const cJSON *v=cJSON_GetObjectItemCaseSensitive(j,key);return cJSON_IsString(v)?v->valuestring:NULL;}
+static cJSON *HdJsonFile(const char *path,size_t limit){size_t n=0;char *data=SDL_LoadFile(path,&n);if(!data)return NULL;cJSON *j=n<=limit?cJSON_ParseWithLength(data,n):NULL;SDL_free(data);return j;}
+static int HdSavePointer(const char *directory,const char *version,const char *sha){
+    cJSON *j=cJSON_CreateObject();if(!j)return 0;cJSON_AddStringToObject(j,"directory",directory);cJSON_AddStringToObject(j,"version",version);cJSON_AddStringToObject(j,"sha256",sha);char *text=cJSON_PrintUnformatted(j);cJSON_Delete(j);if(!text)return 0;
+    char path[4096]={0},tmp[4096]={0},name[96];
+    snprintf(name,sizeof(name),"active.new-%016llx-%08x.json",(unsigned long long)SDL_GetPerformanceCounter(),(unsigned)SDL_rand(0x7fffffff));
+    int ok=HdPath(path,sizeof(path),host_hd.root,"active.json")&&HdPath(tmp,sizeof(tmp),host_hd.root,name)&&SDL_SaveFile(tmp,text,strlen(text))&&SDL_RenamePath(tmp,path);
+    if(!ok&&*tmp)SDL_RemovePath(tmp);cJSON_free(text);return ok;
+}
+static int HdAllow(cJSON *files,const char *name,const char *sha){if(!HdName(name)||!HdHex(sha)||!strcmp(name,"manifest.json"))return 0;const cJSON *old=cJSON_GetObjectItemCaseSensitive(files,name);if(old)return cJSON_IsString(old)&&!strcmp(old->valuestring,sha);return cJSON_AddStringToObject(files,name,sha)!=NULL;}
+static cJSON *HdFiles(const cJSON *manifest){
+    cJSON *files=cJSON_CreateObject();const cJSON *atlases=cJSON_GetObjectItemCaseSensitive(manifest,"atlases"),*extras=cJSON_GetObjectItemCaseSensitive(manifest,"extras"),*r;
+    if(!files||!cJSON_IsArray(atlases)||cJSON_GetArraySize(atlases)<1||cJSON_GetArraySize(atlases)>8192)goto fail;
+    cJSON_ArrayForEach(r,atlases)if(!HdAllow(files,HdString(r,"file"),HdString(r,"atlas_sha256"))||!HdAllow(files,HdString(r,"reference_file"),HdString(r,"reference_sha256")))goto fail;
+    if(extras&&!cJSON_IsArray(extras))goto fail;cJSON_ArrayForEach(r,extras)if(!HdAllow(files,HdString(r,"file"),HdString(r,"sha256")))goto fail;
+    if(cJSON_GetArraySize(files)>16384)goto fail;return files;
+fail:cJSON_Delete(files);return NULL;
+}
+static int HdVerify(const char *directory){
+    char path[4096],actual[65];if(!HdPath(path,sizeof(path),directory,"manifest.json"))return 0;cJSON *manifest=HdJsonFile(path,8*1024*1024);if(!manifest)return 0;cJSON *files=HdFiles(manifest);cJSON_Delete(manifest);if(!files)return 0;const cJSON *r;int ok=1,n=0,total=cJSON_GetArraySize(files);
+    cJSON_ArrayForEach(r,files){if(SDL_GetAtomicInt(&host_hd.cancel)||!HdPath(path,sizeof(path),directory,r->string)||!HdHashFile(path,actual)||strcmp(actual,r->valuestring)){ok=0;break;}SDL_SetAtomicInt(&host_hd.progress,97+(++n*2/total));}
+    cJSON_Delete(files);return ok;
+}
+static size_t HdZipRead(void *opaque,mz_uint64 at,void *buffer,size_t n){SDL_IOStream *f=opaque;return SDL_SeekIO(f,(Sint64)at,SDL_IO_SEEK_SET)<0?0:SDL_ReadIO(f,buffer,n);}
+static SDL_EnumerationResult HdRemoveEntry(void *unused,const char *directory,const char *name){(void)unused;char p[4096];if(HdPath(p,sizeof(p),directory,name))SDL_RemovePath(p);return SDL_ENUM_CONTINUE;}
+static void HdClean(const char *directory){if(!*directory)return;SDL_EnumerateDirectory(directory,HdRemoveEntry,NULL);SDL_RemovePath(directory);}
+static int HdUnpack(const char *archive,const char *directory,const char *version){
+    SDL_IOStream *io=SDL_IOFromFile(archive,"rb");if(!io)return 0;Sint64 size=SDL_GetIOSize(io);mz_zip_archive zip={0};zip.m_pRead=HdZipRead;zip.m_pIO_opaque=io;int started=0,ok=0;void *bytes=NULL;cJSON *manifest=NULL,*files=NULL,*seen=NULL;
+    if(size<0||!mz_zip_reader_init(&zip,(mz_uint64)size,0))goto end;started=1;
+    int count=(int)mz_zip_reader_get_num_files(&zip),index=mz_zip_reader_locate_file(&zip,"manifest.json",NULL,MZ_ZIP_FLAG_CASE_SENSITIVE);mz_zip_archive_file_stat stat;
+    if(count<2||count>16385||index<0||!mz_zip_reader_file_stat(&zip,(mz_uint)index,&stat)||stat.m_uncomp_size>8*1024*1024)goto end;
+    size_t length=0;bytes=mz_zip_reader_extract_to_heap(&zip,(mz_uint)index,&length,0);if(!bytes)goto end;manifest=cJSON_ParseWithLength(bytes,length);mz_free(bytes);bytes=NULL;
+    if(!manifest||!HdString(manifest,"version")||strcmp(HdString(manifest,"version"),version)||!(files=HdFiles(manifest))||count!=cJSON_GetArraySize(files)+1)goto end;
+    seen=cJSON_CreateObject();if(!seen)goto end;mz_uint64 total=0;
+    for(int i=0;i<count;++i){
+        if(SDL_GetAtomicInt(&host_hd.cancel)||!mz_zip_reader_file_stat(&zip,(mz_uint)i,&stat)||!HdName(stat.m_filename)||mz_zip_reader_is_file_a_directory(&zip,(mz_uint)i)||mz_zip_reader_is_file_encrypted(&zip,(mz_uint)i)||!mz_zip_reader_is_file_supported(&zip,(mz_uint)i)||((stat.m_external_attr>>16)&0170000)==0120000||stat.m_uncomp_size>64*1024*1024||cJSON_GetObjectItemCaseSensitive(seen,stat.m_filename))goto end;
+        if(strcmp(stat.m_filename,"manifest.json")&&!cJSON_GetObjectItemCaseSensitive(files,stat.m_filename))goto end;
+        total+=stat.m_uncomp_size;if(total>UINT64_C(2147483648))goto end;
+        if(!cJSON_AddBoolToObject(seen,stat.m_filename,1))goto end;
+        bytes=mz_zip_reader_extract_to_heap(&zip,(mz_uint)i,&length,0);char path[4096];
+        if(!bytes||!HdPath(path,sizeof(path),directory,stat.m_filename)||!SDL_SaveFile(path,bytes,length))goto end;
+        mz_free(bytes);bytes=NULL;SDL_SetAtomicInt(&host_hd.progress,96+(i*2/count));
+    }
+    ok=HdVerify(directory);
+end:if(bytes)mz_free(bytes);cJSON_Delete(seen);cJSON_Delete(files);cJSON_Delete(manifest);if(started)mz_zip_reader_end(&zip);SDL_CloseIO(io);return ok;
+}
+typedef struct {SDL_IOStream *file;char data[16385];size_t used;uint64_t expected,written;HdSha sha;} HdTransfer;
+static size_t HdWrite(char *p,size_t a,size_t b,void *opaque){HdTransfer *t=opaque;if(a&&b>SIZE_MAX/a)return 0;size_t n=a*b;if(SDL_GetAtomicInt(&host_hd.cancel))return 0;
+    if(t->file){if(t->written>t->expected||n>t->expected-t->written)return 0;size_t k=SDL_WriteIO(t->file,p,n);HdShaAdd(&t->sha,p,k);t->written+=k;return k;}
+    if(n>sizeof(t->data)-1-t->used)return 0;memcpy(t->data+t->used,p,n);t->used+=n;t->data[t->used]=0;return n;
+}
+static int HdProgress(void *opaque,curl_off_t total,curl_off_t now,curl_off_t upload_total,curl_off_t uploaded){(void)total;(void)upload_total;(void)uploaded;HdTransfer *t=opaque;if(t->file&&t->expected)SDL_SetAtomicInt(&host_hd.progress,(int)((uint64_t)now*95/t->expected));return SDL_GetAtomicInt(&host_hd.cancel);}
+static int HdRequest(const char *url,HdTransfer *transfer,const char *download_id){
+    CURL *curl=curl_easy_init();if(!curl)return 0;char ua[160],version[100],platform[100],id[128],build[100];snprintf(ua,sizeof(ua),"ParasiteEve/%s (%s; WebP; build %s)",PE_VERSION,SDL_GetPlatform(),PE_BUILD_ID);snprintf(version,sizeof(version),"X-PE-Version: %s",PE_VERSION);snprintf(platform,sizeof(platform),"X-PE-Platform: %s",SDL_GetPlatform());snprintf(id,sizeof(id),"X-PE-Download-ID: %s",download_id);
+    snprintf(build,sizeof(build),"X-PE-Build: %s",PE_BUILD_ID);
+    struct curl_slist *headers=NULL;headers=curl_slist_append(headers,version);headers=curl_slist_append(headers,platform);headers=curl_slist_append(headers,id);headers=curl_slist_append(headers,build);
+    curl_easy_setopt(curl,CURLOPT_URL,url);curl_easy_setopt(curl,CURLOPT_USERAGENT,ua);curl_easy_setopt(curl,CURLOPT_HTTPHEADER,headers);curl_easy_setopt(curl,CURLOPT_PROTOCOLS_STR,"https,http");
+    curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,1L);curl_easy_setopt(curl,CURLOPT_SSL_VERIFYHOST,2L);curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,10L);curl_easy_setopt(curl,CURLOPT_TIMEOUT,7200L);curl_easy_setopt(curl,CURLOPT_LOW_SPEED_LIMIT,1024L);curl_easy_setopt(curl,CURLOPT_LOW_SPEED_TIME,60L);curl_easy_setopt(curl,CURLOPT_NOSIGNAL,1L);
+    curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,HdWrite);curl_easy_setopt(curl,CURLOPT_WRITEDATA,transfer);curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,HdProgress);curl_easy_setopt(curl,CURLOPT_XFERINFODATA,transfer);curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);curl_easy_setopt(curl,CURLOPT_FAILONERROR,1L);
+    CURLcode result=curl_easy_perform(curl);long status=0;curl_easy_getinfo(curl,CURLINFO_RESPONSE_CODE,&status);curl_slist_free_all(headers);curl_easy_cleanup(curl);return result==CURLE_OK&&status==200;
+}
+static int HdWorker(void *unused){
+    (void)unused;char archive[4096]={0},staging[4096]={0},final[4096],actual[65],url[512],id[80];cJSON *catalog=NULL;host_hd.success=0;host_hd.result_activate=0;
+    SDL_strlcpy(host_hd.result_message,"Download failed. Your previous pack is unchanged.",sizeof(host_hd.result_message));
+    if(host_hd.verify_only){host_hd.success=HdVerify(host_hd.active);SDL_strlcpy(host_hd.result_message,host_hd.success?"Installed pack verified.":"Verification failed. Download a fresh copy.",sizeof(host_hd.result_message));goto end;}
+    const char *base=SDL_getenv("PE_HD_SERVER");if(!base||!*base)base="https://pe.polanka.ovh";
+    unsigned local_port=0;char trailing;int local=sscanf(base,"http://127.0.0.1:%u%c",&local_port,&trailing)==1&&local_port>0&&local_port<=65535;
+    if(strcmp(base,"https://pe.polanka.ovh")&&!local){SDL_strlcpy(host_hd.result_message,"Invalid mod server override.",sizeof(host_hd.result_message));goto end;}
+    snprintf(id,sizeof(id),"pe-%016llx-%08x",(unsigned long long)SDL_GetPerformanceCounter(),(unsigned)SDL_rand(0x7fffffff));
+    snprintf(url,sizeof(url),"%s/api/mods/upscale/latest",base);HdTransfer transfer={0};
+    if(!HdRequest(url,&transfer,id)||!(catalog=cJSON_ParseWithLength(transfer.data,transfer.used))){SDL_strlcpy(host_hd.result_message,"Could not fetch the mod catalog. Previous pack kept.",sizeof(host_hd.result_message));goto end;}
+    const char *format=HdString(catalog,"format");if(!format||strcmp(format,"webp-reference-png")){SDL_strlcpy(host_hd.result_message,"This pack needs a newer game build.",sizeof(host_hd.result_message));goto end;}
+    const char *version=HdString(catalog,"version"),*sha=HdString(catalog,"sha256"),*remote=HdString(catalog,"url");const cJSON *size=cJSON_GetObjectItemCaseSensitive(catalog,"size");
+    if(!version||strlen(version)>20||!strchr(version,'.')||!HdHex(sha)||!remote||!cJSON_IsNumber(size)||size->valuedouble<1||size->valuedouble>2147483648.0)goto end;
+    for(const char *p=version;*p;++p)if(!isdigit((unsigned char)*p)&&*p!='.')goto end;
+    snprintf(url,sizeof(url),"%s/upscale-v%s.zip",base,version);if(strcmp(remote,url))goto end;
+    if(!host_hd.development&&*host_hd.active&&!strcmp(version,host_hd.version)&&!strcmp(sha,host_hd.archive_sha)&&HdVerify(host_hd.active)) {
+        host_hd.success=1;SDL_strlcpy(host_hd.result_message,"Background pack is up to date and verified.",sizeof(host_hd.result_message));goto end;
+    }
+    char name[100],stage_name[100],archive_name[100];
+    snprintf(stage_name,sizeof(stage_name),"install-%s.partial",id);snprintf(archive_name,sizeof(archive_name),"download-%s.partial.zip",id);
+    snprintf(name,sizeof(name),"v%s-%.16s-%s",version,sha,id);
+    if(!HdPath(final,sizeof(final),host_hd.root,name)||!HdPath(staging,sizeof(staging),host_hd.root,stage_name)||!HdPath(archive,sizeof(archive),host_hd.root,archive_name))goto end;
+    HdClean(staging);if(!SDL_CreateDirectory(staging))goto end;
+    memset(&transfer,0,sizeof(transfer));transfer.expected=(uint64_t)size->valuedouble;HdShaInit(&transfer.sha);transfer.file=SDL_IOFromFile(archive,"wb");if(!transfer.file)goto end;
+    int fetched=HdRequest(url,&transfer,id);int closed=SDL_CloseIO(transfer.file);transfer.file=NULL;HdShaEnd(&transfer.sha,actual);
+    if(!fetched||!closed||transfer.written!=transfer.expected){SDL_strlcpy(host_hd.result_message,"Download interrupted. Previous pack kept.",sizeof(host_hd.result_message));goto end;}
+    if(strcmp(actual,sha)){SDL_strlcpy(host_hd.result_message,"Download checksum mismatch. Previous pack kept.",sizeof(host_hd.result_message));goto end;}
+    SDL_SetAtomicInt(&host_hd.progress,96);
+    if(!HdUnpack(archive,staging,version)){SDL_strlcpy(host_hd.result_message,"Pack validation failed. Previous pack kept.",sizeof(host_hd.result_message));goto end;}
+    if(!SDL_CompareAndSwapAtomicInt(&host_hd.cancel,0,2)||!SDL_RenamePath(staging,final))goto end;
+    staging[0]=0;if(!HdSavePointer(final,version,sha)){HdClean(final);goto end;}
+    SDL_strlcpy(host_hd.result_path,final,sizeof(host_hd.result_path));SDL_strlcpy(host_hd.result_version,version,sizeof(host_hd.result_version));SDL_strlcpy(host_hd.result_sha,sha,sizeof(host_hd.result_sha));host_hd.success=1;host_hd.result_activate=1;
+    SDL_strlcpy(host_hd.result_message,host_hd.development?"Installed. Local preview overrides this pack.":"Installed. Choose 2x or higher in Graphics.",sizeof(host_hd.result_message));
+end:cJSON_Delete(catalog);if(*archive)SDL_RemovePath(archive);HdClean(staging);if(SDL_GetAtomicInt(&host_hd.cancel)==1){host_hd.success=0;SDL_strlcpy(host_hd.result_message,"Cancelled. Your previous pack is unchanged.",sizeof(host_hd.result_message));}if(host_hd.success)SDL_SetAtomicInt(&host_hd.progress,100);SDL_SetAtomicInt(&host_hd.done,1);return 0;
+}
+static const char *Host_HdStatus(void){return *host_hd.message?host_hd.message:"Download optional HD backgrounds from pe.polanka.ovh.";}
+static int Host_HdBusy(void){return SDL_GetAtomicInt(&host_hd.busy);}
+static int Host_HdPercent(void){return SDL_GetAtomicInt(&host_hd.progress);}
+static const char *Host_HdValue(int row){if(row==0)return host_hd.development?(host_hd.enabled?"Local preview":"Off"):(host_hd.enabled?"On":"Off");if(row==1)return Host_HdBusy()?"Cancel download":"Download / update";return *host_hd.active?"Verify files":"Not installed";}
+void Render_RefreshHdBackgrounds(void);
+void MenuCard_RefreshHdBackground(void);
+static void Host_HdApply(void) {
+    if (!host_hd.development && *host_hd.active)
+        SDL_setenv_unsafe("PE_HD_BACKGROUNDS",host_hd.active,1);
+    Psyz_GpuSetSpriteAtlasesEnabled(host_hd.enabled);
+    Render_RefreshHdBackgrounds();
+    MenuCard_RefreshHdBackground();
+}
+static void Host_HdPoll(void){if(!host_hd.thread||!SDL_GetAtomicInt(&host_hd.done))return;SDL_WaitThread(host_hd.thread,NULL);host_hd.thread=NULL;SDL_SetAtomicInt(&host_hd.busy,0);SDL_strlcpy(host_hd.message,host_hd.result_message,sizeof(host_hd.message));if(host_hd.success&&host_hd.result_activate){SDL_strlcpy(host_hd.active,host_hd.result_path,sizeof(host_hd.active));SDL_strlcpy(host_hd.version,host_hd.result_version,sizeof(host_hd.version));SDL_strlcpy(host_hd.archive_sha,host_hd.result_sha,sizeof(host_hd.archive_sha));host_hd.enabled=1;host_options.hd_backgrounds=1;Host_HdApply();if(host_options.enabled)Host_SaveOptions();}}
+static void Host_HdAction(int row){
+    Host_HdPoll();if(Host_HdBusy()){if(row==1)SDL_CompareAndSwapAtomicInt(&host_hd.cancel,0,1);return;}
+    if(row==0){if(!*host_hd.active){SDL_strlcpy(host_hd.message,"Download the background pack first.",sizeof(host_hd.message));return;}host_hd.enabled=!host_hd.enabled;host_options.hd_backgrounds=host_hd.enabled;Host_HdApply();SDL_strlcpy(host_hd.message,host_options.scale<2?"Choose 2x or higher in Graphics for HD.":"Background setting applied.",sizeof(host_hd.message));return;}
+    if(row==2&&host_hd.development){SDL_strlcpy(host_hd.message,"Local preview: integrity checks are disabled.",sizeof(host_hd.message));return;}
+    if(row==2&&!*host_hd.active){SDL_strlcpy(host_hd.message,"No installed background pack to verify.",sizeof(host_hd.message));return;}
+    host_hd.verify_only=row==2;host_hd.success=0;SDL_SetAtomicInt(&host_hd.cancel,0);SDL_SetAtomicInt(&host_hd.done,0);SDL_SetAtomicInt(&host_hd.progress,0);SDL_SetAtomicInt(&host_hd.busy,1);SDL_strlcpy(host_hd.message,row==2?"Verifying installed files...":"Checking latest background pack...",sizeof(host_hd.message));host_hd.thread=SDL_CreateThread(HdWorker,"HD backgrounds",NULL);if(!host_hd.thread){SDL_SetAtomicInt(&host_hd.busy,0);SDL_strlcpy(host_hd.message,"Could not start download.",sizeof(host_hd.message));}
+}
+static void Host_HdInit(void){
+    const char *slash=strrchr(host_options.user_file,'/');const char *back=strrchr(host_options.user_file,'\\');if(back&&(!slash||back>slash))slash=back;if(!slash)return;
+    int n=snprintf(host_hd.root,sizeof(host_hd.root),"%.*s/mods/upscale",(int)(slash-host_options.user_file),host_options.user_file);if(n<0||(size_t)n>=sizeof(host_hd.root)||!SDL_CreateDirectory(host_hd.root))return;
+    char path[4096];if(HdPath(path,sizeof(path),host_hd.root,"active.json")){cJSON *j=HdJsonFile(path,16384);const char *directory=HdString(j,"directory"),*version=HdString(j,"version"),*sha=HdString(j,"sha256");if(directory&&version&&sha&&strlen(directory)<sizeof(host_hd.active)&&strlen(version)<sizeof(host_hd.version)&&HdHex(sha)&&!strncmp(directory,host_hd.root,strlen(host_hd.root))&&directory[strlen(host_hd.root)]=='/'){SDL_strlcpy(host_hd.active,directory,sizeof(host_hd.active));SDL_strlcpy(host_hd.version,version,sizeof(host_hd.version));SDL_strlcpy(host_hd.archive_sha,sha,sizeof(host_hd.archive_sha));host_hd.enabled=host_options.hd_backgrounds;}cJSON_Delete(j);}
+    const char *dev=SDL_getenv("PE_HD_BACKGROUNDS");if(dev&&*dev){host_hd.development=1;host_hd.enabled=1;SDL_strlcpy(host_hd.active,dev,sizeof(host_hd.active));}
+    else if(*host_hd.active)SDL_setenv_unsafe("PE_HD_BACKGROUNDS",host_hd.active,1);
+    Psyz_GpuSetSpriteAtlasesEnabled(host_hd.enabled);curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+static void Host_HdStop(void){if(host_hd.thread){SDL_CompareAndSwapAtomicInt(&host_hd.cancel,0,1);SDL_WaitThread(host_hd.thread,NULL);host_hd.thread=NULL;}curl_global_cleanup();}
+
+static int Host_HdCli(int verify) {
+    const char *override=SDL_getenv("PE_CONFIG_HOME");char *pref=NULL;
+    if(!override||!*override){pref=SDL_GetPrefPath("","Parasite Eve");override=pref;}
+    if(!override||snprintf(host_options.user_file,sizeof(host_options.user_file),"%s/parasite-eve.toml",override)>=(int)sizeof(host_options.user_file)){SDL_free(pref);return 1;}
+    SDL_CreateDirectory(override);SDL_free(pref);Host_HdInit();Host_HdAction(verify?2:1);
+    int cancel_at=0;const char *cancel_env=SDL_getenv("PE_HD_TEST_CANCEL_AT");const char *test_server=SDL_getenv("PE_HD_SERVER");
+    if(cancel_env&&test_server&&!strncmp(test_server,"http://127.0.0.1:",17))cancel_at=atoi(cancel_env);
+    int last=-1;while(Host_HdBusy()){int n=Host_HdPercent();if(cancel_at>0&&cancel_at<96&&n>=cancel_at){SDL_CompareAndSwapAtomicInt(&host_hd.cancel,0,1);cancel_at=0;}if(n!=last){printf("Background pack: %d%%\n",n);fflush(stdout);last=n;}SDL_Delay(25);Host_HdPoll();}
+    puts(Host_HdStatus());int result=host_hd.success?0:1;Host_HdStop();return result;
+}
 
 #include "settings_overlay.h"
 
@@ -208,6 +416,9 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
             if (v < 1 || v > 8) {
                 return 0;
             }
+            if (v > 1 && (v & 1)) {
+                ++v;
+            }
             host_options.scale = (unsigned)v;
         } else if (!strcmp(key, "fullscreen")) {
             if (v > 1) {
@@ -233,12 +444,26 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
         } else if (!strcmp(key, "widescreen")) {
             if (v > 1) return 0;
             host_options.widescreen = v;
+        } else if (!strcmp(key, "frame_interpolation")) {
+            if(v>1)return 0;host_options.frame_interpolation=v;
         } else if (!strcmp(key, "geometry_correction")) {
             if (v > 1) {
                 return 0;
             }
             host_options.geometry_correction = v;
+        } else if (!strcmp(key, "dynamic_lighting")) {
+            if (v > 1) {
+                return 0;
+            }
+            host_options.dynamic_lighting = v;
+        } else if (!strcmp(key, "effect_geometry_correction")) {
+            if (v > 1) {
+                return 0;
+            }
+            host_options.effect_geometry_correction = v;
         }
+    } else if (!strcmp(section,"mods") && !strcmp(key,"hd_backgrounds")) {
+        if(v<0||v>1)return 0;host_options.hd_backgrounds=v;
     } else if (!strcmp(section, "audio") && !strcmp(key, "volume")) {
         if (v > 100) {
             return 0;
@@ -276,8 +501,21 @@ static int Host_ParseOptionValue(const char *section, const char *key, char *val
     return 1;
 }
 
+/* SDL paths are UTF-8; the Windows CRT's narrow fopen uses the local ANSI
+ * code page. Keep the existing TOML parser/writer on a Unicode FILE stream. */
+static FILE *Host_OptionsFile(const char *path,const char *mode) {
+#ifdef _WIN32
+    wchar_t *wide_path=(wchar_t *)SDL_iconv_string("UTF-16LE","UTF-8",path,strlen(path)+1);
+    wchar_t *wide_mode=(wchar_t *)SDL_iconv_string("UTF-16LE","UTF-8",mode,strlen(mode)+1);
+    FILE *file=wide_path&&wide_mode?_wfopen(wide_path,wide_mode):NULL;
+    SDL_free(wide_path);SDL_free(wide_mode);return file;
+#else
+    return fopen(path,mode);
+#endif
+}
+
 static void Host_LoadOptions(const char *path) {
-    FILE *file = fopen(path, "r");
+    FILE *file = Host_OptionsFile(path, "r");
     if (!file) {
         return;
     }
@@ -343,7 +581,7 @@ static int Host_SaveOptions(void) {
 
     char temporary[4120];
     snprintf(temporary, sizeof(temporary), "%s.tmp", host_options.user_file);
-    FILE *file = fopen(temporary, "w");
+    FILE *file = Host_OptionsFile(temporary, "w");
     if (!file) {
         return 0;
     }
@@ -357,9 +595,12 @@ static int Host_SaveOptions(void) {
         "square_pixels = %s\n"
         "disable_dithering = %s\n"
         "geometry_correction = %s\n"
+        "frame_interpolation = %s\n"
         "antialiasing = %s\n"
         "model_filtering = %s\n"
-        "widescreen = %s\n\n"
+        "widescreen = %s\n"
+        "dynamic_lighting = %s\n"
+        "effect_geometry_correction = %s\n\n"
         "[audio]\n"
         "volume = %u\n\n"
         "[game]\n"
@@ -374,9 +615,12 @@ static int Host_SaveOptions(void) {
         host_options.aspect ? "true" : "false",
         host_options.dither ? "true" : "false",
         host_options.geometry_correction ? "true" : "false",
+        host_options.frame_interpolation ? "true" : "false",
         host_options.antialiasing ? "true" : "false",
         host_options.model_filtering ? "true" : "false",
         host_options.widescreen ? "true" : "false",
+        host_options.dynamic_lighting ? "true" : "false",
+        host_options.effect_geometry_correction ? "true" : "false",
         host_options.volume,
         host_options.speed_factor,
         host_options.speed_toggle ? "true" : "false",
@@ -386,7 +630,8 @@ static int Host_SaveOptions(void) {
     fputs("\ndisc2 = ", file);
     Host_WriteString(file, host_options.discs[1]);
 
-    fputs("\n\n[keyboard]\n", file);
+    fprintf(file,"\n\n[mods]\nhd_backgrounds = %s\n",host_options.hd_backgrounds?"true":"false");
+    fputs("\n[keyboard]\n", file);
     for (unsigned i = 0; i < HOST_BINDING_COUNT; ++i) {
         fprintf(file, "%s = %d\n", host_button_names[i], host_options.keys[i]);
     }
@@ -478,29 +723,81 @@ static int Host_CardPath(char *dst, const char *src, int capacity) {
     return 0;
 }
 
-/* Import once, retaining every legacy file and never replacing a newer card.
- * A completed-import marker prevents deleted slots reappearing at next launch. */
+/* Import each legacy save once, retaining every legacy file and never replacing a
+ * card already in the user folder. The marker lists the legacy files earlier passes
+ * considered ("bu00/<name>" lines), so saves copied beside the game after the first
+ * launch are still imported while a slot deleted after its import stays deleted.
+ * A 0.7 marker is empty: files that arrived before it was written count as listed. */
+#define HOST_CARD_MARKER_HEADER "# Legacy saves already considered for import\n"
+
 typedef struct HostCardImport {
     int ok;
-    unsigned count;
+    unsigned count, kept, rejected;
     char *created[128];
+    const char *listed;     /* the marker's list, "\n"-delimited; NULL when none */
+    SDL_Time before;        /* an empty 0.7 marker's write time, else 0 */
+    char *added;            /* entries considered by this pass, "\n"-delimited */
+    size_t added_length;
 } HostCardImport;
+
+static int Host_CardImportListed(const HostCardImport *import, const char *entry) {
+    return (import->listed && strstr(import->listed, entry)) || (import->added && strstr(import->added, entry));
+}
+
+/* Record `entry` ("\nbu00/<name>\n") as considered by this pass. */
+static int Host_CardImportRecord(HostCardImport *import, const char *entry) {
+    size_t length = strlen(entry + 1);
+    char *grown = SDL_realloc(import->added, import->added_length + length + 2);
+    if (!grown) return 0;
+    if (!import->added_length) grown[import->added_length++] = '\n';
+    memcpy(grown + import->added_length, entry + 1, length + 1);
+    import->added = grown;
+    import->added_length += length;
+    return 1;
+}
+
+static int Host_IsCardImage(const char *name) {
+    const char *dot = strrchr(name, '.');
+    static const char *const images[] = {".srm", ".mcr", ".mcd", ".gme", ".mcs", ".mc", ".psv", ".vmp"};
+    for (unsigned i = 0; dot && i < sizeof(images) / sizeof(images[0]); ++i)
+        if (!SDL_strcasecmp(dot, images[i])) return 1;
+    return 0;
+}
 
 static SDL_EnumerationResult SDLCALL Host_ImportCard(void *userdata, const char *dirname, const char *name) {
     HostCardImport *import = userdata;
-    if (strlen(name) != 20 || strncmp(name, "BASLUS-00662", 11)) return SDL_ENUM_CONTINUE;
-    char source[8192], target[4096], device[64], temporary[4160];
+    char source[8192], target[4096], device[64], temporary[4160], entry[64];
     snprintf(source, sizeof(source), "%s%s", dirname, name);
-    SDL_PathInfo info;
-    if (!SDL_GetPathInfo(source, &info) || info.type != SDL_PATHTYPE_FILE || info.size != 8192)
+    if (strlen(name) != 20 || strncmp(name, "BASLUS-00662", 11)) {
+        if (Host_IsCardImage(name)) {
+            ++import->rejected;
+            fprintf(stderr, "Memory cards: %s is a memory card image, not a PsyZ save; "
+                            "open it in the save editor to import its saves.\n", source);
+        }
         return SDL_ENUM_CONTINUE;
+    }
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(source, &info) || info.type != SDL_PATHTYPE_FILE || info.size != 8192) {
+        ++import->rejected;
+        fprintf(stderr, "Memory cards: %s is not an 8192-byte PsyZ save; not imported.\n", source);
+        return SDL_ENUM_CONTINUE;
+    }
     /* Port is encoded by the legacy directory supplied to EnumerateDirectory. */
     size_t length = strlen(dirname);
     unsigned port = length >= 4 && dirname[length - 3] == '1';
+    snprintf(entry, sizeof(entry), "\nbu%u0/%s\n", port, name);
+    if (Host_CardImportListed(import, entry)) return SDL_ENUM_CONTINUE;
+    if (!Host_CardImportRecord(import, entry)) { import->ok = 0; return SDL_ENUM_CONTINUE; }
+    SDL_Time arrived = info.create_time > info.modify_time ? info.create_time : info.modify_time;
+    if (import->before && arrived <= import->before) return SDL_ENUM_CONTINUE;
     snprintf(device, sizeof(device), "bu%u0:%s", port, name);
     Host_CardPath(target, device, sizeof(target));
     if (!*target) { import->ok = 0; return SDL_ENUM_CONTINUE; }
-    if (SDL_GetPathInfo(target, &info)) return SDL_ENUM_CONTINUE;
+    if (SDL_GetPathInfo(target, &info)) {
+        ++import->kept;
+        fprintf(stderr, "Memory cards: kept %s; the save of the same name in %s was not imported.\n", target, dirname);
+        return SDL_ENUM_CONTINUE;
+    }
     if (import->count >= 128) { import->ok = 0; return SDL_ENUM_CONTINUE; }
     size_t bytes = 0;
     void *data = SDL_LoadFile(source, &bytes);
@@ -530,30 +827,70 @@ static int Host_InstallCardPaths(const char *base) {
     char marker[4096], card[4096];
     if (Host_CardPath(card, "bu00:*", sizeof(card)) || !*card) return 0;
     snprintf(marker, sizeof(marker), "%.*s.legacy-imported", (int)strlen(card) - 5, card);
+    HostCardImport import = {.ok = 1};
     SDL_PathInfo info;
-    if (!SDL_GetPathInfo(marker, &info)) {
-        HostCardImport import = {.ok = 1};
-        char *cwd = SDL_GetCurrentDirectory();
-        const char *roots[] = {cwd, base};
-        for (unsigned root = 0; root < 2; ++root) if (roots[root]) {
-            for (unsigned port = 0; port < 2; ++port) {
-                char source[8192];
-                snprintf(source, sizeof(source), "%sbu%u0", roots[root], port);
-                if (SDL_GetPathInfo(source, &info) && info.type == SDL_PATHTYPE_DIRECTORY &&
-                    !SDL_EnumerateDirectory(source, Host_ImportCard, &import)) import.ok = 0;
-            }
-        }
-        SDL_free(cwd);
-        if (import.ok && !SDL_SaveFile(marker, "", 0)) {
-            SDL_RemovePath(marker);
-            import.ok = 0;
-        }
-        for (unsigned i = 0; i < import.count; ++i) {
-            if (!import.ok) SDL_RemovePath(import.created[i]);
-            SDL_free(import.created[i]);
-        }
-        if (!import.ok) return 0;
+    size_t bytes = 0;
+    char *list = NULL;
+    if (SDL_GetPathInfo(marker, &info)) {
+        if (!(list = SDL_LoadFile(marker, &bytes))) return 0;
+        if (!bytes) import.before = info.modify_time;
     }
+    /* "\n" + list + "\n" lets every entry be found as "\n<entry>\n". */
+    char *listed = SDL_malloc(bytes + 3);
+    if (!listed) { SDL_free(list); return 0; }
+    listed[0] = '\n';
+    memcpy(listed + 1, list ? list : "", bytes);
+    listed[bytes + 1] = '\n';
+    listed[bytes + 2] = '\0';
+    import.listed = listed;
+
+    char *cwd = SDL_GetCurrentDirectory();
+    const char *roots[] = {cwd, base};
+    for (unsigned root = 0; root < 2; ++root) if (roots[root]) {
+        for (unsigned port = 0; port < 2; ++port) {
+            char source[8192];
+            snprintf(source, sizeof(source), "%sbu%u0", roots[root], port);
+            if (SDL_GetPathInfo(source, &info) && info.type == SDL_PATHTYPE_DIRECTORY &&
+                !SDL_EnumerateDirectory(source, Host_ImportCard, &import)) import.ok = 0;
+        }
+    }
+    SDL_free(cwd);
+    /* Rewrite the marker when this pass considered anything, and always replace an
+     * empty 0.7 marker or a missing one, so the list format takes over. */
+    if (import.ok && (!list || !bytes || import.added_length)) {
+        size_t header = strlen(HOST_CARD_MARKER_HEADER);
+        int has_header = bytes >= header && !memcmp(list, HOST_CARD_MARKER_HEADER, header);
+        size_t extra = import.added_length ? import.added_length - 1 : 0;
+        size_t total = (has_header ? 0 : header) + bytes + extra;
+        char *text = SDL_malloc(total + 1);
+        if (!text) import.ok = 0;
+        else {
+            size_t at = 0;
+            if (!has_header) { memcpy(text, HOST_CARD_MARKER_HEADER, header); at = header; }
+            if (bytes) { memcpy(text + at, list, bytes); at += bytes; }
+            if (extra) { memcpy(text + at, import.added + 1, extra); at += extra; }
+            /* Replace the list whole: a torn write would bring deleted slots back. */
+            char temporary[4160];
+            snprintf(temporary, sizeof(temporary), "%s.tmp", marker);
+            if (!SDL_SaveFile(temporary, text, at) || !SDL_RenamePath(temporary, marker)) {
+                SDL_RemovePath(temporary);
+                import.ok = 0;
+            }
+            SDL_free(text);
+        }
+    }
+    for (unsigned i = 0; i < import.count; ++i) {
+        if (!import.ok) SDL_RemovePath(import.created[i]);
+        SDL_free(import.created[i]);
+    }
+    SDL_free(import.added);
+    SDL_free(listed);
+    SDL_free(list);
+    if (!import.ok) return 0;
+    if (import.count || import.kept)
+        fprintf(stderr, "Memory cards: imported %u old save(s); kept %u current save(s) over older copies.\n",
+                import.count, import.kept);
+    fprintf(stderr, "Memory cards: %.*s (bu00 is card 1, bu10 card 2)\n", (int)strlen(card) - 6, card);
     Psyz_AdjustPathCB(Host_CardPath);
     return 1;
 }
@@ -565,6 +902,9 @@ static void Host_InitOptions(int enabled) {
     host_options.antialiasing = 0;
     host_options.model_filtering = 0;
     host_options.widescreen = 0;
+    host_options.dynamic_lighting = 0;
+    host_options.effect_geometry_correction = 0;
+    host_options.hd_backgrounds = 1;
     host_options.volume = 100;
     host_options.speed_factor = 2;
     host_options.speed_toggle = 0;
@@ -640,9 +980,22 @@ static void Host_ApplyOptions(SDL_Window *window) {
     Psyz_VideoSetInternalResolution(host_options.scale);
     Psyz_VideoSetAspectMode(host_options.widescreen ? PSYZ_ASPECT_DISPLAY : (PsyzAspectMode)host_options.aspect);
     Psyz_VideoSetDitheringMode((PsyzDitherMode)host_options.dither);
+    Psyz_GpuSetFrameInterpolation(host_options.frame_interpolation);
     Psyz_VideoSetGeometryCorrection(host_options.geometry_correction != 0);
     Psyz_VideoSetAntialiasing(host_options.antialiasing != 0);
     Psyz_VideoSetModelFiltering(host_options.model_filtering != 0);
+    Psyz_VideoSetDynamicLighting(host_options.dynamic_lighting != 0);
+    Psyz_VideoSetEffectGeometryCorrection(host_options.effect_geometry_correction != 0);
+    /* An allocation failure keeps the last working renderer configuration.
+     * Before window creation the getters do not yet reflect pending options. */
+    if (window) {
+        host_options.scale = Psyz_VideoGetInternalResolution();
+        host_options.antialiasing = Psyz_VideoGetAntialiasing();
+        host_options.geometry_correction = Psyz_VideoGetGeometryCorrection();
+        host_options.model_filtering = Psyz_VideoGetModelFiltering();
+        host_options.dynamic_lighting = Psyz_VideoGetDynamicLighting();
+        host_options.effect_geometry_correction = Psyz_VideoGetEffectGeometryCorrection();
+    }
     Psyz_VideoSetWidescreen(host_options.widescreen != 0);
     Psyz_AudioSetOutputVolume(host_options.volume);
     for (unsigned i = 0; i < 16; ++i) {
@@ -966,6 +1319,9 @@ static void Host_ApplySettingsAction(
             index = (index + action + setting->count) % setting->count;
         }
         setting->set(index);
+    } else if (state->page == HOST_PAGE_MODS) {
+        if(activate_only || state->row==0)Host_HdAction(state->row);
+        state->status=Host_HdStatus();state->dirty=1;return;
     } else if (state->page == HOST_PAGE_IMAGES) {
         if (!activate_only) {
             return;
@@ -1020,13 +1376,21 @@ static void Host_ClearSpeedBinding(HostOverlayState *state) {
 }
 
 /* The headless control console uses the same actions as the actual menu. */
+static void Host_ControlHd(int enabled,const char *directory) {
+    host_hd.development=0;
+    SDL_strlcpy(host_hd.active,directory,sizeof(host_hd.active));
+    host_hd.enabled=enabled;
+    Host_HdApply();
+}
+
 static void Host_ControlGraphics(int geometry, int antialiasing, int filtering) {
     const int values[3] = {geometry, antialiasing, filtering};
     HostOverlayState state = {.open=1, .page=HOST_PAGE_GRAPHICS};
+    SDL_Window *window = Psyz_GetWindow_SDL3();
     for (int i=0;i<3;++i) {
         state.row=4+i;
         if (kGraphics[state.row].get()!=values[i])
-            Host_ApplySettingsAction(&state, 1, 0, NULL);
+            Host_ApplySettingsAction(&state, 1, 0, window);
     }
 }
 
@@ -1089,7 +1453,8 @@ static void Host_ProcessSettingsPointer(
         int isStepper = hitRow < pureCount &&
                         !(state->page == HOST_PAGE_CONTROLS && hitRow >= 1 && hitRow != HOST_ANALOG_RUN_ROW &&
                           hitRow != HOST_SPEED_MODE_ROW) &&
-                        state->page != HOST_PAGE_IMAGES;
+                        state->page != HOST_PAGE_IMAGES &&
+                        !(state->page == HOST_PAGE_MODS && hitRow > 0);
         int action = isStepper ? (x < OverlayValueCentre() ? -1 : 1) : 1;
         Host_ApplySettingsAction(state, action, !isStepper, game);
     }
@@ -1420,6 +1785,9 @@ static void Host_Settings(SDL_Window *game) {
     };
 
     while (s_overlayState.open) {
+        int hd_was_busy=Host_HdBusy();Host_HdPoll();
+        if(hd_was_busy || Host_HdBusy())s_overlayState.dirty=1;
+        if(s_overlayState.page==HOST_PAGE_MODS)s_overlayState.status=Host_HdStatus();
         if (useGpuOverlay) {
             Host_OverlayRefreshGPU(s_overlayGpuDevice, game, &s_overlayState);
             Psyz_VideoVSync(0);
@@ -1715,7 +2083,8 @@ static void Host_DescribeCrash(char *out, size_t size) {
                      "\r\n== Settings ==\r\n"
                      "Settings file: %s\r\n"
                      "Graphics: render resolution %ux (renderer %ux), fullscreen %s, aspect ratio %s, "
-                     "dithering %s, geometry correction %s, antialiasing %s, model textures %s\r\n"
+                     "dithering %s, geometry correction %s, antialiasing %s, model textures %s, "
+                     "dynamic lighting %s, effect geometry %s\r\n"
                      "Audio: master volume %u%%\r\n"
                      "Controls: speed-up %ux while %s, field run threshold %u\r\n"
                      "Discs: disc 1 %s, disc 2 %s\r\n",
@@ -1724,7 +2093,10 @@ static void Host_DescribeCrash(char *out, size_t size) {
                      host_options.scale, Psyz_VideoGetInternalResolution(), kSwitchNames[host_options.fullscreen != 0],
                      kAspectNames[host_options.aspect != 0], kDitherNames[host_options.dither != 0],
                      kSwitchNames[host_options.geometry_correction != 0], kAntialiasNames[host_options.antialiasing != 0],
-                     kFilterNames[host_options.model_filtering != 0], host_options.volume, host_options.speed_factor,
+                     kFilterNames[host_options.model_filtering != 0],
+                     kSwitchNames[host_options.dynamic_lighting != 0],
+                     kSwitchNames[host_options.effect_geometry_correction != 0],
+                     host_options.volume, host_options.speed_factor,
                      host_options.speed_toggle ? "toggled on" : "held",
                      host_options.analog_run_threshold, Host_CrashFileName(host_options.discs[0]),
                      Host_CrashFileName(host_options.discs[1]));
@@ -1851,16 +2223,19 @@ static void Host_DescribeSaveData(char *out, size_t size) {
 static void Host_PrintHelp(const char *program_name) {
     printf(
         "Usage: %s [--disc <USA Disc 1 CUE/BIN>] [--disc2 <USA Disc 2 CUE/BIN>] [--choose-discs] "
-        "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] "
+        "[--geometry-correction 0|1] [--antialiasing 0|1] [--model-filtering 0|1] [--widescreen 0|1] [--frame-interpolation 0|1] "
+        "[--dynamic-lighting 0|1] [--effect-geometry-correction 0|1] "
         "[--headless | --headless-gpu] [--internal-resolution 1..8] [--frame-limit N] [--control-at N] "
         "[--dump-vram PATH] [--dump-frame PATH] [--dump-audio PATH] [--pad-at VBLANK:BUTTON_MASK ...] "
         "[--test-crash-after N | --test-abort-after N]\n",
         program_name
     );
+    printf("--download-backgrounds / --verify-backgrounds manage the optional HD pack without opening a window.\n");
     printf("Without --disc, opens a native multi-select CUE/BIN dialog. --choose-discs selects new images. ESC opens desktop settings.\n");
     printf("--headless uses native-resolution software rendering; --headless-gpu keeps the actual GPU window hidden and supports internal scaling.\n");
     printf("--dump-frame writes the rendered display as RGB888 PPM at each control/terminal boundary.\n");
     printf("--dump-audio writes stereo 44100 Hz signed-16-bit little-endian PCM; requires headless and PSYZ_AUDIO_CLOCK=video.\n");
+    printf("Headless editor capture: lighting-export PATH writes the original posed Aya mesh and PATH.vram (requires --dump-vram).\n");
     printf("Headless control: --control-at N pauses for stdin commands: advance FRAMES BUTTON_MASK, graphics PGXP AA FILTER (0/1; advances 8 blanks), or quit (requires --frame-limit).\n");
     printf("Headless fixtures only: --diagnostic-hp-at VBLANK:EXPECTED_HP:VALUE (requires --frame-limit; output is marked coverage-only)\n");
     printf("--test-crash-after N / --test-abort-after N crash on purpose at VBlank N to check the crash report (its path is printed).\n");
@@ -1946,7 +2321,7 @@ int main(int argc, char **argv) {
         interactive = 0;
     }
     for (int i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--headless-gpu") || !strcmp(argv[i], "--help")) {
+        if (!strcmp(argv[i], "--headless") || !strcmp(argv[i], "--headless-gpu") || !strcmp(argv[i], "--help") || !strcmp(argv[i], "--download-backgrounds") || !strcmp(argv[i], "--verify-backgrounds")) {
             interactive = 0;
         }
     }
@@ -1958,6 +2333,7 @@ int main(int argc, char **argv) {
     CrashReport_SetMods(pe_mod_crash_describe);
 #endif
     Host_InitOptions(interactive);
+    if(argc==2 && (!strcmp(argv[1],"--download-backgrounds") || !strcmp(argv[1],"--verify-backgrounds")))return Host_HdCli(!strcmp(argv[1],"--verify-backgrounds"));
     unsigned internal_resolution = host_options.scale;
     int resolution_argument = 0;
     int headless_argument = 0;
@@ -1996,10 +2372,16 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[arg], "--geometry-correction") ||
                    !strcmp(argv[arg], "--antialiasing") ||
                    !strcmp(argv[arg], "--model-filtering") ||
-                   !strcmp(argv[arg], "--widescreen")) {
+                   !strcmp(argv[arg], "--widescreen") ||
+                   !strcmp(argv[arg], "--frame-interpolation") ||
+                   !strcmp(argv[arg], "--dynamic-lighting") ||
+                   !strcmp(argv[arg], "--effect-geometry-correction")) {
             unsigned effect = !strcmp(argv[arg], "--geometry-correction") ? 1u :
                               !strcmp(argv[arg], "--antialiasing") ? 2u :
-                              !strcmp(argv[arg], "--model-filtering") ? 4u : 8u;
+                              !strcmp(argv[arg], "--model-filtering") ? 4u :
+                              !strcmp(argv[arg], "--widescreen") ? 8u :
+                              !strcmp(argv[arg], "--frame-interpolation") ? 16u :
+                              !strcmp(argv[arg], "--dynamic-lighting") ? 32u : 64u;
             if ((effect_arguments & effect) || arg + 1 >= argc ||
                 (strcmp(argv[arg+1], "0") && strcmp(argv[arg+1], "1"))) {
                 fprintf(stderr, "Missing, invalid or duplicate graphics effect (use 0 or 1)\n");
@@ -2010,7 +2392,10 @@ int main(int argc, char **argv) {
             if (effect == 1u) host_options.geometry_correction = enabled;
             else if (effect == 2u) host_options.antialiasing = enabled;
             else if (effect == 4u) host_options.model_filtering = enabled;
-            else host_options.widescreen = enabled;
+            else if(effect==8u) host_options.widescreen = enabled;
+            else if (effect == 16u) host_options.frame_interpolation=enabled;
+            else if (effect == 32u) host_options.dynamic_lighting = enabled;
+            else host_options.effect_geometry_correction = enabled;
         } else if (!strcmp(argv[arg], "--frame-limit")) {
             char *end = NULL;
             errno = 0;
@@ -2073,6 +2458,10 @@ int main(int argc, char **argv) {
             }
             if (!Host_ParseHealthEventArg(argv[++arg], argc)) {
                 return EXIT_FAILURE;
+            }
+        } else if (!strcmp(argv[arg], "--disc-env")) {
+            if (paths[0] || arg+1>=argc || !(paths[0]=SDL_GetEnvironmentVariable(SDL_GetEnvironment(),argv[++arg])) || !*paths[0]) {
+                fprintf(stderr,"Missing image environment variable\n");return EXIT_FAILURE;
             }
         } else if (!strcmp(argv[arg], "--disc") || !strcmp(argv[arg], "--disc2")) {
             int slot = !strcmp(argv[arg], "--disc2");
@@ -2214,6 +2603,7 @@ image_error:
 images_ready:;
     host_options.scale = internal_resolution;
     g_BootHostGraphicsOptions = Host_ControlGraphics;
+    g_BootHostHdOptions = Host_ControlHd;
     {
         /* Keep CLI/headless disc names accurate in reports too. Copy both
          * before replacing picker storage: selection can be reversed. */
@@ -2229,11 +2619,19 @@ images_ready:;
         }
         memcpy(host_options.discs, ordered, sizeof(ordered));
     }
+    if(!interactive) {
+        const char *config_home=SDL_getenv("PE_CONFIG_HOME");
+        if(config_home&&*config_home) {
+            int n=snprintf(host_options.user_file,sizeof(host_options.user_file),"%s/parasite-eve.toml",config_home);
+            if(n>0&&(size_t)n<sizeof(host_options.user_file))Host_HdInit();
+        }
+    }
     if (interactive) {
         host_images = images;
         g_CdImageRequest = Host_RequestImage;
         g_BootMovieSkipConfirm = Host_ConfirmMovieSkip;
         host_options.scale = internal_resolution;
+        Host_HdInit();
         Host_InstallSettingsOverlay();
         Host_ApplyOptions(NULL);
         Host_SaveOptions();
@@ -2249,21 +2647,26 @@ images_ready:;
         if (internal_resolution > 1 || (effect_arguments & 1u) ||
             host_options.antialiasing || host_options.model_filtering)
             Psyz_VideoSetGeometryCorrection(host_options.geometry_correction != 0);
+        Psyz_GpuSetFrameInterpolation(host_options.frame_interpolation);
         Psyz_VideoSetAntialiasing(host_options.antialiasing);
         Psyz_VideoSetModelFiltering(host_options.model_filtering);
         Psyz_VideoSetWidescreen(host_options.widescreen);
+        Psyz_VideoSetDynamicLighting(host_options.dynamic_lighting != 0);
+        Psyz_VideoSetEffectGeometryCorrection(host_options.effect_geometry_correction != 0);
     }
     /* Widescreen reads background texels to find where a room's picture
      * ends (mesh_list.c); kept on so switching it on mid-game works. */
     Psyz_GpuSetVramCopy(1);
     Boot_InitSystem();
-    if (Psyz_VideoGetInternalResolution() != internal_resolution) {
+    if ((!interactive || resolution_argument) &&
+        Psyz_VideoGetInternalResolution() != internal_resolution) {
         fprintf(stderr, "Requested internal resolution unavailable\n");
         goto shutdown;
     }
     if (interactive) {
         SDL_Window *window = Psyz_GetWindow_SDL3();
         Host_ApplyOptions(window);
+        Host_SaveOptions();
     }
     mode = 0;
 
@@ -2377,6 +2780,7 @@ images_ready:;
     }
 
 shutdown:
+    Host_HdStop();
     if (g_BootDisplayPlaybackActive) {
         BootDisplay_WaitForCdAndRestoreCallbacks();
     }

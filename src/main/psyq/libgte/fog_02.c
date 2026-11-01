@@ -2,7 +2,7 @@
 
 #include "pe1/gte_types.h"
 
-void SetFogNearFar(int near, int far, int h) {
+void SetFogNearFar(long near, long far, long h) {
     int range;
     int depth_scale;
     int dqa;

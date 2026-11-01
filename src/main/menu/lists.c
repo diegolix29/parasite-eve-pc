@@ -3,6 +3,7 @@
 #include "pe1/draw_state.h"
 #include "pe1/draw_wipe_rect.h"
 #include "pe1/inventory.h"
+#include "pe1/inventory_queries.h"
 #include "pe1/inventory_slots.h"
 #include "pe1/menu_bonus_stats.h"
 #include "pe1/menu_confirm_callback.h"
@@ -193,7 +194,7 @@ extern int g_MenuItemRenameMode;
 
 int Inv_GetPackedListItem(int arg0);
 void Menu_CloseContextHelpPanel(void);
-int Inv_GetActiveListItem(int arg0);
+
 
 void Draw_SetColor(int arg0);
 
@@ -257,7 +258,7 @@ int g_SaveSlotCellIndex;
 void Save_StartWriteSlot(int arg0, int arg1);
 int Save_StartReadSlot(int port, int slot);
 void MemCard_SetDelayedCallback(void (*callback)(void));
-void MemCard_DrawProgress(void);
+
 int Menu_MemCardProgressInputHandler(MenuWidgetNode *node, unsigned int flags);
 void MemCard_MarkActivePortState13(void);
 void MemCard_ClearActivePrompt(void);
@@ -446,7 +447,7 @@ void Draw_PrintNumberWidth2(int arg0);
 void Draw_PrintNumberWidth2Unk(int);
 void Menu_UpdateStatBarAnimation(int);
 void Draw_AllocTexturedQuad(int);
-void Inv_ShowItemDescriptionPanel(void);
+
 
 void Menu_DrawActionOptionRow(int arg0) {
     Draw_SetTextDimmed(0);
@@ -524,7 +525,7 @@ void Menu_DrawArmorListItem(int arg0) {
 }
 
 void Menu_DrawArmorEquipItem(int index) {
-    Inv_ShowItemDescriptionPanel();
+    Inv_ShowItemDescriptionPanel(index);
 }
 
 void Menu_DrawMemCardPortItem(int arg0) {

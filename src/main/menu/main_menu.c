@@ -1,5 +1,6 @@
 #include "common.h"
 #include "pe_hooks.h"
+#include "pe1/battle_level_up.h"
 #include "pe1/akao_counters.h"
 #include "pe1/battle_cmd.h"
 #include "pe1/battle_modifiers.h"

@@ -172,3 +172,50 @@ Game data and proprietary SDK files are not distributed. Unit tests that do not
 require retail assets run standalone in CI; set `PE_TEST_DISC` and
 `PE_TEST_DISC2` to run the full asset and gameplay regression suite. See
 [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+
+## Experimental HD backgrounds
+
+The `poc/hd-backgrounds` branch adds an opt-in presentation path to the existing
+room renderer. Set `PE_HD_BACKGROUNDS` to a directory of generated BMP atlases
+and use the SDL_GPU backend at an internal resolution of at least 2x. Without
+the pack the game uses its original textures. Software rendering and SDL_GL
+currently retain the original graphics.
+
+`Render_PrepareHdBackgrounds` hashes the original room tile descriptors before
+scripts animate them. Each original room sprite carries a queued asset key and
+cell index followed by its ordinary SPRT_16 command. Camera motion, scrolling,
+visibility, animation selection, fades and OT depth ordering stay in their
+original modules. This metadata is serialized in the GPU queue, so it survives
+deferred consumption without relying on packet addresses or VRAM addresses.
+
+PsyZ loads optional 4x RGB atlases into a shared presentation texture, avoiding
+extra flushes between background materials. A 68x68 atlas cell contains a
+64x64 enhanced tile plus a two-pixel gutter; the lower half of the source BMP
+contains the original colour references. The current PoC reserves about
+508 MiB of GPU memory when a pack is used, with bounded cell and asset counts.
+There is no streaming or eviction yet. A missing, unsupported or over-capacity
+asset falls back to its original texture.
+
+Native VRAM is rasterized independently. Original texels still determine
+transparency, STP and blend class; modulation follows the existing packet
+colours. If a palette colour no longer matches the original reference, that
+pixel falls back to native RGB. This is a conservative fallback, not complete
+HD palette-animation support. Original masks retain their native resolution;
+edge reconstruction and replacement character meshes are outside this PoC.
+
+The local study in ignored `docs/assets/hd-poc/` contains export, inference,
+packing and headless verification scripts, model provenance, private
+image-derived packs and a comparison gallery. Its first pack covers 13 room
+records and 138 entries, including serialized animation states. Common static
+regions are locked across each controller family. Runtime verification covers
+three early maps; it does not establish coverage of every scripted state or
+animation in all 13 rooms. Original game data and generated art are not checked
+into Git.
+
+`original-game-hd-backgrounds` is an optional integration test. Set both
+`PE_TEST_DISC` and `PE_TEST_HD_BACKGROUNDS` to run it. It cold-boots the actual
+GPU game twice and requires changed rendered pixels with byte-identical native
+VRAM, PCM and matching complete diagnostic game state. SDK tests additionally
+cover queued selection, multi-cell upload pitch, original coverage, foreground
+occlusion, ordinary sprites and exact fallback after a palette change.
