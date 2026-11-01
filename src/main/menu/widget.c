@@ -163,7 +163,7 @@ void Draw_PushPrimToList(MenuWidgetNode *node) {
     int *q;
     s32 t0;
     u32 t1;
-    void (*f)();
+    void (*f)(MenuWidgetNode *);
     s32 offsetX, offsetY;
     s32 cursorX;
     u32 cursorY;
@@ -231,7 +231,7 @@ int MenuWidget_HasActiveNodes(void) {
     return g_MenuWidgetActiveListHead != 0;
 }
 
-MenuWidgetNode *MenuWidget_FindByFieldValue(int value) {
+MenuWidgetNode *MenuWidget_FindByFieldValue(const MenuWidgetNode *value) {
     MenuWidgetNode *node;
     MenuWidgetNode *result;
     int i;
@@ -241,7 +241,7 @@ MenuWidgetNode *MenuWidget_FindByFieldValue(int value) {
     while (node != 0) {
         i = 0;
         while (i < 4) {
-            if ((int)node->children[i] == value) {
+            if (node->children[i] == value) {
                 break;
             }
             i++;

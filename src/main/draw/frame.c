@@ -1,8 +1,10 @@
 #include "pe1/battle_status.h"
+#include <psyz/gpu.h>
 #include "pe1/boot.h"
 #include "pe1/boot_disc_check.h"
 #include "pe1/draw_buffers.h"
 #include "pe1/game_state.h"
+#include "pe1/geom_state.h"
 #include "pe1/menu_background.h"
 #include "pe1/menu_widget.h"
 #include "pe1/psyq_gpu.h"
@@ -45,6 +47,7 @@ void Draw_RenderFrame(void) {
     Menu_DrawSaveBg();
     PE_HOOK(PE_HOOK_FRAME_DRAWN, NULL);
 
+    Psyz_GpuPrepareInterpolatedPresent(-1);
     displayFlags = g_GameState.flags & 0x200;
     if (displayFlags) {
         VSync(4);
@@ -52,6 +55,8 @@ void Draw_RenderFrame(void) {
             SetDispMask(1);
         }
     } else {
+        Psyz_GpuPrepareInterpolatedPresent(Draw_CheckDrawStatus()==0 ?
+            g_RenderDrawEnvArray[1-g_ActiveDrawSlot].clip.y : -1);
         VSync(2);
     }
 
@@ -79,6 +84,8 @@ draw_buffer:
         Render_LinkFieldSubpixel(drawSlot, orderingTable);
         Render_CommitWidescreenPicture(drawSlot, g_RenderDrawEnvArray[drawSlot].clip.y);
         Render_CentreWidescreenOverlay(drawSlot, orderingTable, Draw_WidescreenOverlayEntry());
+        Psyz_GpuBeginInterpolationFrame();
+        Psyz_GpuSetInterpolationCamera(g_GeomScroll.state.position.x,g_GeomScroll.state.position.y);
         DrawOTagEnv(orderingTable + 4095, &g_RenderDrawEnvArray[drawSlot]);
     }
 

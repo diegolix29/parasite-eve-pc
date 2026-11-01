@@ -1,0 +1,27 @@
+{
+  "model": "OpenAI built-in image generation; exact model version not exposed",
+  "source_reference": "original-0.png",
+  "reference_sha256": "6d81dd3b152fc458b116a45b79610c751c10c5aa218c2fb98c79d08149db6060",
+  "art": "title-wide-v1.png",
+  "sha256": "6cfcf4f22568feaa75f30b96a8554d6845045d043f22f6a5b416d217d20ee220",
+  "prompt": "prompt.txt",
+  "pack_entry": {
+    "file": "title.png",
+    "kind": "title-background",
+    "sha256": "6cfcf4f22568feaa75f30b96a8554d6845045d043f22f6a5b416d217d20ee220",
+    "size": [
+      1672,
+      941
+    ],
+    "native_source_size": [
+      320,
+      204
+    ],
+    "native_screen_size": [
+      320,
+      240
+    ],
+    "native_top": 20,
+    "native_bottom": 16
+  }
+}

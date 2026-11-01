@@ -15,7 +15,7 @@ extern int g_BattleModeState;
 
 
 void Pm_StopAllBoth(void);
-void Aya_SetTotalExp(u32 exp, u16 pe_bonus, void *rewards);
+void Aya_SetTotalExp(s32 exp, s32 pe_bonus, void *rewards);
 int Render_BeginSceneLoad(void);
 int CdRom_StepReadState(int mode);
 void Battle_SetupPlayerPalette(void);

@@ -857,7 +857,12 @@ int FieldFx_FanSweep(int mode, void *data, intptr_t argument)
         sweep->angle = rand();
         handles = FieldFx_InitCallbackList(g_FieldFxActiveTaskSlot->end, 0x10, 0x18,
                                 FieldFx_FanSweepSpark);
-        handles += FieldFx_AllocCallbackList(&sweep->pool, handles, 8, 0x12, FieldFx_EmberSpark);
+        if (handles < 0) return handles;
+        {
+            int extra = FieldFx_AllocCallbackList(&sweep->pool, handles, 8, 0x12, FieldFx_EmberSpark);
+            if (extra < 0) return extra;
+            handles += extra;
+        }
         return handles;
     case 1:
         if (g_FieldFxCurrentAge < 0x20 && (g_FieldFxCurrentAge & 1)) {
@@ -1174,8 +1179,13 @@ int FieldFx_OrbitingSpriteEmitter(int mode, void *data, intptr_t argument)
         state->phase = rand();
         count = FieldFx_InitCallbackList(g_FieldFxActiveTaskSlot->end, 16, 12,
                               (FieldFxTaskCallback)FieldFx_OrbitingSprite);
-        count += FieldFx_AllocCallbackList(&state->particles, count, 8, 32,
+        if (count < 0) return count;
+        {
+            int extra = FieldFx_AllocCallbackList(&state->particles, count, 8, 32,
                                FieldFx_OrbitTrailPoint);
+            if (extra < 0) return extra;
+            count += extra;
+        }
         return count;
     case 1:
         if (g_FieldFxCurrentAge < 44 && g_FieldFxCurrentAge % 3 == 0) {
@@ -1238,8 +1248,13 @@ int FieldFx_OrbitingSpriteBurst(int mode, void *data, intptr_t argument)
         state->phase = rand();
         count = FieldFx_InitCallbackList(g_FieldFxActiveTaskSlot->end, 16, 3,
                              (FieldFxTaskCallback)FieldFx_OrbitingSprite);
-        count += FieldFx_AllocCallbackList(&state->particles, count, 8, 18,
+        if (count < 0) return count;
+        {
+            int extra = FieldFx_AllocCallbackList(&state->particles, count, 8, 18,
                                    FieldFx_OrbitTrailPoint);
+            if (extra < 0) return extra;
+            count += extra;
+        }
         return count;
     case 1:
         if (g_FieldFxCurrentAge == 1) {
@@ -1496,8 +1511,13 @@ int FieldFx_HelicalSpriteEmitter(int mode, void *data, intptr_t argument)
         state->phase = rand();
         count = FieldFx_InitCallbackList(g_FieldFxActiveTaskSlot->end, 16, 4,
                              (FieldFxTaskCallback)FieldFx_HelicalSprite);
-        count += FieldFx_AllocCallbackList(&state->particles, count, 8, 32,
+        if (count < 0) return count;
+        {
+            int extra = FieldFx_AllocCallbackList(&state->particles, count, 8, 32,
                                    FieldFx_HelicalTrailPoint);
+            if (extra < 0) return extra;
+            count += extra;
+        }
         return count;
     case 1:
         if (g_FieldFxCurrentAge < 2) {

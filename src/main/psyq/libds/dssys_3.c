@@ -9,15 +9,20 @@ int DsMix(CdlATV *volume) {
 }
 
 int DsGetSector(void *address, int size) {
+    /* At most one 2352-byte raw image sector; reject wrapped DMA lengths. */
+    if (size < 0 || size > 2352 / 4) return 0;
     return CD_getsector(address, size) == 0;
 }
 
 int DsGetSector2(void *address, int size) {
-    return CD_getsector2(address, size) == 0;
+    /* Both DMA variants read the same mounted-image sector buffer on PC. */
+    return DsGetSector(address, size);
 }
 
 int DsDataSync(int mode) {
-    return CD_datasync(mode);
+    /* Image-backed sector copies are synchronous; no hardware DMA is pending. */
+    (void)mode;
+    return 0;
 }
 
 static inline int ENCODE_BCD(int n) { return ((n / 10) << 4) + (n % 10); }

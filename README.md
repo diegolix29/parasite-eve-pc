@@ -5,7 +5,7 @@
 A native PC port of Parasite Eve, built from the original game code with
 [our PsyZ fork](https://github.com/khasinski/parasite-eve-psyz).
 
-![Parasite Eve running in the native port](docs/images/gameplay.png)
+![Parasite Eve running in the native port](docs/images/gameplay.png?v=3)
 
 ## Play
 
@@ -18,12 +18,18 @@ Keep each CUE file next to its BIN file.
 
 1. Launch Parasite Eve and select your disc images. Selecting both discs enables automatic switching.
 2. You can start with either disc. If the other is needed, the game asks for it by name.
-3. Press **Escape** for graphics, controls, audio and disc settings. You can add the other disc there later.
+3. Press **Escape** for graphics, controls, audio, disc and mod settings. You can add the other disc there later.
+
+**HD backgrounds:** open **Escape → Mods → Background pack** to download or update the optional artwork.
+The game shows download progress and checks the files before installing. Use **2x or higher** in Graphics; the artwork applies immediately.
+You can also [download the pack manually](https://pe.polanka.ovh/).
 
 **Enter** is START and skips movies; in a story movie, START pauses it and asks whether to skip. View or change all bindings in **Escape → Controls**. A **speed** button can be bound there too: the game runs at 2x while it is held, or 3x or 4x with the arrows either side of the number (Left/Right on that row). It is unbound until you choose a key or button, and keeps your VSync setting.
 The left stick provides analog movement. **Escape → Controls → Field run threshold** sets how far to push it before Aya runs (85% by default).
 Settings and selected disc paths are saved automatically. Memory cards are kept in `memory-cards` beside your user preferences. Older `bu00`/`bu10` cards from the launch or executable folder are imported once, keeping the original files.
 **Escape → Graphics** includes geometry correction, antialiasing, model texture filtering and an optional **Widescreen** aspect ratio. Widescreen shows more of the original background where available; narrow scenes and movies stay in 4:3.
+
+For smoother motion, enable **Escape → Graphics → Gameplay display → 60 Hz (interpolated)**. This optional setting smooths models and camera movement while keeping the original game speed. It is off by default.
 
 If the game crashes, it saves a report and shows where to find it. Attach that file when reporting the problem on Discord.
 
@@ -72,7 +78,7 @@ Mod builds are experimental; a passing build or test does not establish full in-
 
 ## Build
 
-Requires Git, CMake 3.21 or newer and a C11 compiler.
+Requires Git, CMake 3.21 or newer and a C11 compiler. Linux builds also need libcurl development headers (`libcurl4-openssl-dev` on Ubuntu).
 
 ```sh
 git clone https://github.com/khasinski/parasite-eve-pc
@@ -92,6 +98,7 @@ cmake --build build-mods --parallel
 ./build-mods/parasite-eve-pc
 ```
 
-`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksaves`).
+`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave`).
 
 For development details, see [code organization](docs/CODE_ORGANIZATION.md).
+[Parasite Eve Lighting Lab](tools/lighting-editor/README.md) is a separate desktop tool for experimenting with room lighting. Download it from [Releases](https://github.com/khasinski/parasite-eve-pc/releases). Lighting profiles are not yet used in the game.

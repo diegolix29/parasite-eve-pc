@@ -2,6 +2,7 @@
 #define PE1_PSYQ_SPU_INTERNAL_H
 
 #include "common.h"
+#include <stddef.h>
 #include "pe1/psyq_callbacks.h"
 #include "pe1/psyq_spu_api.h"
 #include "pe1/psyq_spu_reverb.h"
@@ -64,11 +65,11 @@ typedef struct SpuReverbState {
 } SpuReverbState;
 typedef char SpuReverbStateSizeCheck[(sizeof(SpuReverbState) == 16) ? 1 : -1];
 typedef char SpuReverbStateDepthCheck[
-    ((unsigned long)&((SpuReverbState *)0)->depth == 4) ? 1 : -1];
+    (offsetof(SpuReverbState, depth) == 4) ? 1 : -1];
 typedef char SpuReverbStateDelayCheck[
-    ((unsigned long)&((SpuReverbState *)0)->delay == 8) ? 1 : -1];
+    (offsetof(SpuReverbState, delay) == 8) ? 1 : -1];
 typedef char SpuReverbStateFeedbackCheck[
-    ((unsigned long)&((SpuReverbState *)0)->feedback == 12) ? 1 : -1];
+    (offsetof(SpuReverbState, feedback) == 12) ? 1 : -1];
 extern SpuReverbState g_SpuReverbState;
 extern u16 _spu_voice_centerNote[24];
 extern int _spu_rev_flag, _spu_rev_reserve_wa, D_8009B46C;
@@ -93,7 +94,7 @@ typedef struct SpuAddressUnit {
 } SpuAddressUnit;
 typedef char SpuAddressUnitSizeCheck[(sizeof(SpuAddressUnit) == 16) ? 1 : -1];
 typedef char SpuAddressUnitShiftCheck[
-    ((unsigned long)&((SpuAddressUnit *)0)->shift == 4) ? 1 : -1];
+    (offsetof(SpuAddressUnit, shift) == 4) ? 1 : -1];
 extern SpuAddressUnit _spu_mem_mode;
 extern SpuRegs *_spu_RXX;
 extern u32 *_spu_sys_pcr;

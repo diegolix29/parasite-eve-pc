@@ -1,0 +1,5 @@
+[
+  {"room":"M006","bbox":[15,150,59,166],"reason":"Rear quarter fleet number: restore source lettering; never invent POLICE. Fixed body panel, shared by both door controllers. Exact digits cannot be reliably transcribed from this native texture."},
+  {"room":"M013","bbox":[84,8,131,22],"reason":"Left original door plaque. Remove generated LIMITED SEATING; preserve native glyph shapes without guessing illegible letters."},
+  {"room":"M013","bbox":[253,6,288,20],"reason":"Right original door plaque. Remove generated AUCTION; preserve native glyph shapes without guessing illegible letters."}
+]

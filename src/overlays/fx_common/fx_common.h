@@ -167,8 +167,8 @@ void SetSemiTrans(void *packet, int enabled);
 s16 FxCommon_DrawEffectMarkers(s16 value);
 int FxCommon_SamplePath(u32 position, int radius, void *allocation,
                    FxCommonVec3 *vector, GteShortVector *angles);
-void *PushMatrix(void);
-int PopMatrix(void);
+void PushMatrix(void);
+void PopMatrix(void);
 void Akao_Cmd_A0(int handle, int index, int value);
 void Akao_Cmd_A2(int handle, int index, int value);
 void Draw_CloseTextboxPage(int resourceId);

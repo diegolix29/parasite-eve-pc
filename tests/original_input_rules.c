@@ -276,6 +276,7 @@ static void TestUserCardMigration(void) {
         char directory[4096]; snprintf(directory, sizeof(directory), "%s/bu%u0", root, port);
         HostCardImport imported = {.ok = 1};
         assert(SDL_EnumerateDirectory(directory, Host_ImportCard, &imported) && imported.ok && imported.count == 0);
+        assert(imported.kept == 1); SDL_free(imported.added);
         size_t size; void *contents = SDL_LoadFile(target, &size);
         assert(contents && size == sizeof(newer) && !memcmp(contents, newer, size)); SDL_free(contents);
         /* Source remains intact. A deleted imported save must stay deleted. */
@@ -306,6 +307,101 @@ static void TestUserCardMigration(void) {
     snprintf(host_options.user_file, sizeof(host_options.user_file), "%s", prefs);
     Psyz_AdjustPathCB(NULL);
     puts("PASS: both legacy cards imported once, originals retained, UTF-8/long user paths read and enumerated");
+}
+
+static void TestSaveFixture(const char *path, unsigned char fill) {
+    unsigned char data[8192]; memset(data, fill, sizeof(data));
+    assert(SDL_SaveFile(path, data, sizeof(data)));
+}
+
+static int TestFileHasFill(const char *path, unsigned char fill) {
+    size_t size; unsigned char *contents = SDL_LoadFile(path, &size);
+    int same = contents && size == 8192 && contents[0] == fill && contents[8191] == fill;
+    SDL_free(contents);
+    return same;
+}
+
+/* Prepare a launch folder with an empty legacy bu00 and its own user folder. */
+static void TestCardRoot(char *root, size_t size, const char *tag) {
+    snprintf(root, size, "%s/%s-%llx", test_directory, tag, (unsigned long long)SDL_GetPerformanceCounter());
+    assert(SDL_CreateDirectory(root));
+    char legacy[4200]; snprintf(legacy, sizeof(legacy), "%s/bu00", root); assert(SDL_CreateDirectory(legacy));
+    snprintf(host_options.user_file, sizeof(host_options.user_file), "%s/user/preferences.toml", root);
+    assert(!TestChdir(root));
+}
+
+static void TestLateCardImport(void) {
+    char *cwd = SDL_GetCurrentDirectory();
+    char prefs[4096], root[4096], legacy[4200], current[4096], marker[4200];
+    snprintf(prefs, sizeof(prefs), "%s", host_options.user_file);
+    TestCardRoot(root, sizeof(root), "late-cards");
+    /* First launch: nothing to import, but the marker is written. */
+    assert(Host_InstallCardPaths(NULL));
+    assert(!Host_CardPath(current, "bu00:*", sizeof(current)));
+    snprintf(marker, sizeof(marker), "%.*s.legacy-imported", (int)strlen(current) - 5, current);
+    SDL_PathInfo info; assert(SDL_GetPathInfo(marker, &info) && info.size > 0);
+    /* A save copied beside the game after that launch is imported at the next one. */
+    snprintf(legacy, sizeof(legacy), "%s/bu00/BASLUS-006620000000A", root);
+    TestSaveFixture(legacy, 0x41);
+    assert(Host_InstallCardPaths(NULL));
+    assert(!Host_CardPath(current, "bu00:BASLUS-006620000000A", sizeof(current)));
+    assert(TestFileHasFill(current, 0x41) && TestFileHasFill(legacy, 0x41));
+    /* Deleted from the current card, it stays deleted. */
+    assert(SDL_RemovePath(current));
+    assert(Host_InstallCardPaths(NULL));
+    assert(!SDL_GetPathInfo(current, &info));
+    /* A legacy save never replaces a current save of the same name. */
+    assert(!Host_CardPath(current, "bu00:BASLUS-006620000001B", sizeof(current)));
+    TestSaveFixture(current, 0x62);
+    snprintf(legacy, sizeof(legacy), "%s/bu00/BASLUS-006620000001B", root);
+    TestSaveFixture(legacy, 0x42);
+    assert(Host_InstallCardPaths(NULL));
+    assert(TestFileHasFill(current, 0x62) && TestFileHasFill(legacy, 0x42));
+    /* A whole card image beside the game is reported, not copied. */
+    snprintf(legacy, sizeof(legacy), "%s/bu00/card.srm", root);
+    assert(SDL_SaveFile(legacy, "x", 1));
+    assert(Host_InstallCardPaths(NULL));
+    assert(!Host_CardPath(current, "bu00:card.srm", sizeof(current)) && !SDL_GetPathInfo(current, &info));
+    size_t size; char *list = SDL_LoadFile(marker, &size);
+    assert(list && strstr(list, "bu00/BASLUS-006620000000A\n") && strstr(list, "bu00/BASLUS-006620000001B\n"));
+    assert(!strstr(list, "card.srm")); SDL_free(list);
+    assert(!TestChdir(cwd)); SDL_free(cwd);
+    snprintf(host_options.user_file, sizeof(host_options.user_file), "%s", prefs);
+    Psyz_AdjustPathCB(NULL);
+    puts("PASS: saves copied after the first launch are imported; deleted ones stay deleted; current saves win");
+}
+
+static void TestOldCardMarker(void) {
+    char *cwd = SDL_GetCurrentDirectory();
+    char prefs[4096], root[4096], legacy[4200], current[4096], marker[4200];
+    snprintf(prefs, sizeof(prefs), "%s", host_options.user_file);
+    TestCardRoot(root, sizeof(root), "old-marker");
+    /* An empty 0.7 marker, written after one legacy save arrived and before another. */
+    snprintf(legacy, sizeof(legacy), "%s/bu00/BASLUS-006620000000A", root);
+    TestSaveFixture(legacy, 0x41);
+    SDL_Delay(50);
+    assert(!Host_CardPath(current, "bu00:*", sizeof(current)));
+    snprintf(marker, sizeof(marker), "%.*s.legacy-imported", (int)strlen(current) - 5, current);
+    assert(SDL_SaveFile(marker, "", 0));
+    SDL_Delay(50);
+    snprintf(legacy, sizeof(legacy), "%s/bu00/BASLUS-006620000001B", root);
+    TestSaveFixture(legacy, 0x42);
+    assert(Host_InstallCardPaths(NULL));
+    SDL_PathInfo info;
+    assert(!Host_CardPath(current, "bu00:BASLUS-006620000000A", sizeof(current)) && !SDL_GetPathInfo(current, &info));
+    assert(!Host_CardPath(current, "bu00:BASLUS-006620000001B", sizeof(current)) && TestFileHasFill(current, 0x42));
+    /* The marker now lists both, so the next launch changes nothing. */
+    size_t size; char *list = SDL_LoadFile(marker, &size);
+    assert(list && !strncmp(list, HOST_CARD_MARKER_HEADER, strlen(HOST_CARD_MARKER_HEADER)));
+    assert(strstr(list, "bu00/BASLUS-006620000000A\n") && strstr(list, "bu00/BASLUS-006620000001B\n"));
+    SDL_free(list);
+    assert(SDL_RemovePath(current));
+    assert(Host_InstallCardPaths(NULL));
+    assert(!SDL_GetPathInfo(current, &info));
+    assert(!TestChdir(cwd)); SDL_free(cwd);
+    snprintf(host_options.user_file, sizeof(host_options.user_file), "%s", prefs);
+    Psyz_AdjustPathCB(NULL);
+    puts("PASS: a 0.7 marker keeps earlier saves handled and imports saves that arrived after it");
 }
 
 static int presents;
@@ -623,6 +719,48 @@ static int SDLCALL DriveFocus(void *window) {
     return 0;
 }
 
+/* The production boot-module downloader must reject a broken pack before
+ * activation. These fixtures use the real ZIP parser, SHA and file verifier. */
+static void TestHdInstaller(void) {
+    HdSha sha;char hash[65];HdShaInit(&sha);HdShaEnd(&sha,hash);
+    assert(!strcmp(hash,"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+    HdShaInit(&sha);HdShaAdd(&sha,"a",1);HdShaAdd(&sha,"bc",2);HdShaEnd(&sha,hash);
+    assert(!strcmp(hash,"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
+    char too_short[4]="old";assert(!HdPath(too_short,sizeof(too_short),"long","path"));assert(!*too_short);
+    assert(!HdName("../escape.webp")&&!HdName("CON.png")&&!HdName("folder/file.png")&&!HdName(".webp")&&!HdName("0123456789abcdef.webp:stream"));
+    assert(HdName("0123456789abcdef.webp")&&HdName("0123456789abcdef.ref.png")&&HdName("0123456789abcdef-wide.bin"));
+    HdShaInit(&sha);HdShaAdd(&sha,"payload",7);HdShaEnd(&sha,hash);
+    for(int bad=0;bad<3;++bad) {
+        char manifest[1400],zip_path[4096],dest[4096],name[80];
+        const char *material=bad==1?"../escape.webp":"0123456789abcdef.webp";
+        snprintf(manifest,sizeof(manifest),"{\"version\":\"0.1\",\"atlases\":[{\"file\":\"%s\",\"atlas_sha256\":\"%s\",\"reference_file\":\"0123456789abcdef.ref.png\",\"reference_sha256\":\"%s\"}]}",material,hash,hash);
+        mz_zip_archive zip={0};assert(mz_zip_writer_init_heap(&zip,0,0));
+        assert(mz_zip_writer_add_mem(&zip,"manifest.json",manifest,strlen(manifest),0));
+        assert(mz_zip_writer_add_mem(&zip,material,"payload",7,0));
+        assert(mz_zip_writer_add_mem(&zip,"0123456789abcdef.ref.png","payload",7,0));
+        void *data=NULL;size_t bytes=0;assert(mz_zip_writer_finalize_heap_archive(&zip,&data,&bytes));assert(mz_zip_writer_end(&zip));
+        if(bad==2){for(size_t i=0;i+7<=bytes;++i)if(!memcmp((char *)data+i,"payload",7)){((char *)data)[i]^=1;break;}}
+        snprintf(name,sizeof(name),"hd-fixture-%d.zip",bad);assert(HdPath(zip_path,sizeof(zip_path),test_directory,name));assert(SDL_SaveFile(zip_path,data,bytes));mz_free(data);
+        snprintf(name,sizeof(name),"hd-fixture-%d",bad);assert(HdPath(dest,sizeof(dest),test_directory,name));assert(SDL_CreateDirectory(dest));
+        SDL_SetAtomicInt(&host_hd.cancel,0);assert(HdUnpack(zip_path,dest,"0.1")==!bad);
+        if(!bad){assert(HdVerify(dest));SDL_strlcpy(host_hd.active,dest,sizeof(host_hd.active));host_hd.verify_only=1;SDL_SetAtomicInt(&host_hd.cancel,1);HdWorker(NULL);assert(!host_hd.success);assert(strstr(host_hd.result_message,"Cancelled"));SDL_SetAtomicInt(&host_hd.cancel,0);}
+        HdClean(dest);SDL_RemovePath(zip_path);
+    }
+    char unicode_dir[4096],saved_file[4096];
+    SDL_strlcpy(saved_file,host_options.user_file,sizeof(saved_file));
+    int saved_enabled=host_options.enabled;unsigned saved_volume=host_options.volume;
+    assert(HdPath(unicode_dir,sizeof(unicode_dir),test_directory,"settings-zażółć"));
+    assert(SDL_CreateDirectory(unicode_dir));
+    assert(HdPath(host_options.user_file,sizeof(host_options.user_file),unicode_dir,"parasite-eve.toml"));
+    host_options.enabled=1;host_options.volume=37;assert(Host_SaveOptions());
+    host_options.volume=88;Host_LoadOptions(host_options.user_file);assert(host_options.volume==37);
+    assert(SDL_RemovePath(host_options.user_file));assert(SDL_RemovePath(unicode_dir));
+    SDL_strlcpy(host_options.user_file,saved_file,sizeof(host_options.user_file));
+    host_options.enabled=saved_enabled;host_options.volume=saved_volume;
+    memset(&host_hd,0,sizeof(host_hd));
+    puts("HD installer: SHA vectors, paths, valid extraction, ZIP CRC failure and cancellation passed");
+}
+
 int main(int argc, char **argv) {
 #ifdef _WIN32
     /* CI must report assertions instead of waiting for a CRT dialog. */
@@ -636,6 +774,7 @@ int main(int argc, char **argv) {
     assert(SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software"));
     assert(SDL_Init(SDL_INIT_VIDEO));
     Host_InitOptions(0);
+    TestHdInstaller();
     TestKeyboardLayoutLabels();
     Psyz_VideoSetVsyncMode(PSYZ_VSYNC_OFF);
     unsigned frozen = (unsigned)Psyz_VideoVSync(-1);
@@ -671,6 +810,9 @@ int main(int argc, char **argv) {
     snprintf(host_options.user_file, sizeof(host_options.user_file), "%s/preferences.toml", test_directory);
 
     TestUserCardMigration();
+    TestLateCardImport();
+    TestOldCardMarker();
+    snprintf(host_options.user_file, sizeof(host_options.user_file), "%s/preferences.toml", test_directory);
 
     char card_path[4096];
     char expected_card[4096];
@@ -742,7 +884,49 @@ int main(int argc, char **argv) {
     assert(host_options.widescreen && !host_options.aspect && kGraphics[2].get() == 2);
     kGraphics[2].set(0);
     assert(!host_options.widescreen && !host_options.aspect && kGraphics[2].get() == 0);
-    assert(COUNT_OF(kGraphics) <= OVERLAY_VISIBLE_CONTROLS);
+    assert(COUNT_OF(kGraphics) <= Host_SettingsVisibleSettingCount(HOST_PAGE_GRAPHICS));
+    assert(host_options.frame_interpolation==0);
+    assert(Host_ParseOptionValue("graphics","frame_interpolation",enabled_effect));
+    assert(Host_SaveOptions());host_options.frame_interpolation=0;
+    Host_LoadOptions(host_options.user_file);assert(host_options.frame_interpolation==1);
+    assert(!Host_ParseOptionValue("graphics","frame_interpolation",invalid_effect));
+    assert(kGraphics[7].get==GetFrameInterpolation && kGraphics[7].count==2);
+    host_options.frame_interpolation=0;
+
+    assert(kGraphics[0].get == GetScale && kGraphics[0].count == 5);
+    const unsigned expected_scales[5] = {1, 2, 4, 6, 8};
+    for (int i = 0; i < 5; ++i) {
+        kGraphics[0].set(i);
+        assert(host_options.scale == expected_scales[i] && kGraphics[0].get() == i);
+    }
+    char odd_scale[] = "5";
+    assert(Host_ParseOptionValue("graphics", "internal_resolution", odd_scale));
+    assert(host_options.scale == 6 && kGraphics[0].get() == 3);
+    kGraphics[0].set(0);
+    assert(host_options.scale == 1);
+
+    assert(host_options.dynamic_lighting == 0);
+    assert(host_options.effect_geometry_correction == 0);
+    assert(Host_ParseOptionValue("graphics", "dynamic_lighting", enabled_effect));
+    assert(Host_ParseOptionValue("graphics", "effect_geometry_correction", enabled_effect));
+    assert(Host_SaveOptions());
+    host_options.dynamic_lighting = host_options.effect_geometry_correction = 0;
+    Host_LoadOptions(host_options.user_file);
+    assert(host_options.dynamic_lighting == 1 &&
+           host_options.effect_geometry_correction == 1);
+    assert(!Host_ParseOptionValue("graphics", "dynamic_lighting", invalid_effect));
+    assert(!Host_ParseOptionValue("graphics", "effect_geometry_correction", invalid_effect));
+    assert(kGraphics[8].get == GetDynamicLighting && kGraphics[8].count == 2 && kGraphics[8].get() == 1);
+    assert(kGraphics[9].get == GetEffectGeometryCorrection && kGraphics[9].count == 2 && kGraphics[9].get() == 1);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 1 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 1);
+    kGraphics[8].set(0);
+    kGraphics[9].set(0);
+    Host_ApplyOptions(NULL);
+    assert(Psyz_VideoGetDynamicLighting() == 0 &&
+           Psyz_VideoGetEffectGeometryCorrection() == 0);
+    assert(Host_SaveOptions());
 
     char invalid[4096];
     snprintf(invalid, sizeof(invalid), "%s/invalid.toml", test_directory);
@@ -971,6 +1155,21 @@ int main(int argc, char **argv) {
     assert(SDL_SaveBMP(analog_image,analog_image_path));
     SDL_DestroySurface(analog_image);OverlaySurfaceRelease(&analog_surface);
 
+
+    assert(Host_SettingsPureRowCount(HOST_PAGE_MODS)==3);
+    char invalid_hd_value[]="-1";assert(!Host_ParseOptionValue("mods","hd_backgrounds",invalid_hd_value));
+    assert(Host_ParseOptionValue("mods","hd_backgrounds","false"));assert(!host_options.hd_backgrounds);
+    assert(Host_ParseOptionValue("mods","hd_backgrounds","true"));assert(host_options.hd_backgrounds);
+    SDL_SetAtomicInt(&host_hd.busy,1);SDL_SetAtomicInt(&host_hd.progress,42);
+    HostOverlayState mod_state={.open=1,.page=OVERLAY_PAGE_MODS,.row=1};OverlaySurface mod_surface={0};
+    OverlayLayout mod_layout;OverlayComputeLayout(OVERLAY_PAGE_MODS,1280,720,&mod_layout);
+    assert(OverlaySurfaceResize(&mod_surface,mod_layout.w,mod_layout.h));OverlayPaint(&mod_surface,&mod_state,&mod_layout);
+    SDL_Surface *mod_image=SDL_CreateSurfaceFrom(mod_surface.w,mod_surface.h,SDL_PIXELFORMAT_RGBA32,mod_surface.pixels,mod_surface.w*4);
+    s_overlayLayout=mod_layout;SDL_SetAtomicInt(&host_hd.cancel,0);
+    Host_ProcessSettingsPointer(&mod_state,mod_layout.x+mod_layout.scale*300,
+        mod_layout.y+mod_layout.scale*(OVERLAY_HEADER_H+OVERLAY_ROW_H+20),1,NULL,NULL);
+    assert(SDL_GetAtomicInt(&host_hd.cancel)==1);SDL_SetAtomicInt(&host_hd.cancel,0);
+    assert(mod_image);char mod_image_path[4096];snprintf(mod_image_path,sizeof(mod_image_path),"%s/mod-download.bmp",test_directory);assert(SDL_SaveBMP(mod_image,mod_image_path));SDL_DestroySurface(mod_image);OverlaySurfaceRelease(&mod_surface);SDL_SetAtomicInt(&host_hd.busy,0);
 
     /* Issue #2: All settings tabs share a fixed panel height and top Y anchor. */
     OverlayLayout base_layout = {0};

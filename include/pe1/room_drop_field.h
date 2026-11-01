@@ -135,6 +135,6 @@ extern unsigned char g_RoomDropFieldBeamImages[];
 extern u8 g_RoomDropFieldParticleFrames[];
 
 s32 *FieldFx_RegPtr(s32 index);
-void FieldFx_ModelSetDepthBias(int arg0);
+#include "pe1/field_model_draw.h"
 
 #endif

@@ -1,0 +1,13 @@
+{
+  "name": "Parasite Eve HD Backgrounds",
+  "version": "0.1",
+  "kind": "optional background mod",
+  "source_branch": "poc/hd-backgrounds",
+  "source_commit": "cf3256c1d",
+  "pack_manifest_sha256": "278b1abf2ceedfab1e6aa21bd47fbd30c0e913977bd630e26304fe92aba56829",
+  "unique_atlases": 1029,
+  "scope": "Reviewed Day 1 backgrounds and animations, plus 186 static map candidates / 234 views across both discs. Includes the recorded material, lettering and E15 occlusion corrections.",
+  "runtime": "Requires the HD WIP port build; PE_HD_BACKGROUNDS points to the pack directory.",
+  "validation": "Native reference and unselected atlas texels unchanged; original state, native VRAM and PCM parity passed in hidden GPU integration test. Full runtime traversal of all new static maps not claimed.",
+  "assets": "Private snapshot; artwork and disc-derived packs are not committed to Git."
+}

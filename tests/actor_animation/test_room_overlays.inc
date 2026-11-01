@@ -3389,3 +3389,102 @@ static int room_callback_context(void)
 }
 
 /* USA Save_SelectMetadataWindow selects C0DE0 or C20A4 (+10 for armor). */
+
+/* Exercise real sweep timing and GTE velocities with the loaded M273 constants.
+ * These ranges vary a fixed source bone; they do not claim full animated-bone coverage. */
+extern int RoomM273_SweepController(int,void *,intptr_t);
+extern int RoomM273_SweepDropEmitter(int,void *,intptr_t);
+extern int RoomM273_SweepSplashEmitter(int,void *,intptr_t);
+extern intptr_t RoomM273_SweepConfigure(int,intptr_t,intptr_t,intptr_t);
+static int original_m273_sweep_timing(void){
+ unsigned peak=0,cases=0;int heights[]={-128,-256,-512,-768,-1024,-1536,-2048},distances[]={64,128,256,512,1024,2048,4096};
+ int rates[]={16384,32768,65536,131072};
+ for(unsigned side=0;side<2;++side)for(unsigned loops=0;loops<4;++loops)
+ for(unsigned h=0;h<7;++h)for(unsigned d=0;d<7;++d)for(unsigned r=0;r<4;++r){
+  FieldActor boss={0},player={0};FieldActorState bs={0},ps={0};RenderMatrix matrices[23]={0};
+  boss.state=&bs;player.state=&ps;boss.mode=13;boss.render_object.matrices=matrices;
+  for(unsigned i=0;i<3;++i)matrices[22].rotation[i][i]=4096;
+  matrices[22].translation[1]=heights[h];player.pos_x=distances[d]*65536;player.render_object.model_matrix.translation[0]=distances[d];
+  RoomM273BossActor owner={0};owner.instance=&boss;g_FieldFxOwner=(void *)&owner;g_PlayerEntity=&player;
+  FieldFxTaskContext context={0};g_FieldFxTaskContext=&context;
+  _Alignas(void *) char drops[4096],splashes[4096];
+  FieldFxTaskSlot drop_slot={.start=drops,.end=drops},splash_slot={.start=splashes,.end=splashes};
+  memset(&g_RoomM273SweepState,0,sizeof(g_RoomM273SweepState));g_RoomFloorY->y=0;
+  RoomM273_SweepConfigure(0,loops,side,0);RoomM273_SweepController(0,NULL,0);RoomM273_SweepController(1,NULL,0);
+  g_FieldFxActiveTaskSlot=&drop_slot;RoomM273_SweepDropEmitter(0,NULL,0);
+  g_FieldFxActiveTaskSlot=&splash_slot;RoomM273_SweepSplashEmitter(0,NULL,0);
+  for(unsigned tick=0;tick<800;++tick){
+   boss.anim_prev=boss.anim.fixed;boss.anim.fixed+=rates[r];RoomM273_SweepController(1,NULL,0);
+   g_FieldFxActiveTaskSlot=&drop_slot;g_FieldFxCurrentAge=tick;RoomM273_SweepDropEmitter(1,NULL,0);
+   FieldFxCallbackList *list=(void *)drops;unsigned landing=0;
+   for(unsigned i=0;i<(unsigned)list->count;++i){
+    FieldFxCallbackListEntry *entry=(void *)(list->entries+i*list->stride);RoomM273Drop *drop=(void *)entry->state;
+    if(entry->active && drop->position.pad==0 && (s16)(drop->position.y+drop->vy)>=0)++landing;
+   }
+   unsigned queued=g_RoomM273SweepState.count;
+   if(queued+landing>peak)peak=queued+landing;
+   if(queued+landing>12){printf("QUEUE OVERFLOW side=%u loops=%u height=%d distance=%d rate=%d tick=%u landings=%u\n",side,loops,heights[h],distances[d],rates[r],tick,queued+landing);return 0;}
+   FieldFx_UpdateCallbackList(drops);
+   if((unsigned)g_RoomM273SweepState.count!=queued+landing){printf("queue count mismatch %d/%u\n",g_RoomM273SweepState.count,landing);return 0;}
+   g_FieldFxActiveTaskSlot=&splash_slot;RoomM273_SweepSplashEmitter(1,NULL,0);FieldFx_UpdateCallbackList(splashes);
+   unsigned active=0;for(unsigned i=0;i<(unsigned)list->count;++i)active+=((FieldFxCallbackListEntry *)(list->entries+i*list->stride))->active!=0;
+   if(g_RoomM273SweepState.done && !active)break;
+  }
+  ++cases;
+ }
+ printf("Sweep timing: %u cases, peak %u queued landings (queue capacity 12)\n",cases,peak);g_FieldFxTaskContext=NULL;g_FieldFxActiveTaskSlot=NULL;g_FieldFxOwner=NULL;g_PlayerEntity=NULL;return cases==1568 && peak==12;
+}
+
+/* Use real RNG seeding, hand-trail physics and paired-pool updates. Like
+ * the sweep grid above, bone transforms are prescribed, not a full boss replay. */
+extern int RoomM273_HandTrailController(int,void *,intptr_t);
+extern int RoomM273_HandTrailEmitter(int,void *,intptr_t);
+extern int RoomM273_HandTrailLandingEmitter(int,void *,intptr_t);
+extern intptr_t RoomM273_HandTrailConfigure(int,intptr_t,intptr_t,intptr_t);
+extern void *g_RoomM273HandTrailLandingFanPool;
+static int original_m273_hand_timing(void){
+ unsigned peak=0,cases=0;int heights[]={-128,-256,-512,-768,-1024,-1536,-2048},rates[]={16384,32768,65536,131072};
+ for(unsigned mode=0;mode<3;++mode)for(unsigned h=0;h<7;++h)for(unsigned r=0;r<4;++r)for(unsigned seed=0;seed<8;++seed){
+  g_GameTimers[0].current=seed*7919*60;Inv_SetDefaultItemId();
+  FieldActor boss={0},player={0};FieldActorState bs={0},ps={0};RenderMatrix matrices[23]={0};
+  boss.state=&bs;player.state=&ps;boss.mode=11;boss.action=40;boss.render_object.matrices=matrices;
+  matrices[13].translation[0]=-200;matrices[18].translation[0]=200;
+  player.pos_x=4096*65536;player.render_object.model_matrix.translation[0]=4096;
+  RoomM273BossActor owner={0};owner.instance=&boss;g_FieldFxOwner=(void *)&owner;g_PlayerEntity=&player;
+  FieldFxTaskContext context={0};g_FieldFxTaskContext=&context;
+  _Alignas(void *) char trails[4096],pulses[4096];
+  FieldFxTaskSlot trail_slot={.start=trails,.end=trails},pulse_slot={.start=pulses,.end=pulses};
+  memset(&g_RoomM273HandTrailState,0,sizeof(g_RoomM273HandTrailState));g_RoomFloorY->y=0;
+  RoomM273_HandTrailConfigure(0,mode,0,0);RoomM273_HandTrailController(0,NULL,0);
+  g_FieldFxActiveTaskSlot=&trail_slot;RoomM273_HandTrailEmitter(0,NULL,0);
+  g_FieldFxActiveTaskSlot=&pulse_slot;RoomM273_HandTrailLandingEmitter(0,NULL,0);
+  for(unsigned tick=0;tick<1800;++tick){
+   matrices[13].translation[1]=matrices[18].translation[1]=heights[h]+boss.pos_y/65536;
+   boss.anim_prev=boss.anim.fixed;boss.anim.fixed+=rates[r];RoomM273_HandTrailController(1,NULL,0);
+   g_FieldFxActiveTaskSlot=&trail_slot;g_FieldFxCurrentAge=tick;RoomM273_HandTrailEmitter(1,NULL,0);
+   FieldFx_UpdateCallbackList(trails);
+   if((unsigned)g_RoomM273HandTrailState.landing_count>peak)peak=g_RoomM273HandTrailState.landing_count;
+   if((unsigned)g_RoomM273HandTrailState.landing_count>8){printf("QUEUE OVERFLOW mode=%u height=%d rate=%d seed=%u tick=%u pending=%d\n",mode,heights[h],rates[r],seed,tick,g_RoomM273HandTrailState.landing_count);return 0;}
+   g_FieldFxActiveTaskSlot=&pulse_slot;RoomM273_HandTrailLandingEmitter(1,NULL,0);FieldFx_UpdateCallbackList(pulses);
+   FieldFxCallbackList *primary=(void *)pulses,*secondary=g_RoomM273HandTrailLandingFanPool;
+   for(unsigned i=0;i<(unsigned)secondary->count;++i){
+    FieldFxCallbackListEntry *entry=(void *)(secondary->entries+i*secondary->stride);if(!entry->active)continue;
+    void *point;memcpy(&point,entry->state,sizeof(point));unsigned found=0;
+    for(unsigned j=0;j<(unsigned)primary->count;++j){FieldFxCallbackListEntry *p=(void *)(primary->entries+j*primary->stride);if(p->active && point==p->state)++found;}
+    if(found!=1){printf("STALE POINTER mode=%u h=%u rate=%d tick=%u\n",mode,h,rates[r],tick);return 0;}
+   }
+   for(unsigned j=0;j<(unsigned)primary->count;++j){
+    FieldFxCallbackListEntry *p=(void *)(primary->entries+j*primary->stride);unsigned references=0;
+    for(unsigned i=0;i<(unsigned)secondary->count;++i){
+     FieldFxCallbackListEntry *entry=(void *)(secondary->entries+i*secondary->stride);void *point;
+     if(!entry->active)continue;memcpy(&point,entry->state,sizeof(point));references+=point==p->state;
+    }
+    if(references!=(unsigned)(p->active!=0)){printf("PAIRED POOL OWNERSHIP mode=%u tick=%u refs=%u\n",mode,tick,references);return 0;}
+   }
+   FieldFxCallbackList *list=(void *)trails;unsigned active=0;for(unsigned i=0;i<(unsigned)list->count;++i)active+=((FieldFxCallbackListEntry *)(list->entries+i*list->stride))->active!=0;
+   if(g_RoomM273HandTrailState.done && !active)break;
+  }
+  ++cases;
+ }
+ printf("Hand timing: %u cases, peak %u pending landings (capacity 8), all secondary pointers refer to live primary entries\n",cases,peak);g_FieldFxTaskContext=NULL;g_FieldFxActiveTaskSlot=NULL;g_FieldFxOwner=NULL;g_PlayerEntity=NULL;return cases==672 && peak==6;
+}

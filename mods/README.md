@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksaves` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -52,6 +52,8 @@ mods/
   pe_stacks/           stacked consumables (up to 99 per bag or storage slot), from the Pathogen Eve port
   pe_warp/             warp menu to story checkpoints, from the Pathogen Eve port
   pe_quicksave/        10 quick save slots in the game's own save format (F10 / F11 / F12)
+  pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
+                       by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
 ```
 
@@ -429,7 +431,21 @@ without touching these files.
   bridge's build_outfit_rooms.py): rooms install Aya's animations for the outfit the story has her
   in (29, 31 or 23 parts), so the evening dress worn on a jacket day gets them retargeted to its own.
 - `pe_wardrobe_menu.c`: a Wardrobe row in Aya's main menu (icon: the Equip Armor icon, twice) once a
-  costume is owned: pick an owned costume like armor; it shows when the menu closes.
+  costume is owned. Uses the Bestiary's six-row list, right-hand model preview and three-row details
+  panel (outfit name, wear status/action, and preview control; no cast/category detail row). L1/R1 filter owned outfits by registered group; Left/Right rotate, Triangle opens/closes
+  full view, Square (default keyboard V) pauses. Previews start facing the viewer. Both Wardrobe
+  and Bestiary use `pe_screen_preview_input` to pass Left/Right through the native list to rotation. Cross wears the selected outfit when the menu closes; Circle returns.
+  There are no purchases, prices or unlock actions here. Missing/unowned outfits stay out of the list.
+  Names are fitted to the native font and capped to leave room for the title and side rail in the
+  16 KB menu drawing buffer. Groups remember their scroll position while the screen is open.
+  Preview loading is separate from equipment: `host/pe_model_skin.c` reads standalone skin blobs
+  or Aya's original disc bundles into private model/texture memory, using player idle row 0x15.
+  It never calls a costume's gameplay `load` callback. Callback-only costumes without standalone
+  assets remain wearable with a Preview unavailable message. Presenter slot 3 is reserved for this
+  screen (Bestiary uses 2). `tests/run_pe_wardrobe_menu_test.ps1` covers controls, scrolling, long
+  names, the drawing budget, owned-only choices and cleanup; the model fixture covers player idle,
+  skin source caching and missing files. Set `PE_MODEL_SKIN_ROOT` to the preference directory when
+  running `tests/run_pe_model_test.ps1` to also decode installed Harlequin, Baker and Maya assets.
 - `pe_profile.c`: unlocks by key in pe_collection.ini beside the preferences, kept across every
   game; records of packs that aren't loaded are kept untouched. The recomp's pe_collection.dat is
   imported once.
