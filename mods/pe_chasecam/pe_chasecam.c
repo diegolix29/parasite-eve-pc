@@ -65,7 +65,8 @@ static void dump_room(void);
 
 /* Room camera words saved around the actor pass. */
 static u32 s_saved_scratch[9];
-static u16 s_saved_offset_x, s_saved_offset_y;
+/* Signed: rooms that scroll put the screen origin above or left of the picture. */
+static s16 s_saved_offset_x, s_saved_offset_y;
 static int s_swapped;
 static float s_mirror = 1.0f;    /* -1 when the room's camera is a mirror (det < 0) */
 
@@ -110,10 +111,11 @@ static int s_tile_count;
 static unsigned s_tile_hash, s_tile_frame;
 
 /* Screen cells (16 px) covering a margin around the frame, each listing its tiles. */
-#define CELL_X0 (-96)
-#define CELL_Y0 (-96)
-#define CELLS_W 32
-#define CELLS_H 26
+/* The whole picture, not only the part on screen: scrolling rooms are taller or wider. */
+#define CELL_X0 (-1024)
+#define CELL_Y0 (-1024)
+#define CELLS_W 128
+#define CELLS_H 128
 #define MAX_CELL_ITEMS (MAX_TILES * 4)
 static int s_cell_start[CELLS_W * CELLS_H + 1];
 static u16 s_cell_items[MAX_CELL_ITEMS];
@@ -566,8 +568,8 @@ static void project_surface(const Surface *s) {
 static void build_pieces(void) {
     unsigned key = hash_add(s_tile_hash, (unsigned)s_surf_count);
     for (int i = 0; i < 8; ++i) key = hash_add(key, s_saved_scratch[i]);
-    key = hash_add(key, s_saved_scratch[8] | ((unsigned)s_saved_offset_x << 16));
-    key = hash_add(key, s_saved_offset_y | ((unsigned)(uintptr_t)s_mesh_key << 16));
+    key = hash_add(key, s_saved_scratch[8] | ((unsigned)(u16)s_saved_offset_x << 16));
+    key = hash_add(key, (u16)s_saved_offset_y | ((unsigned)(uintptr_t)s_mesh_key << 16));
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
@@ -994,8 +996,8 @@ static int on_camera(void *ctx, void *user) {
         if (!can_run()) return 0;
         build_mesh();
         memcpy(s_saved_scratch, g_EntityRenderScratch, sizeof s_saved_scratch);
-        s_saved_offset_x = g_GeomScroll.state.position.screenOffsetX;
-        s_saved_offset_y = g_GeomScroll.state.position.screenOffsetY;
+        s_saved_offset_x = (s16)g_GeomScroll.state.position.screenOffsetX;
+        s_saved_offset_y = (s16)g_GeomScroll.state.position.screenOffsetY;
         float mirror = room_camera_mirrored() ? -1.0f : 1.0f;
         if (mirror != s_mirror) {
             s_mirror = mirror;
@@ -1015,8 +1017,8 @@ static int on_camera(void *ctx, void *user) {
         s_drawn_frame = s_frame;
     } else if (s_swapped) {
         memcpy(g_EntityRenderScratch, s_saved_scratch, sizeof s_saved_scratch);
-        g_GeomScroll.state.position.screenOffsetX = s_saved_offset_x;
-        g_GeomScroll.state.position.screenOffsetY = s_saved_offset_y;
+        g_GeomScroll.state.position.screenOffsetX = (u16)s_saved_offset_x;
+        g_GeomScroll.state.position.screenOffsetY = (u16)s_saved_offset_y;
         SetGeomScreen((long)s_saved_scratch[8]);
         s_swapped = 0;
     }
@@ -1198,14 +1200,16 @@ static int tile_cmp_far_first(const void *a, const void *b) {
     return (int)tb->ot - (int)ta->ot;
 }
 
-/* Room camera: world point -> picture canvas (screen + margin). 0 when behind the camera. */
+static int s_dox, s_doy; /* dump canvas origin in screen space */
+
+/* Room camera: world point -> picture canvas. 0 when behind the camera. */
 static int room_to_canvas(const V3 *p, float *x, float *y) {
     float v[3];
     room_view(p, v);
     if (v[2] < 16.0f) return 0;
     float H = (float)s_saved_scratch[8];
-    *x = s_saved_offset_x + H * v[0] / v[2] - CELL_X0;
-    *y = s_saved_offset_y + H * v[1] / v[2] - CELL_Y0;
+    *x = s_saved_offset_x + H * v[0] / v[2] - s_dox;
+    *y = s_saved_offset_y + H * v[1] / v[2] - s_doy;
     return 1;
 }
 
@@ -1228,7 +1232,16 @@ static void dump_room(void) {
     DrawSync(0);
 
     /* ---- picture ---- */
-    const int W = CELLS_W * 16, Hh = CELLS_H * 16;
+    int x0 = 0, y0 = 0, x1 = 320, y1 = 224;
+    for (int i = 0; i < s_tile_count; ++i) {
+        if (s_tiles[i].x < x0) x0 = s_tiles[i].x;
+        if (s_tiles[i].y < y0) y0 = s_tiles[i].y;
+        if (s_tiles[i].x + 16 > x1) x1 = s_tiles[i].x + 16;
+        if (s_tiles[i].y + 16 > y1) y1 = s_tiles[i].y + 16;
+    }
+    s_dox = x0 - 16;
+    s_doy = y0 - 16;
+    const int W = x1 - x0 + 32, Hh = y1 - y0 + 32;
     Canvas pic;
     if (!canvas_new(&pic, W, Hh, 80, 0, 80)) return;
     static u16 order[MAX_TILES];
@@ -1240,14 +1253,14 @@ static void dump_room(void) {
             for (int i = 0; i < 16; ++i) {
                 u16 c = tile_texel(t, i, j);
                 if (!c) continue;
-                canvas_put(&pic, t->x - CELL_X0 + i, t->y - CELL_Y0 + j, (u8)((c & 31) << 3),
+                canvas_put(&pic, t->x - s_dox + i, t->y - s_doy + j, (u8)((c & 31) << 3),
                            (u8)(((c >> 5) & 31) << 3), (u8)(((c >> 10) & 31) << 3));
             }
     }
-    canvas_line(&pic, -CELL_X0, -CELL_Y0, -CELL_X0 + 320, -CELL_Y0, 255, 255, 0);
-    canvas_line(&pic, -CELL_X0, -CELL_Y0 + 224, -CELL_X0 + 320, -CELL_Y0 + 224, 255, 255, 0);
-    canvas_line(&pic, -CELL_X0, -CELL_Y0, -CELL_X0, -CELL_Y0 + 224, 255, 255, 0);
-    canvas_line(&pic, -CELL_X0 + 320, -CELL_Y0, -CELL_X0 + 320, -CELL_Y0 + 224, 255, 255, 0);
+    canvas_line(&pic, -s_dox, -s_doy, -s_dox + 320, -s_doy, 255, 255, 0);
+    canvas_line(&pic, -s_dox, -s_doy + 224, -s_dox + 320, -s_doy + 224, 255, 255, 0);
+    canvas_line(&pic, -s_dox, -s_doy, -s_dox, -s_doy + 224, 255, 255, 0);
+    canvas_line(&pic, -s_dox + 320, -s_doy, -s_dox + 320, -s_doy + 224, 255, 255, 0);
     snprintf(path, sizeof path, "%s/picture.bmp", dir);
     canvas_save(&pic, path);
 
@@ -1349,7 +1362,7 @@ static void dump_room(void) {
             m->m[0][0], m->m[0][1], m->m[0][2], m->m[1][0], m->m[1][1], m->m[1][2], m->m[2][0],
             m->m[2][1], m->m[2][2], m->t[0], m->t[1], m->t[2], s_saved_scratch[8],
             s_mirror < 0 ? "mirrored" : "rotation");
-    fprintf(f, "screen offset %u %u  scroll x %d y %d  group %u\n", s_saved_offset_x,
+    fprintf(f, "screen offset %d %d  scroll x %d y %d  group %u\n", s_saved_offset_x,
             s_saved_offset_y, g_GeomScroll.state.position.x, g_GeomScroll.state.position.y,
             g_GeomScroll.state.position.groupSelect);
     fprintf(f, "chase camera: yaw %.3f pitch %.3f distance %.0f (want %d) pos %.0f %.0f %.0f  fov %d\n",
