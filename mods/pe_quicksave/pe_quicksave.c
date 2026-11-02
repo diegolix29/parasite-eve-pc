@@ -1,14 +1,16 @@
 /* Quick save slots, from the Pathogen Eve port (where they were save states).
  *
- * A quick save is the game's own memory-card save, made anywhere in the free field: the same 8 KB
- * card file Save_BuildCardFile writes (with every mod's save records), kept beside the user's
- * preferences as quicksave_<slot>.mcd. Loading one is the card load (Save_LoadCardFileIntoRuntime
- * without its dialogs) followed by the field script's own room transfer to the saved room, so the
- * game restarts that room the way a loaded save does. A quick save holds what a save holds:
- * Aya, items, storage, story and the room, not her place in it or a fight in progress.
+ * A quick save is the game's own memory-card save: the same 8 KB card file Save_BuildCardFile
+ * writes (with every mod's save records), kept beside the user's preferences as
+ * quicksave_<slot>.mcd. Loading one is the card load (Save_LoadCardFileIntoRuntime without its
+ * dialogs) followed by the field script's own room transfer to the saved room, so the game
+ * restarts that room the way a loaded save does. A quick save holds what a save holds: Aya, items,
+ * storage, story and the room, not her place in it or a fight in progress.
  *
- * F10 saves to the slot, F11 loads it, F12 picks the next slot; also F1 > Quick save. Both run on
- * the next free field frame: never in a battle, an event, a room change, a menu or a movie. */
+ * F10 saves to the slot, F11 loads it, F12 picks the next slot; also F1 > Quick save, which closes
+ * the panel. Both run on the next frame of any scene once a game is running (a load also from the
+ * title): a battle, an event, a menu or a movie is left for the saved room. Only a room change
+ * already under way is waited for. */
 #include <stdio.h>
 #include <string.h>
 #include <SDL3/SDL.h>
@@ -20,7 +22,11 @@
 #include "pe1/battle_saved_state.h"
 #include "pe1/game_state.h"
 #include "pe1/inventory.h"
+#include "pe1/boot.h"
+#include "pe1/akao_send.h"
 #include "pe1/memcard.h"
+#include "pe1/menu_memcard_display.h"
+#include "pe1/menu_widget.h"
 #include "pe1/save.h"
 #include "pe1/save_blob.h"
 #include "pe1/scene_dispatch.h"
@@ -48,12 +54,13 @@ static void pe_slot_path(char *out, size_t size, int slot) {
     if (pe_mod_path(out, size, name) != 0) snprintf(out, size, "%s", name);
 }
 
-static int pe_field_ready(void) {
+/* 1 now, 0 wait for a room change under way, -1 not possible here. */
+static int pe_ready(int load) {
     const unsigned token = (unsigned)g_SceneDispatchToken;
-    if (!pe_game_loaded() || !token || token == PE_TOKEN_TITLE || token == PE_TOKEN_NEW_GAME ||
-        token == PE_TOKEN_BOOT || token == PE_TOKEN_PROLOGUE) return -1;
-    return (unsigned)g_SceneDispatchCur == token && pe_free_field() &&
-           !g_GameState.scene_audio.tracks.movie_active;
+    if (!token || token == PE_TOKEN_BOOT) return -1;
+    if (!load && (!pe_game_loaded() || token == PE_TOKEN_TITLE || token == PE_TOKEN_NEW_GAME ||
+                  token == PE_TOKEN_PROLOGUE)) return -1;
+    return (unsigned)g_SceneDispatchCur == token;
 }
 
 static u32 pe_card_crc(const u8 *card) {
@@ -136,6 +143,12 @@ static void pe_load(int slot) {
         pe_toast(msg);
         return;
     }
+    /* A movie stops as a skipped one does; open menus go with the scene. */
+    if (Draw_CheckDrawStatus() != 0) {
+        MenuCardFirst_StopVideo();
+        Script_StopMovieMusic();
+    }
+    MenuWidget_InitPool();
     /* Save_LoadCardFileIntoRuntime's commit, without the card menu's dialogs. */
     g_SaveIoCursor = g_MemCardFileBuffer + 0x100 + 0x12E4;
     if (Save_DeserializeTail() != 0) { pe_toast("Quick load failed: the save's records don't match"); return; }
@@ -179,9 +192,13 @@ static int pe_on_frame(void *ctx, void *user) {
     (void)ctx; (void)user;
     pe_keys();
     if (!s_pending) return 0;
-    ready = pe_field_ready();
-    if (ready < 0) { pe_toast("Quick save: only in the field"); s_pending = PE_NONE; return 0; }
-    if (!ready) return 0;                   /* a battle, an event or a room change: wait */
+    ready = pe_ready(s_pending == PE_LOAD);
+    if (ready < 0) {
+        pe_toast(s_pending == PE_LOAD ? "Quick load: after the title screen appears" : "Quick save: start or load a game first");
+        s_pending = PE_NONE;
+        return 0;
+    }
+    if (!ready) return 0;
     if (s_pending == PE_SAVE) pe_save(s_slot); else pe_load(s_slot);
     s_pending = PE_NONE;
     return 0;
@@ -192,8 +209,8 @@ static int pe_on_new_game(void *ctx, void *user) {
     return 0;
 }
 
-static void pe_ask_save(void) { s_pending = PE_SAVE; }
-static void pe_ask_load(void) { s_pending = PE_LOAD; }
+static void pe_ask_save(void) { s_pending = PE_SAVE; pe_mod_panel_close(); }
+static void pe_ask_load(void) { s_pending = PE_LOAD; pe_mod_panel_close(); }
 static void pe_slot_info(char *out, unsigned size) {
     char path[1024];
     FILE *f;
@@ -208,11 +225,11 @@ static int quicksave_init(void) {
     pe_hook_add(PE_HOOK_NEW_GAME, pe_on_new_game, NULL, PE_PRIORITY_NORMAL, MOD_ID);
 
     pe_menu_begin(PE_PAGE_QUICKSAVE);
-    pe_menu_top_page(PE_PAGE_QUICKSAVE, "Save anywhere in the field, 10 slots.", 40);
+    pe_menu_top_page(PE_PAGE_QUICKSAVE, "Save and load at any moment, 10 slots.", 40);
     pe_menu_register_int(0, "Slot", "Which of the 10 slots F10 / F11 and the rows below use.",
                          &s_slot, 0, PE_SLOTS - 1, 1);
     pe_menu_register_info(0, "This slot", "Whether the slot holds a quick save.", pe_slot_info);
-    pe_menu_register_action(0, "Save", "Save to the slot (once the panel closes, from the field).", pe_ask_save);
+    pe_menu_register_action(0, "Save", "Save to the slot and return to the game.", pe_ask_save);
     pe_menu_register_action(0, "Load", "Load the slot: the saved room starts again, as a loaded save does.",
                             pe_ask_load);
     pe_menu_register_toggle(0, "Hotkeys", "F10 saves, F11 loads, F12 picks the next slot.", &s_hotkeys, NULL);

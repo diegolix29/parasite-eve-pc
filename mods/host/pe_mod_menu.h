@@ -69,6 +69,8 @@ int pe_mod_panel_open_page(const char *page);
 void pe_mod_panel_set_open_binding(int key, int button);
 /* Open the panel where F1 would (synchronously); 0 when it cannot draw. */
 int pe_mod_panel_open(void);
+/* Close the panel once the current row's action returns (back to the game). */
+void pe_mod_panel_close(void);
 
 /* ---- for the panel ---- */
 

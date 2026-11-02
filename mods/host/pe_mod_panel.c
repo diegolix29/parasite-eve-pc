@@ -594,6 +594,8 @@ int pe_mod_panel_open_page(const char *page) {
     return 1;
 }
 
+void pe_mod_panel_close(void) { s_panel.open = 0; }
+
 int pe_mod_panel_open(void) {
     if (!pe_ui_gpu_ready() || s_panel.open) return 0;
     pe_panel_run();
