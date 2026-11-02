@@ -101,6 +101,12 @@ projecting them through the room's camera onto its background tiles. F7 writes a
 (chasecam_dump beside the settings): the room picture, an overlay of every floor and wall piece
 on it (textured or not), a map from above, and a report of layers, wall loops and coverage.
 
+F6 is the fit editor, per room and camera: numpad 4/6/8/2 move the room's picture on the walls
+and floor, +/- size it, 7/9 and 1/3 width and height, PageUp/PageDown and Insert/Delete the wall
+and obstacle heights, 5 resets, 0 saves (F1 > Chase camera > Room fit has the same values). Fits
+are kept in chasecam_rooms.txt beside the settings. An obstacle Aya stands inside (a stage) gets
+no walls and a floor at her height.
+
 ## Cheats (pe_cheats)
 
 F1 > Cheats: God mode, Infinite ammo and PE, Win this battle, and Learn all / Restore PE powers.

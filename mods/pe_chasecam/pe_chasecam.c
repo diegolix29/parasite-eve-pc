@@ -60,7 +60,20 @@ static unsigned s_frame, s_drawn_frame;
 
 /* Mouse deltas and wheel, gathered by an event watch between frames. */
 static float s_mouse_dx, s_mouse_dy, s_wheel;
-static int s_f8_down, s_home_down, s_f7_down, s_dump_pending;
+static int s_f8_down, s_home_down, s_f7_down, s_f6_down, s_dump_pending;
+
+/* Per room and camera: how the room's picture sits on the rebuilt walls and floor. The picture
+ * position of every surface point is moved by (ox, oy) and scaled by (sx, sy) about the screen
+ * centre before it picks its tile; walls are wall / obst high. chasecam_rooms.txt beside the
+ * settings keeps them, one "room group ox oy sx sy wall obst" line each. */
+typedef struct { int room, group; float ox, oy, sx, sy; int wall, obst; } RoomFit;
+#define MAX_FITS 512
+static RoomFit s_fits[MAX_FITS];
+static int s_fit_count;
+static RoomFit s_fit = {-1, -1, 0, 0, 1, 1, 1400, 500};
+static int s_fit_saved = 1;   /* the current fit matches the file */
+static int s_edit;            /* F6: fit editor keys on the numpad */
+static unsigned s_edit_toast;
 static void dump_room(void);
 
 /* Room camera words saved around the actor pass. */
@@ -96,6 +109,10 @@ static const void *s_mesh_key;
 static unsigned s_mesh_tris;
 static int s_mesh_wall_height, s_mesh_obstacle_height;
 static u16 s_surf_pieces[MAX_SURFACES]; /* textured pieces per surface, for the dump */
+/* The obstacle loop Aya stands inside (a stage or platform: its floor isn't in the triangles),
+ * -1 for none, and her height there; the mesh is built with it. */
+static int s_inside_loop = -1, s_mesh_inside_loop = -2;
+static float s_inside_y;
 
 /* ---- background tiles this frame, where Render_DrawSpriteEntry would have put them ---- */
 typedef struct {
@@ -231,24 +248,45 @@ static int same_point(const V3 *a, const V3 *b) {
     return fabsf(a->x - b->x) < 0.5f && fabsf(a->z - b->z) < 0.5f;
 }
 
-/* Chains the wall edges into closed loops (each edge's end is the next one's start) and orders
- * s_walls_list by loop. The loop with the largest area is the floor's outline, and so is any
- * loop wound the same way (another island of floor); loops wound the other way are holes in the
- * floor: obstacles such as seat rows or tables, which get the lower obstacle height. */
+/* Whether (x, z) is inside the closed loop (even-odd rule over its edges). */
+static int inside_loop(const WallLoop *l, float x, float z) {
+    int in = 0;
+    for (int k = 0; k < l->count; ++k) {
+        const WallEdge *e = &s_walls_list[l->first + k];
+        if ((e->a.z > z) != (e->b.z > z) &&
+            x < e->a.x + (z - e->a.z) * (e->b.x - e->a.x) / (e->b.z - e->a.z))
+            in = !in;
+    }
+    return in;
+}
+
+/* Chains the wall edges into loops, end to start, turning an edge round when it was stored the
+ * other way (the floor's triangles aren't all wound alike), and orders s_walls_list by loop.
+ * A closed loop that lies inside an odd number of other closed loops is a hole in the floor:
+ * an obstacle such as a seat row or a table, which gets the lower obstacle height. Loops that
+ * don't close stay outer walls. */
 static void build_loops(void) {
     static WallEdge sorted[MAX_WALLS];
     static u8 used[MAX_WALLS];
+    static u8 closed[MAX_LOOPS];
     int n = 0;
     s_loop_count = 0;
     memset(used, 0, sizeof used);
     for (int start = 0; start < s_wall_count; ++start) {
         if (used[start]) continue;
         WallLoop loop = {n, 0, 0, 0, 1e9f, -1e9f, 1e9f, -1e9f};
-        int cur = start;
-        while (cur >= 0 && !used[cur]) {
+        int cur = start, flip = 0;
+        V3 first = s_walls_list[start].a;
+        int loop_index = s_loop_count < MAX_LOOPS ? s_loop_count : MAX_LOOPS - 1;
+        while (cur >= 0) {
             used[cur] = 1;
             WallEdge e = s_walls_list[cur];
-            e.loop = s_loop_count < MAX_LOOPS ? s_loop_count : MAX_LOOPS - 1;
+            if (flip) {
+                V3 t = e.a;
+                e.a = e.b;
+                e.b = t;
+            }
+            e.loop = loop_index;
             sorted[n++] = e;
             loop.count++;
             loop.area += e.a.x * e.b.z - e.b.x * e.a.z;
@@ -257,22 +295,98 @@ static void build_loops(void) {
             if (e.a.z < loop.minz) loop.minz = e.a.z;
             if (e.a.z > loop.maxz) loop.maxz = e.a.z;
             int next = -1;
-            for (int j = 0; j < s_wall_count; ++j)
-                if (!used[j] && same_point(&s_walls_list[j].a, &e.b)) { next = j; break; }
+            for (int j = 0; j < s_wall_count && next < 0; ++j) {
+                if (used[j]) continue;
+                if (same_point(&s_walls_list[j].a, &e.b)) { next = j; flip = 0; }
+                else if (same_point(&s_walls_list[j].b, &e.b)) { next = j; flip = 1; }
+            }
+            if (next < 0) {
+                if (s_loop_count < MAX_LOOPS) closed[s_loop_count] = same_point(&e.b, &first);
+                break;
+            }
             cur = next;
         }
         loop.area *= 0.5f;
         if (s_loop_count < MAX_LOOPS) s_loops[s_loop_count++] = loop;
     }
     memcpy(s_walls_list, sorted, sizeof(WallEdge) * (size_t)n);
-    int biggest = -1;
-    for (int i = 0; i < s_loop_count; ++i)
-        if (biggest < 0 || fabsf(s_loops[i].area) > fabsf(s_loops[biggest].area)) biggest = i;
     for (int i = 0; i < s_loop_count; ++i) {
         WallLoop *l = &s_loops[i];
-        l->outer = biggest >= 0 && (l->area >= 0) == (s_loops[biggest].area >= 0);
-        for (int k = 0; k < l->count; ++k)
-            s_walls_list[l->first + k].height = (float)(l->outer ? s_wall_height : s_obstacle_height);
+        int depth = 0;
+        if (closed[i] && l->count >= 3) {
+            const WallEdge *e = &s_walls_list[l->first];
+            float x = (e->a.x + e->b.x) * 0.5f, z = (e->a.z + e->b.z) * 0.5f;
+            for (int j = 0; j < s_loop_count; ++j)
+                if (j != i && closed[j] && s_loops[j].count >= 3 && inside_loop(&s_loops[j], x, z))
+                    depth++;
+        }
+        l->outer = (depth & 1) == 0;
+        float h = (float)(l->outer ? s_fit.wall : s_fit.obst);
+        if (i == s_inside_loop && !l->outer) h = 0.0f; /* Aya stands on it: a platform */
+        for (int k = 0; k < l->count; ++k) s_walls_list[l->first + k].height = h;
+    }
+}
+
+/* A floor over obstacle loop `index` at height y: its outline cut into triangles (ear clipping). */
+static void push_platform(int index, float y) {
+    const WallLoop *l = &s_loops[index];
+    if (l->count < 3 || l->count > 256) return;
+    float px[256], pz[256];
+    int idx[256], n = l->count;
+    for (int k = 0; k < n; ++k) {
+        px[k] = s_walls_list[l->first + k].a.x;
+        pz[k] = s_walls_list[l->first + k].a.z;
+        idx[k] = k;
+    }
+    float area = 0;
+    for (int k = 0; k < n; ++k) area += px[k] * pz[(k + 1) % n] - px[(k + 1) % n] * pz[k];
+    float sign = area >= 0 ? 1.0f : -1.0f;
+    int guard = 0;
+    while (n > 3 && guard++ < 4096) {
+        int cut = 0;
+        for (int i = 0; i < n && !cut; ++i) {
+            int a = idx[(i + n - 1) % n], b = idx[i], c = idx[(i + 1) % n];
+            float cross = (px[b] - px[a]) * (pz[c] - pz[a]) - (pz[b] - pz[a]) * (px[c] - px[a]);
+            if (cross * sign <= 0) continue;
+            int inside = 0;
+            for (int j = 0; j < n && !inside; ++j) {
+                int q = idx[j];
+                if (q == a || q == b || q == c) continue;
+                float d1 = (px[b] - px[a]) * (pz[q] - pz[a]) - (pz[b] - pz[a]) * (px[q] - px[a]);
+                float d2 = (px[c] - px[b]) * (pz[q] - pz[b]) - (pz[c] - pz[b]) * (px[q] - px[b]);
+                float d3 = (px[a] - px[c]) * (pz[q] - pz[c]) - (pz[a] - pz[c]) * (px[q] - px[c]);
+                inside = d1 * sign >= 0 && d2 * sign >= 0 && d3 * sign >= 0;
+            }
+            if (inside) continue;
+            V3 va = {px[a], y, pz[a]}, vb = {px[b], y, pz[b]}, vc = {px[c], y, pz[c]};
+            push_surface(&va, &vb, &vc, 1, 0, 0xFFFF, 0);
+            for (int j = i; j < n - 1; ++j) idx[j] = idx[j + 1];
+            n--;
+            cut = 1;
+        }
+        if (!cut) break;
+    }
+    if (n == 3) {
+        V3 va = {px[idx[0]], y, pz[idx[0]]}, vb = {px[idx[1]], y, pz[idx[1]]}, vc = {px[idx[2]], y, pz[idx[2]]};
+        push_surface(&va, &vb, &vc, 1, 0, 0xFFFF, 0);
+    }
+}
+
+/* Which obstacle loop Aya stands inside, if any (the innermost, smallest one). */
+static void find_inside_loop(void) {
+    const FieldActor *aya = g_PlayerEntity;
+    float x = (float)(aya->pos_x >> 16), z = (float)(aya->pos_z >> 16);
+    int best = -1;
+    for (int i = 0; i < s_loop_count; ++i) {
+        const WallLoop *l = &s_loops[i];
+        if (l->outer || l->count < 3) continue;
+        if (x < l->minx || x > l->maxx || z < l->minz || z > l->maxz) continue;
+        if (!inside_loop(l, x, z)) continue;
+        if (best < 0 || fabsf(l->area) < fabsf(s_loops[best].area)) best = i;
+    }
+    if (best != s_inside_loop) {
+        s_inside_loop = best;
+        s_inside_y = (float)(aya->pos_y >> 16);
     }
 }
 
@@ -285,12 +399,14 @@ static void build_mesh(void) {
         return;
     }
     if (s_mesh_key == db->triangles.pointer && s_mesh_tris == db->triangleCount &&
-        s_mesh_wall_height == s_wall_height && s_mesh_obstacle_height == s_obstacle_height)
+        s_mesh_wall_height == s_fit.wall && s_mesh_obstacle_height == s_fit.obst &&
+        s_mesh_inside_loop == s_inside_loop)
         return;
+    s_mesh_inside_loop = s_inside_loop;
     s_mesh_key = db->triangles.pointer;
     s_mesh_tris = db->triangleCount;
-    s_mesh_wall_height = s_wall_height;
-    s_mesh_obstacle_height = s_obstacle_height;
+    s_mesh_wall_height = s_fit.wall;
+    s_mesh_obstacle_height = s_fit.obst;
     s_surf_count = s_wall_count = 0;
     s_piece_key = 0;
 
@@ -343,9 +459,12 @@ static void build_mesh(void) {
             s_wall_count++;
         }
     }
-    s_floor_surf_count = s_surf_count;
     build_loops();
-    for (int i = 0; i < s_wall_count; ++i) push_wall(&s_walls_list[i], i);
+    if (s_inside_loop >= 0 && s_inside_loop < s_loop_count && !s_loops[s_inside_loop].outer)
+        push_platform(s_inside_loop, s_inside_y);
+    s_floor_surf_count = s_surf_count;
+    for (int i = 0; i < s_wall_count; ++i)
+        if (s_walls_list[i].height > 0.0f) push_wall(&s_walls_list[i], i);
     int outer = 0;
     for (int i = 0; i < s_loop_count; ++i) outer += s_loops[i].outer;
     pe_mod_log(MOD_ID, "room %d: %u triangles (%s), %d wall edges in %d loops (%d outer, %d "
@@ -522,8 +641,8 @@ static void project_surface(const Surface *s) {
     float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
     for (int k = 0; k < n; ++k) {
         float q = 1.0f / poly[k][2];
-        base[k].sx = ox + H * poly[k][0] * q;
-        base[k].sy = oy + H * poly[k][1] * q;
+        base[k].sx = 160.0f + (ox + H * poly[k][0] * q - 160.0f) * s_fit.sx + s_fit.ox;
+        base[k].sy = 112.0f + (oy + H * poly[k][1] * q - 112.0f) * s_fit.sy + s_fit.oy;
         base[k].q = q;
         base[k].wx = poly[k][3] * q;
         base[k].wy = poly[k][4] * q;
@@ -570,6 +689,12 @@ static void build_pieces(void) {
     for (int i = 0; i < 8; ++i) key = hash_add(key, s_saved_scratch[i]);
     key = hash_add(key, s_saved_scratch[8] | ((unsigned)(u16)s_saved_offset_x << 16));
     key = hash_add(key, (u16)s_saved_offset_y | ((unsigned)(uintptr_t)s_mesh_key << 16));
+    {
+        const float f[4] = {s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy};
+        unsigned bits[4];
+        memcpy(bits, f, sizeof bits);
+        for (int i = 0; i < 4; ++i) key = hash_add(key, bits[i]);
+    }
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
@@ -775,7 +900,7 @@ static void draw_room(void) {
     if (textured)
         for (int i = 0; i < s_piece_count; ++i)
             if (!s_pieces[i].wall || s_solid_walls) draw_piece(&s_pieces[i]);
-    if (!s_outlines) return;
+    if (!s_outlines && !s_edit) return;
     for (int i = 0; i < s_wall_count; ++i) {
         const WallEdge *w = &s_walls_list[i];
         V3 ta = {w->a.x, w->a.y - w->height, w->a.z};
@@ -801,6 +926,7 @@ static float collide_distance(float tx, float tz, float fx, float fz, float want
     float best = 1.0f;
     for (int i = 0; i < s_wall_count; ++i) {
         const WallEdge *w = &s_walls_list[i];
+        if (w->height <= 0.0f) continue; /* the platform Aya stands on */
         float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z;
         float dx = cx - tx, dz = cz - tz;
         float den = dx * ez - dz * ex;
@@ -872,6 +998,139 @@ static int can_run(void) {
     return s_enabled && pe_game_loaded() && g_PlayerEntity && g_CollisionDb;
 }
 
+/* ================= per-room fit ================= */
+
+static void fit_path(char *out, size_t size) {
+    if (pe_mod_path(out, size, "chasecam_rooms.txt") != 0) out[0] = 0;
+}
+
+static void fits_load(void) {
+    char path[512], line[256];
+    fit_path(path, sizeof path);
+    s_fit_count = 0;
+    FILE *f = path[0] ? fopen(path, "r") : NULL;
+    if (!f) return;
+    while (fgets(line, sizeof line, f) && s_fit_count < MAX_FITS) {
+        RoomFit r;
+        if (line[0] == '#') continue;
+        if (sscanf(line, "%d %d %f %f %f %f %d %d", &r.room, &r.group, &r.ox, &r.oy, &r.sx, &r.sy,
+                   &r.wall, &r.obst) == 8 && r.sx > 0.01f && r.sy > 0.01f)
+            s_fits[s_fit_count++] = r;
+    }
+    fclose(f);
+    pe_mod_log(MOD_ID, "%d room fits loaded", s_fit_count);
+}
+
+static void fits_save(void) {
+    char path[512];
+    int found = 0;
+    for (int i = 0; i < s_fit_count; ++i)
+        if (s_fits[i].room == s_fit.room && s_fits[i].group == s_fit.group) {
+            s_fits[i] = s_fit;
+            found = 1;
+        }
+    if (!found && s_fit_count < MAX_FITS) s_fits[s_fit_count++] = s_fit;
+    fit_path(path, sizeof path);
+    FILE *f = path[0] ? fopen(path, "w") : NULL;
+    if (!f) {
+        pe_toast("Chase camera: can't write chasecam_rooms.txt");
+        return;
+    }
+    fprintf(f, "# room group offset_x offset_y scale_x scale_y wall_height obstacle_height\n");
+    for (int i = 0; i < s_fit_count; ++i)
+        fprintf(f, "%d %d %.2f %.2f %.4f %.4f %d %d\n", s_fits[i].room, s_fits[i].group,
+                s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
+                s_fits[i].obst);
+    fclose(f);
+    s_fit_saved = 1;
+    char msg[96];
+    snprintf(msg, sizeof msg, "Room %d camera %d fit saved", s_fit.room, s_fit.group);
+    pe_toast(msg);
+}
+
+/* Picks the fit for the room and camera now showing (defaults when there is none). */
+static void fit_select(void) {
+    int room = pe_room_number(), group = g_GeomScroll.state.position.groupSelect;
+    if (room == s_fit.room && group == s_fit.group) return;
+    if (!s_fit_saved && s_fit.room >= 0) fits_save(); /* leaving an edited room keeps its edits */
+    RoomFit r = {room, group, 0, 0, 1, 1, s_wall_height, s_obstacle_height};
+    for (int i = 0; i < s_fit_count; ++i)
+        if (s_fits[i].room == room && s_fits[i].group == group) r = s_fits[i];
+    s_fit = r;
+    s_fit_saved = 1;
+}
+
+static void fit_reset(void) {
+    s_fit.ox = s_fit.oy = 0;
+    s_fit.sx = s_fit.sy = 1;
+    s_fit.wall = s_wall_height;
+    s_fit.obst = s_obstacle_height;
+    s_fit_saved = 0;
+}
+
+static void fit_toast(void) {
+    char msg[200];
+    snprintf(msg, sizeof msg, "Room %d cam %d  move %.1f, %.1f  size %.3f x %.3f  wall %d  obstacle %d%s",
+             s_fit.room, s_fit.group, s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy, s_fit.wall, s_fit.obst,
+             s_fit_saved ? "" : "  (not saved)");
+    pe_toast(msg);
+}
+
+/* F6 editor: numpad 4/6/8/2 move the picture, +/- size, 7/9 width, 1/3 height,
+ * PageUp/PageDown wall height, Insert/Delete obstacle height, 5 reset, 0 save; Shift is faster. */
+static void edit_keys(const bool *keys) {
+    if (!s_edit) return;
+    float fast = (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) ? 5.0f : 1.0f;
+    float step = 0.25f * fast, grow = 1.0f + 0.002f * fast;
+    int hstep = (int)(10 * fast);
+    RoomFit before = s_fit;
+    if (keys[SDL_SCANCODE_KP_4]) s_fit.ox -= step;
+    if (keys[SDL_SCANCODE_KP_6]) s_fit.ox += step;
+    if (keys[SDL_SCANCODE_KP_8]) s_fit.oy -= step;
+    if (keys[SDL_SCANCODE_KP_2]) s_fit.oy += step;
+    if (keys[SDL_SCANCODE_KP_PLUS]) { s_fit.sx *= grow; s_fit.sy *= grow; }
+    if (keys[SDL_SCANCODE_KP_MINUS]) { s_fit.sx /= grow; s_fit.sy /= grow; }
+    if (keys[SDL_SCANCODE_KP_9]) s_fit.sx *= grow;
+    if (keys[SDL_SCANCODE_KP_7]) s_fit.sx /= grow;
+    if (keys[SDL_SCANCODE_KP_3]) s_fit.sy *= grow;
+    if (keys[SDL_SCANCODE_KP_1]) s_fit.sy /= grow;
+    if (keys[SDL_SCANCODE_PAGEUP]) s_fit.wall += hstep;
+    if (keys[SDL_SCANCODE_PAGEDOWN]) s_fit.wall -= hstep;
+    if (keys[SDL_SCANCODE_INSERT]) s_fit.obst += hstep;
+    if (keys[SDL_SCANCODE_DELETE]) s_fit.obst -= hstep;
+    if (keys[SDL_SCANCODE_KP_5]) fit_reset();
+    s_fit.sx = clampf(s_fit.sx, 0.1f, 10.0f);
+    s_fit.sy = clampf(s_fit.sy, 0.1f, 10.0f);
+    if (s_fit.wall < 0) s_fit.wall = 0;
+    if (s_fit.wall > 8000) s_fit.wall = 8000;
+    if (s_fit.obst < 0) s_fit.obst = 0;
+    if (s_fit.obst > 8000) s_fit.obst = 8000;
+    if (memcmp(&before, &s_fit, sizeof before) != 0) {
+        s_fit_saved = 0;
+        if (s_frame - s_edit_toast > 12) {
+            s_edit_toast = s_frame;
+            fit_toast();
+        }
+    }
+    if (keys[SDL_SCANCODE_KP_0] && !s_fit_saved) fits_save();
+}
+
+/* F1 > Chase camera > Room fit: the same values as live rows. */
+static int get_ox(void) { return (int)lrintf(s_fit.ox * 4); }
+static int set_ox(int v) { s_fit.ox = v / 4.0f; s_fit_saved = 0; return 1; }
+static int get_oy(void) { return (int)lrintf(s_fit.oy * 4); }
+static int set_oy(int v) { s_fit.oy = v / 4.0f; s_fit_saved = 0; return 1; }
+static int get_sx(void) { return (int)lrintf(s_fit.sx * 1000); }
+static int set_sx(int v) { s_fit.sx = v / 1000.0f; s_fit_saved = 0; return 1; }
+static int get_sy(void) { return (int)lrintf(s_fit.sy * 1000); }
+static int set_sy(int v) { s_fit.sy = v / 1000.0f; s_fit_saved = 0; return 1; }
+static int get_wall(void) { return s_fit.wall; }
+static int set_wall(int v) { s_fit.wall = v; s_fit_saved = 0; return 1; }
+static int get_obst(void) { return s_fit.obst; }
+static int set_obst(int v) { s_fit.obst = v; s_fit_saved = 0; return 1; }
+static void fit_save_action(void) { fits_save(); }
+static void fit_reset_action(void) { fit_reset(); fit_toast(); }
+
 /* ================= input and hooks ================= */
 
 static bool SDLCALL on_event(void *user, SDL_Event *ev) {
@@ -921,6 +1180,18 @@ static void read_keys(void) {
     if (home && !s_home_down) s_place_behind = 1;
     if (keys[SDL_SCANCODE_F7] && !s_f7_down) s_dump_pending = 1;
     s_f7_down = keys[SDL_SCANCODE_F7];
+    if (keys[SDL_SCANCODE_F6] && !s_f6_down && s_enabled) {
+        s_edit = !s_edit;
+        if (s_edit)
+            pe_toast("Fit editor: numpad 4/6/8/2 move, +/- size, 7/9 width, 1/3 height, "
+                     "PgUp/PgDn wall, Ins/Del obstacle, 5 reset, 0 save, Shift faster");
+        else {
+            if (!s_fit_saved) fits_save();
+            pe_toast("Fit editor off");
+        }
+    }
+    s_f6_down = keys[SDL_SCANCODE_F6];
+    edit_keys(keys);
     s_f8_down = f8;
     s_home_down = home;
 }
@@ -994,6 +1265,11 @@ static int on_camera(void *ctx, void *user) {
     if (cam->phase == 0) {
         s_swapped = 0;
         if (!can_run()) return 0;
+        fit_select();
+        if (s_mesh_key && g_CollisionDb && s_mesh_key == g_CollisionDb->triangles.pointer)
+            find_inside_loop();
+        else
+            s_inside_loop = -1;
         build_mesh();
         memcpy(s_saved_scratch, g_EntityRenderScratch, sizeof s_saved_scratch);
         s_saved_offset_x = (s16)g_GeomScroll.state.position.screenOffsetX;
@@ -1043,6 +1319,7 @@ static int chasecam_init(void) {
     pe_hook_add(PE_HOOK_FIELD_CAMERA, on_camera, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     pe_hook_add(PE_HOOK_FIELD_BACKGROUND, on_background, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     SDL_AddEventWatch(on_event, NULL);
+    fits_load();
 
     pe_menu_begin(PAGE);
     pe_menu_top_page(PAGE, "Experimental camera behind Aya over the room's walkable floor.", 45);
@@ -1077,11 +1354,29 @@ static int chasecam_init(void) {
                             &s_collide, NULL);
     pe_menu_register_toggle(0, "Wall outlines", "Lines along the floor's edges and wall tops.",
                             &s_outlines, NULL);
+    pe_menu_page("Room fit", "Line the room's picture up with its walls, per room and camera (F6).", 0);
+    pe_menu_register_live_int("Room fit", "Move right", "Picture offset, quarter pixels (numpad 4/6).",
+                              -4000, 4000, 1, get_ox, set_ox);
+    pe_menu_register_live_int("Room fit", "Move down", "Picture offset, quarter pixels (numpad 8/2).",
+                              -4000, 4000, 1, get_oy, set_oy);
+    pe_menu_register_live_int("Room fit", "Width x1000", "Picture width (numpad 7/9).", 100, 10000,
+                              5, get_sx, set_sx);
+    pe_menu_register_live_int("Room fit", "Height x1000", "Picture height (numpad 1/3).", 100,
+                              10000, 5, get_sy, set_sy);
+    pe_menu_register_live_int("Room fit", "Wall height", "This room's walls (PageUp/PageDown).", 0,
+                              8000, 50, get_wall, set_wall);
+    pe_menu_register_live_int("Room fit", "Obstacle height",
+                              "This room's seat rows and tables (Insert/Delete).", 0, 8000, 50,
+                              get_obst, set_obst);
+    pe_menu_register_action("Room fit", "Save", "Keep this room's fit (numpad 0).", fit_save_action);
+    pe_menu_register_action("Room fit", "Reset", "Back to no offset, size 1 (numpad 5).",
+                            fit_reset_action);
     pe_menu_begin(0);
     return 0;
 }
 
 static void chasecam_shutdown(void) {
+    if (!s_fit_saved && s_fit.room >= 0) fits_save();
     SDL_RemoveEventWatch(on_event, NULL);
     release_angles();
 }
@@ -1319,6 +1614,12 @@ static void dump_room(void) {
                 canvas_line(&map, MX(w->a.x), MZ(w->a.z), MX(w->b.x), MZ(w->b.z),
                             outer ? 80 : 255, outer ? 140 : 150, outer ? 255 : 0);
             }
+            /* The scene's floor polygon, magenta. */
+            for (unsigned i = 0; g_FloorPolygonVertices && i < g_FloorPolygonVertexCount; ++i) {
+                const PolygonVertex *a = &g_FloorPolygonVertices[i];
+                const PolygonVertex *b = &g_FloorPolygonVertices[(i + 1) % g_FloorPolygonVertexCount];
+                canvas_line(&map, MX(a->x), MZ(a->z), MX(b->x), MZ(b->z), 255, 0, 255);
+            }
             const FieldActor *aya = g_PlayerEntity;
             float ax = MX((float)(aya->pos_x >> 16)), az = MZ((float)(aya->pos_z >> 16));
             canvas_line(&map, ax - 5, az, ax + 5, az, 255, 255, 255);
@@ -1369,6 +1670,13 @@ static void dump_room(void) {
             s_yaw, s_pitch, s_cur_distance, s_distance, s_cam[0], s_cam[1], s_cam[2], s_fov);
     fprintf(f, "settings: textures %d solid_walls %d wall_height %d obstacle_height %d\n",
             s_textures, s_solid_walls, s_wall_height, s_obstacle_height);
+    fprintf(f, "room fit (camera %d): move %.2f %.2f size %.4f x %.4f wall %d obstacle %d%s\n",
+            s_fit.group, s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy, s_fit.wall, s_fit.obst,
+            s_fit_saved ? "" : " (not saved)");
+    fprintf(f, "floor polygon (scene command 0x2E): %u vertices", g_FloorPolygonVertexCount);
+    for (unsigned i = 0; g_FloorPolygonVertices && i < g_FloorPolygonVertexCount && i < 64; ++i)
+        fprintf(f, " (%d,%d)", g_FloorPolygonVertices[i].x, g_FloorPolygonVertices[i].z);
+    fprintf(f, "\n");
     fprintf(f, "tiles %d%s, pieces %d, surfaces %d floor + %d wall\n\n", s_tile_count,
             stale ? " (STALE: not gathered this frame)" : "", s_piece_count, s_floor_surf_count,
             s_surf_count - s_floor_surf_count);
@@ -1392,13 +1700,13 @@ static void dump_room(void) {
         }
     }
 
-    fprintf(f, "\nwall loops: %d (outer = the floor's outline, obstacle = a hole in the floor)\n",
-            s_loop_count);
+    fprintf(f, "\nwall loops: %d (outer = the floor's outline, obstacle = a hole in the floor); "
+            "Aya stands in loop %d (a platform, no walls)\n", s_loop_count, s_inside_loop);
     for (int i = 0; i < s_loop_count; ++i) {
         const WallLoop *l = &s_loops[i];
         fprintf(f, "  loop %3d %-8s edges %3d area %10.0f  x %.0f..%.0f z %.0f..%.0f  height %d\n",
                 i, l->outer ? "outer" : "obstacle", l->count, l->area, l->minx, l->maxx, l->minz,
-                l->maxz, l->outer ? s_wall_height : s_obstacle_height);
+                l->maxz, l->outer ? s_fit.wall : s_fit.obst);
     }
 
     /* Per source triangle / wall edge: how many of its parts got a texture. */
@@ -1406,7 +1714,7 @@ static void dump_room(void) {
     {
         int last = -1, parts = 0, tex = 0, total_tex = 0, total = 0;
         for (int i = 0; i <= s_floor_surf_count; ++i) {
-            int src = i < s_floor_surf_count ? s_surf[i].src : -2;
+            int src = i < s_floor_surf_count ? (s_surf[i].src == 0xFFFF ? -3 : s_surf[i].src) : -2;
             if (src != last && last >= 0) {
                 fprintf(f, "  tri %4d: %d/%d\n", last, tex, parts);
                 total_tex += tex > 0;
@@ -1414,6 +1722,7 @@ static void dump_room(void) {
                 parts = tex = 0;
             }
             if (i == s_floor_surf_count) break;
+            if (src == -3) continue; /* platform floor under Aya, not a collision triangle */
             last = src;
             parts++;
             tex += s_surf_pieces[i] > 0;
@@ -1444,5 +1753,5 @@ static void dump_room(void) {
     pe_mod_log(MOD_ID, "dump written to %s", dir);
 }
 
-const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.3", NULL, chasecam_init,
+const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.4", NULL, chasecam_init,
                                   chasecam_shutdown};
