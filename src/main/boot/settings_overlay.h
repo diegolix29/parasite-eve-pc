@@ -434,6 +434,8 @@ static int Host_SettingsPureRowCount(int page) {
 #else
         return 4;
 #endif
+#elif defined(PE_MODS) && !defined(PE_PS5)
+        return 4; /* the last row opens the Mods menu (F1) */
 #else
         return 3;
 #endif
@@ -1028,7 +1030,7 @@ static void PaintRows(const Painter *p) {
                                           ? "Press key or button..."
                                           : Host_ControlBindingValueName(p->state, idx);
                     int speed = idx == HOST_SPEED_BINDING;
-                    PaintValueRow(p, speed ? "" : host_button_names[idx],
+                    PaintValueRow(p, speed ? "" : Host_BindingLabel((unsigned)idx),
                                   val, mid, baseline, selected, capturing, label);
                     if (speed) {
                         PaintSpeedLabel(p, mid, baseline, selected, label);
@@ -1046,7 +1048,7 @@ static void PaintRows(const Painter *p) {
                 const char *names[]={"Title HD","CPU field HD (experimental)","Field pack directory"};
  #endif
 #else
-                const char *names[]={"HD backgrounds","Background pack","Integrity check"};
+                const char *names[]={"HD backgrounds","Background pack","Integrity check","Mods menu"};
 #endif
 #ifdef PE_PS5_GPU_NATIVE
 #ifdef PE_MODS
@@ -1055,6 +1057,10 @@ static void PaintRows(const Painter *p) {
 #endif
                 if(row==5)PaintValueRow(p,names[row],host_options.battle_debris_3d==2?"New geometry":host_options.battle_debris_3d?"Hybrid geometry":"Original",mid,baseline,selected,0,label);
                 else if(row==3)PaintValueRow(p,names[row],host_options.movie_presentation==0?"On":"Off (aspect + blur)",mid,baseline,selected,0,label);
+                else
+#endif
+#if defined(PE_MODS) && !defined(PE_PS5)
+                if(row==3)PaintValueRow(p,names[row],"Open menu",mid,baseline,selected,0,label);
                 else
 #endif
                 if(row==0)PaintValueRow(p,names[row],Host_HdValue(row),mid,baseline,selected,0,label);
@@ -1079,7 +1085,7 @@ static void PaintRows(const Painter *p) {
 #ifdef PE_PS5_GPU_NATIVE
                      quit ? "Quit game" : row==pureCount+1 ? "Back" : "Resume game",quit?kDanger:label,
 #else
-                     quit ? "Quit game" : "Resume game", quit ? kDanger : label,
+                     quit ? "Quit game" : host_setup_mode ? "Start game" : "Resume game", quit ? kDanger : label,
 #endif
                      ALIGN_LEFT);
         }
@@ -1153,8 +1159,15 @@ static const char *OverlayRowHelp(const HostOverlayState *state) {
     if(state->page==OVERLAY_PAGE_MODS&&state->row==3)
         return "On fills the TV. Off keeps the original movie aspect with blurred borders. Applies to both original video formats.";
 #endif
+#if defined(PE_MODS) && !defined(PE_PS5)
+    if(state->page==OVERLAY_PAGE_MODS&&state->row==3)
+        return "Open the Mods menu (F1, Guide or the Mods button) to turn mods on or off and set their options.";
+#endif
     int pureCount = Host_SettingsPureRowCount(state->page);
     if (state->row == pureCount) {
+#ifndef PE_PS5
+        if (host_setup_mode) return "Start the game with these settings. Esc or the Settings button changes them later.";
+#endif
         return "Return to the game.";
     }
     if (state->row == pureCount + OVERLAY_ACTION_ROWS-1) {
@@ -1189,6 +1202,12 @@ static const char *OverlayRowHelp(const HostOverlayState *state) {
         }
         if (state->row == HOST_SCREENSHOT_BINDING + 1) {
             return "Capture a screenshot with note & background ID. Enter/South binds; Del/West unbinds.";
+        }
+        if (state->row == HOST_SETTINGS_BINDING + 1 || state->row == HOST_SETTINGS2_BINDING + 1) {
+            return "Open this menu: hold both together (one if the other is unbound). Esc always works.";
+        }
+        if (state->row == HOST_MODS_BINDING + 1) {
+            return "Open or close the Mods menu, like F1 or the Guide button. Del/West unbinds.";
         }
         return "Press Enter or South button to rebind. Duplicate bindings swap automatically.";
     }
