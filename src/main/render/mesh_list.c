@@ -3,6 +3,7 @@
  * draws (G0833/G0835). */
 
 #include "common.h"
+#include "pe_hooks.h"
 #include "pe1/game_state.h"
 #include "pe1/geom_state.h"
 #include "pe1/gte.h"
@@ -655,6 +656,8 @@ s32 Render_BuildMeshList(void) {
     s32 count;
     s32 i;
 
+    if (PE_HOOK(PE_HOOK_FIELD_BACKGROUND, NULL))
+        return 0;
     base.state = g_GeomState;
     base.state->out_disp_x = base.state->disp_src_x - ((u16)g_GeomScroll.state.position.x - 160);
     count = base.state->entry_count06;

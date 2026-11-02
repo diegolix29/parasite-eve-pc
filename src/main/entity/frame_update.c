@@ -17,6 +17,7 @@
 #include "pe1/script_node.h"
 #include "pe1/script_queue.h"
 #include "pe_actor_texture_pages.h"
+#include "pe_hooks.h"
 
 /* Original USA per-type integration callbacks (800915DC). */
 FieldActorCallbacks g_FieldActorTypeCallbacks[13] = {
@@ -272,6 +273,7 @@ void Entity_FrameUpdate(void) {
             }
         }
         Render_SetViewport(camera);
+        PE_HOOK(PE_HOOK_FIELD_CAMERA, (&(PeHookFieldCamera){0}));
 
         if (!(g_GameStateBlock.flags & 4)) {
             Render_SetGteScreenOffset();
@@ -352,6 +354,7 @@ void Entity_FrameUpdate(void) {
         Scene_LoadEntityTextures();
         Pm_RunPrimary();
         Render_ResetGteScreenOffset();
+        PE_HOOK(PE_HOOK_FIELD_CAMERA, (&(PeHookFieldCamera){1}));
 
         if (!(g_GameStateBlock.flags & 4)) {
             if (g_GameStateBlock.flags & 0x100) {

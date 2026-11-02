@@ -98,7 +98,7 @@ cmake --build build-mods --parallel
 ./build-mods/parasite-eve-pc
 ```
 
-`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave;pe_cheats`).
+`PE_MOD_LIST` picks the mods by folder name (default: `pe_qol;pe_rebalance;pe_economy;pe_collection;pe_stacks;pe_warp;pe_quicksave;pe_cheats;pe_chasecam`).
 
 ### PS5 payload & native GPU options
 

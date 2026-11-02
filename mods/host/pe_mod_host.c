@@ -444,6 +444,8 @@ static const char *pe_hook_name(int id) {
         [PE_HOOK_STORAGE_TRANSFER] = "storage transfer",
         [PE_HOOK_SLOT_DRAWN] = "slot drawn",
         [PE_HOOK_TITLE_FRAME] = "title frame",
+        [PE_HOOK_FIELD_CAMERA] = "field camera",
+        [PE_HOOK_FIELD_BACKGROUND] = "field background",
     };
     if (id >= 0 && id < PE_HOOK_COUNT) return names[id] ? names[id] : "?";
     return id - PE_HOOK_COUNT < s_event_count ? s_events[id - PE_HOOK_COUNT] : "?";
