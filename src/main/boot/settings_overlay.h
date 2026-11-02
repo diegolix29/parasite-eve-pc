@@ -435,11 +435,14 @@ static int Host_SettingsPureRowCount(int page) {
         return 4;
 #endif
 #elif defined(PE_MODS) && !defined(PE_PS5)
-        return 4; /* the last row opens the Mods menu (F1) */
+        return 4;
 #else
         return 3;
 #endif
     }
+#ifndef PE_PS5
+    if (page == OVERLAY_PAGE_DISCS) return 3;
+#endif
     return 2;
 }
 
@@ -1068,6 +1071,8 @@ static void PaintRows(const Painter *p) {
                     DrawText(p->surface,OVERLAY_PAD*s,baseline,17*s,names[row],label,ALIGN_LEFT);
                     DrawText(p->surface,OverlayValueCentre()*s,baseline,17*s,Host_HdValue(row),selected?kAccent:kText,ALIGN_CENTRE);
                 }
+            } else if (page == OVERLAY_PAGE_DISCS && row == 2) {
+                PaintValueRow(p, "Setup wizard", "Run again", mid, baseline, selected, 0, label);
             } else if (page == OVERLAY_PAGE_DISCS) {
                 char discLabel[32];
                 snprintf(discLabel, sizeof(discLabel), "Disc %d", row + 1);
@@ -1212,6 +1217,7 @@ static const char *OverlayRowHelp(const HostOverlayState *state) {
         return "Press Enter or South button to rebind. Duplicate bindings swap automatically.";
     }
     if (state->page == OVERLAY_PAGE_DISCS) {
+        if (state->row == 2) return "Restart the game into setup: storage, discs, settings and mods.";
         return g_CdImageVolumes[state->row]
                    ? "This disc image is validated and mounted."
                    : "Press Enter to select a Parasite Eve (USA) CUE or BIN disc image.";

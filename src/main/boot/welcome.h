@@ -1,7 +1,5 @@
-/* First-launch welcome (desktop), before the game window: where to keep settings and saves
- * (a portable userdata folder beside the executable, or the user profile), then the disc images.
- * The settings wizard follows on the first frame. Drawn with the settings painter in its own
- * window; keyboard, mouse and pad. --setup shows the disc step again. */
+/* Welcome (desktop; first launch or --setup), before the game window: where to keep settings
+ * and saves, then the disc images. The settings wizard follows on the first frame. */
 
 enum {
     WELCOME_PANEL_W = 640,
@@ -12,8 +10,9 @@ enum {
 static struct {
     int step;          /* 0 storage, 1 discs */
     int row;
-    int full;          /* first launch: the storage step comes first */
-    int portable;
+    int full;          /* first launch */
+    int fixed;         /* PE_CONFIG_HOME set elsewhere: no storage step */
+    int portable, was_portable;
     char disc[2][4096];
     int disc_state[2]; /* 0 not set, 1 a matching image, -1 not that disc */
     int changed[2];
@@ -26,6 +25,13 @@ static struct {
 static int Welcome_RowCount(void) { return s_welcome.step == 0 ? 3 : 4; }
 static int Welcome_DesignHeight(void) {
     return WELCOME_HEADER_H + Welcome_RowCount() * OVERLAY_ROW_H + WELCOME_FOOTER_H;
+}
+
+/* PE_CONFIG_HOME is the portable userdata folder beside the executable. */
+static int Welcome_PortableActive(void) {
+    const char *config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
+    const char *base = SDL_GetBasePath();
+    return config && base && *base && !SDL_strncasecmp(config, base, strlen(base));
 }
 
 static const char *Welcome_FileName(const char *path) {
@@ -63,7 +69,7 @@ static void Welcome_Row(int row, const char **label, const char **value, Color *
         }
         return;
     }
-    *label = row == 2 ? "Continue to settings" : s_welcome.full ? "Back" : "Quit";
+    *label = row == 2 ? "Continue to settings" : s_welcome.fixed ? "Quit" : "Back";
 }
 
 static void Welcome_Help(const char **first, const char **second) {
@@ -72,10 +78,12 @@ static void Welcome_Help(const char **first, const char **second) {
     if (s_welcome.step == 0) {
         if (s_welcome.row == 0) {
             *first = "Settings, saves, mods and HD backgrounds go in a userdata folder";
-            *second = "beside the game. Copy the whole folder to play on another PC.";
+            *second = !s_welcome.full && !s_welcome.was_portable ? "beside the game; your current ones are copied there."
+                                                                 : "beside the game. Copy the whole folder to play on another PC.";
         } else if (s_welcome.row == 1) {
             *first = "Settings, saves, mods and HD backgrounds go in your user profile,";
-            *second = "shared by every copy of the game on this PC.";
+            *second = s_welcome.was_portable ? "copied from userdata, which is kept as userdata-old."
+                                             : "shared by every copy of the game on this PC.";
         } else {
             *first = "Close without changing anything.";
         }
@@ -89,7 +97,7 @@ static void Welcome_Help(const char **first, const char **second) {
         *first = "Next: graphics, controls, audio and the Mods menu, then Start game.";
         *second = "Disc 2 can wait; the game asks for it when the story needs it.";
     } else {
-        *first = s_welcome.full ? "Back to where settings and saves are kept." : "Close without starting the game.";
+        *first = s_welcome.fixed ? "Close without starting the game." : "Back to where settings and saves are kept.";
     }
 }
 
@@ -107,10 +115,11 @@ static void Welcome_Paint(OverlaySurface *surface, const OverlayLayout *layout) 
     DrawText(surface, (float)OVERLAY_PAD * s, 40.0f * s, 26.0f * s,
              s_welcome.step == 0 ? "Welcome to Parasite Eve" : "Disc images", kText, ALIGN_LEFT);
     DrawText(surface, (float)(WELCOME_PANEL_W - OVERLAY_PAD) * s, 38.0f * s, 14.0f * s,
-             !s_welcome.full ? "SETUP" : s_welcome.step == 0 ? "STEP 1 OF 3" : "STEP 2 OF 3", kMuted,
+             s_welcome.fixed ? "SETUP" : s_welcome.step == 0 ? "STEP 1 OF 3" : "STEP 2 OF 3", kMuted,
              ALIGN_RIGHT);
     DrawText(surface, (float)OVERLAY_PAD * s, 84.0f * s, 16.0f * s,
-             s_welcome.step == 0 ? "A short setup before the first start. Where should the game keep"
+             s_welcome.step == 0 ? s_welcome.full ? "A short setup before the first start. Where should the game keep"
+                                                  : "Setting up again. Where should the game keep"
                                  : "Point the game at your Parasite Eve (USA) disc images.",
              WithAlpha(kText, 0.82f), ALIGN_LEFT);
     DrawText(surface, (float)OVERLAY_PAD * s, 108.0f * s, 16.0f * s,
@@ -172,25 +181,9 @@ static void Welcome_Render(SDL_Renderer *renderer, SDL_Window *window, SDL_Textu
         layout.y = (h - layout.h) / 2;
     }
     s_welcome.layout = layout;
-    if (OverlayFontReady() && OverlaySurfaceResize(&s_overlaySurface, layout.w, layout.h)) {
-        Welcome_Paint(&s_overlaySurface, &layout);
-        if (*texture == NULL || *texW != layout.w || *texH != layout.h) {
-            if (*texture != NULL) SDL_DestroyTexture(*texture);
-            *texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING,
-                                         layout.w, layout.h);
-            *texW = layout.w;
-            *texH = layout.h;
-            if (*texture != NULL) SDL_SetTextureBlendMode(*texture, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
-        }
-        if (*texture != NULL) SDL_UpdateTexture(*texture, NULL, s_overlaySurface.pixels, layout.w * 4);
-    }
-    SDL_SetRenderDrawColor(renderer, 12, 14, 18, 255);
-    SDL_RenderClear(renderer);
-    if (*texture != NULL) {
-        SDL_FRect dst = {(float)layout.x, (float)layout.y, (float)layout.w, (float)layout.h};
-        SDL_RenderTexture(renderer, *texture, NULL, &dst);
-    }
-    SDL_RenderPresent(renderer);
+    const int painted = OverlayFontReady() && OverlaySurfaceResize(&s_overlaySurface, layout.w, layout.h);
+    if (painted) Welcome_Paint(&s_overlaySurface, &layout);
+    Host_PresentOverlaySurface(renderer, window, layout, painted, texture, texW, texH);
 }
 
 /* Which disc an image is: 1 or 2, 0 when it is not a Parasite Eve (USA) disc. */
@@ -216,6 +209,8 @@ static void Welcome_ChooseDisc(int slot) {
                                                          : "That image is Disc 1, so it went in the Disc 1 slot.";
 }
 
+static void Welcome_Back(void);
+
 static void Welcome_Accept(void) {
     s_welcome.dirty = 1;
     s_welcome.note = NULL;
@@ -233,18 +228,15 @@ static void Welcome_Accept(void) {
     } else if (s_welcome.row == 2) {
         if (s_welcome.disc_state[0] > 0) s_welcome.done = 1;
         else s_welcome.note = "Choose the Disc 1 image first.";
-    } else if (s_welcome.full) {
-        s_welcome.step = 0;
-        s_welcome.row = s_welcome.portable ? 0 : 1;
     } else {
-        s_welcome.quit = 1;
+        Welcome_Back();
     }
 }
 
 static void Welcome_Back(void) {
     s_welcome.dirty = 1;
     s_welcome.note = NULL;
-    if (s_welcome.step == 1 && s_welcome.full) {
+    if (s_welcome.step == 1 && !s_welcome.fixed) {
         s_welcome.step = 0;
         s_welcome.row = s_welcome.portable ? 0 : 1;
     } else {
@@ -259,7 +251,6 @@ static void Welcome_Move(int direction) {
     s_welcome.dirty = 1;
 }
 
-/* The row under a window point, or -1. */
 static int Welcome_HitRow(SDL_Window *window, float x, float y) {
     const float density = SDL_GetWindowPixelDensity(window);
     const OverlayLayout *layout = &s_welcome.layout;
@@ -338,20 +329,73 @@ static void Welcome_Event(const SDL_Event *event, SDL_Window *window) {
     }
 }
 
-/* full: the storage step first (first launch). discs: the current images, or NULL.
- * 1 continue, 0 quit. Portable chosen: the userdata folder is made and portable mode applied. */
+/* The user-profile folder Host_InitOptions uses without PE_CONFIG_HOME. */
+static int Welcome_StandardDir(char *out, size_t size) {
+#if defined(__linux__) && !defined(__ANDROID__)
+    const char *root = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "XDG_CONFIG_HOME");
+    if (root && *root) return snprintf(out, size, "%s/parasite-eve", root) < (int)size;
+    root = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "HOME");
+    return root && snprintf(out, size, "%s/.config/parasite-eve", root) < (int)size;
+#else
+    char *pref = SDL_GetPrefPath("", "Parasite Eve");
+    int ok = pref && snprintf(out, size, "%s", pref) < (int)size;
+    SDL_free(pref);
+    return ok;
+#endif
+}
+
+static void Welcome_CopyTree(const char *from, const char *to);
+static SDL_EnumerationResult SDLCALL Welcome_CopyEntry(void *to, const char *dirname, const char *fname) {
+    char source[4096], target[4096];
+    SDL_PathInfo info;
+    if (snprintf(source, sizeof(source), "%s%s", dirname, fname) >= (int)sizeof(source) ||
+        snprintf(target, sizeof(target), "%s/%s", (const char *)to, fname) >= (int)sizeof(target) ||
+        !SDL_GetPathInfo(source, &info))
+        return SDL_ENUM_CONTINUE;
+    if (info.type == SDL_PATHTYPE_DIRECTORY) Welcome_CopyTree(source, target);
+    else if (info.type == SDL_PATHTYPE_FILE) SDL_CopyFile(source, target);
+    return SDL_ENUM_CONTINUE;
+}
+static void Welcome_CopyTree(const char *from, const char *to) {
+    SDL_CreateDirectory(to);
+    SDL_EnumerateDirectory(from, Welcome_CopyEntry, (void *)to);
+}
+
+/* Moves to the chosen storage, copying the current files; userdata is renamed, never deleted. */
+static void Welcome_SwitchStorage(const char *base) {
+    char portable[4096], standard[4096], old[4096];
+    if (snprintf(portable, sizeof(portable), "%suserdata", base) >= (int)sizeof(portable) ||
+        !Welcome_StandardDir(standard, sizeof(standard)))
+        return;
+    if (s_welcome.portable) {
+        Welcome_CopyTree(standard, portable);
+        Host_PortableMode();
+        return;
+    }
+    Welcome_CopyTree(portable, standard);
+    for (int i = 0; i < 10; ++i) {
+        snprintf(old, sizeof(old), i ? "%suserdata-old%d" : "%suserdata-old", base, i + 1);
+        if (SDL_RenamePath(portable, old)) break;
+    }
+    SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
+}
+
+/* full: first launch. discs: the current images, or NULL. 1 continue, 0 quit. */
 static int Host_Welcome(int full, char (*discs)[4096]) {
     SDL_Window *window;
     SDL_Renderer *renderer;
     SDL_Texture *texture = NULL;
     int texW = 0, texH = 0;
-    const char *config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
     const char *base = SDL_GetBasePath();
+    const char *config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
 
     memset(&s_welcome, 0, sizeof(s_welcome));
     s_welcome.full = full;
-    s_welcome.step = full ? 0 : 1;
-    s_welcome.portable = full || (config && base && !SDL_strncasecmp(config, base, strlen(base)));
+    s_welcome.was_portable = Welcome_PortableActive();
+    s_welcome.fixed = config && *config && !s_welcome.was_portable;
+    s_welcome.step = s_welcome.fixed ? 1 : 0;
+    s_welcome.portable = full || s_welcome.was_portable;
+    s_welcome.row = s_welcome.fixed || s_welcome.portable ? 0 : 1;
     s_welcome.dirty = 1;
     for (int i = 0; discs && i < 2; ++i)
         if (*discs[i]) {
@@ -385,48 +429,36 @@ static int Host_Welcome(int full, char (*discs)[4096]) {
     SDL_DestroyWindow(window);
     SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
     if (s_welcome.quit) return 0;
-    if (full && s_welcome.portable && base) {
-        char path[4096];
-        if (snprintf(path, sizeof(path), "%suserdata", base) < (int)sizeof(path) && SDL_CreateDirectory(path))
-            Host_PortableMode();
-    }
+    if (!s_welcome.fixed && s_welcome.portable != s_welcome.was_portable && base) Welcome_SwitchStorage(base);
     return 1;
 }
 
-/* The welcome's disc choices into the preferences, relative to the game folder in portable mode. */
+/* The welcome's discs into the preferences: relative to the game folder in portable mode,
+ * absolute otherwise. */
 static void Host_WelcomeApplyDiscs(void) {
-    const char *config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
     const char *base = SDL_GetBasePath();
     const size_t length = base ? strlen(base) : 0;
-    const int portable = config && length && !SDL_strncasecmp(config, base, length);
-    if (!s_welcome.done) return;
+    const int portable = Welcome_PortableActive();
+    if (!s_welcome.done || !length) return;
     for (int i = 0; i < 2; ++i) {
         const char *path = s_welcome.disc[i];
-        if (s_welcome.disc_state[i] <= 0 || !s_welcome.changed[i]) continue;
-        if (portable && !SDL_strncasecmp(path, base, length)) path += length;
-        snprintf(host_options.discs[i], sizeof(host_options.discs[i]), "%s", path);
+        const int absolute = path[0] == '/' || path[0] == '\\' || (path[0] && path[1] == ':');
+        if (s_welcome.disc_state[i] <= 0) continue;
+        if (portable && !SDL_strncasecmp(path, base, length))
+            snprintf(host_options.discs[i], sizeof(host_options.discs[i]), "%s", path + length);
+        else if (!portable && !absolute)
+            snprintf(host_options.discs[i], sizeof(host_options.discs[i]), "%s%s", base, path);
+        else
+            snprintf(host_options.discs[i], sizeof(host_options.discs[i]), "%s", path);
     }
 }
 
-/* No preferences file yet where this launch would keep it (as Host_InitOptions finds it). */
+/* No preferences file yet where Host_InitOptions would look for it. */
 static int Host_FirstLaunch(void) {
     const char *config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
-    char path[4096];
-    if (config && *config) {
-        snprintf(path, sizeof(path), "%s/parasite-eve.toml", config);
-    } else {
-#if defined(__linux__) && !defined(__ANDROID__)
-        const char *root = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "XDG_CONFIG_HOME");
-        if (root && *root) snprintf(path, sizeof(path), "%s/parasite-eve/parasite-eve.toml", root);
-        else if ((root = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "HOME")))
-            snprintf(path, sizeof(path), "%s/.config/parasite-eve/parasite-eve.toml", root);
-        else return 0;
-#else
-        char *pref = SDL_GetPrefPath("", "Parasite Eve");
-        if (!pref) return 0;
-        snprintf(path, sizeof(path), "%sparasite-eve.toml", pref);
-        SDL_free(pref);
-#endif
-    }
+    char dir[4096], path[4200];
+    if (config && *config) snprintf(dir, sizeof(dir), "%s", config);
+    else if (!Welcome_StandardDir(dir, sizeof(dir))) return 0;
+    snprintf(path, sizeof(path), "%s/parasite-eve.toml", dir);
     return !SDL_GetPathInfo(path, NULL);
 }

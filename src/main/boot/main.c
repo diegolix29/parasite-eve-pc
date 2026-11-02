@@ -27,7 +27,8 @@ static int host_open_assists;
 void pe_mod_panel_set_open_binding(int key, int button);
 int pe_mod_panel_open(void);
 #endif
-static int host_setup_pending, host_setup_mode, host_open_mods;
+static int host_setup_pending, host_setup_mode, host_open_mods, host_relaunch_setup;
+static char host_executable[4096];
 #if PE_NATIVE_STATE_CPU_COMPONENTS
 static void Host_StateUiRegister(void);
 static bool Host_StateChord(const SDL_Event *event);
@@ -1835,33 +1836,10 @@ static int Host_RequestImage(unsigned identity) {
     return Host_AddImage(identity, 1);
 }
 
-static void Host_OverlayRenderFallback(
-    SDL_Renderer *renderer,
-    SDL_Window *window,
-    HostOverlayState *state,
-    SDL_Texture **texture,
-    int *texW,
-    int *texH
-) {
-    int w = 0, h = 0;
-    OverlayLayout layout;
-    SDL_GetWindowSizeInPixels(window, &w, &h);
-    if (w <= 0) {
-        w = 640;
-    }
-    if (h <= 0) {
-        h = 600;
-    }
-    OverlayComputeStateLayout(state, w, h, &layout);
-    s_overlayLayout = layout;
-    if (OverlayFontReady() && OverlaySurfaceResize(&s_overlaySurface, layout.w, layout.h)) {
-        if (state->prompt) {
-            OverlayPaintPrompt(&s_overlaySurface, state, &layout);
-        } else if (state->screenshot) {
-            OverlayPaintScreenshot(&s_overlaySurface, state, &layout);
-        } else {
-            OverlayPaint(&s_overlaySurface, state, &layout);
-        }
+/* Presents s_overlaySurface centred at layout, uploading it first when it was just painted. */
+static void Host_PresentOverlaySurface(SDL_Renderer *renderer, SDL_Window *window, OverlayLayout layout,
+                                       int painted, SDL_Texture **texture, int *texW, int *texH) {
+    if (painted) {
         if (*texture == NULL || *texW != layout.w || *texH != layout.h) {
             if (*texture != NULL) {
                 SDL_DestroyTexture(*texture);
@@ -1894,7 +1872,41 @@ static void Host_OverlayRenderFallback(
     SDL_RenderPresent(renderer);
 #ifdef PE_PS5
     SDL_UpdateWindowSurface(window);
+#else
+    (void)window;
 #endif
+}
+
+static void Host_OverlayRenderFallback(
+    SDL_Renderer *renderer,
+    SDL_Window *window,
+    HostOverlayState *state,
+    SDL_Texture **texture,
+    int *texW,
+    int *texH
+) {
+    int w = 0, h = 0, painted = 0;
+    OverlayLayout layout;
+    SDL_GetWindowSizeInPixels(window, &w, &h);
+    if (w <= 0) {
+        w = 640;
+    }
+    if (h <= 0) {
+        h = 600;
+    }
+    OverlayComputeStateLayout(state, w, h, &layout);
+    s_overlayLayout = layout;
+    if (OverlayFontReady() && OverlaySurfaceResize(&s_overlaySurface, layout.w, layout.h)) {
+        if (state->prompt) {
+            OverlayPaintPrompt(&s_overlaySurface, state, &layout);
+        } else if (state->screenshot) {
+            OverlayPaintScreenshot(&s_overlaySurface, state, &layout);
+        } else {
+            OverlayPaint(&s_overlaySurface, state, &layout);
+        }
+        painted = 1;
+    }
+    Host_PresentOverlaySurface(renderer, window, layout, painted, texture, texW, texH);
 }
 
 static void Host_SwitchSettingsPage(HostOverlayState *state, int nextPage) {
@@ -2018,6 +2030,14 @@ static void Host_ApplySettingsAction(
         if (!activate_only) {
             return;
         }
+#ifndef PE_PS5
+        if (state->row == 2) {
+            host_relaunch_setup = 1;
+            state->quit = 1;
+            state->open = 0;
+            return;
+        }
+#endif
         if (g_CdImageVolumes[state->row]) {
             state->status = "This image is already available.";
         } else {
@@ -2624,8 +2644,8 @@ static void Host_ProcessSettingsEvent(
             state->capturing_binding = 0;
             state->dirty = 1;
             /* Swap duplicates, keeping every original button reachable. An
-             * unbound speed binding has nothing to give back in a swap. Game buttons and host
-             * bindings are checked apart: a host binding may share a game button. */
+             * unbound speed binding has nothing to give back in a swap. Host bindings
+             * may share a game button, so the two groups are checked apart. */
             int first = target < HOST_GAME_BINDING_COUNT ? 0 : HOST_GAME_BINDING_COUNT;
             int last = target < HOST_GAME_BINDING_COUNT ? HOST_GAME_BINDING_COUNT : HOST_BINDING_COUNT;
             for (int i = first; i < last; ++i) {
@@ -2894,7 +2914,16 @@ static void Host_Settings(SDL_Window *game) {
     s_overlayState.open = 0;
     Host_TraceAspectSelection("menu_resume", 1);
 
-    if (!Host_SaveOptions()) {
+    int saved = Host_SaveOptions();
+#ifndef PE_PS5
+    /* Setup wizard row: a new copy starts at the storage step once this one has saved. */
+    if (host_relaunch_setup && *host_executable) {
+        const char *args[] = {host_executable, "--setup", NULL};
+        SDL_Process *process = SDL_CreateProcess(args, false);
+        if (process) SDL_DestroyProcess(process);
+    }
+#endif
+    if (!saved) {
 #ifdef PE_PS5
         fprintf(stderr, "Could not save preferences; changes apply for this session.\n");
 #else
@@ -2931,7 +2960,6 @@ static void Host_Settings(SDL_Window *game) {
     }
 #endif
 #if defined(PE_MODS) && !defined(PE_PS5)
-    /* The setup wizard reopens the settings after the panel; elsewhere the panel is the last step. */
     if(host_open_mods&&!host_setup_mode){host_open_mods=0;if(!quit)pe_mod_panel_open();}
 #endif
 #if PE_NATIVE_STATE_CPU_COMPONENTS
@@ -3567,8 +3595,6 @@ static bool Host_ScreenshotTriggerEvent(const SDL_Event *event, SDL_Window *game
     return false;
 }
 
-/* Whether a pad input of the binding format (a button, or a trigger as SDL_GAMEPAD_BUTTON_COUNT
- * and COUNT + 1) is down now. */
 static int Host_PadBindingHeld(SDL_Gamepad *pad, int binding) {
     if (!pad || binding < 0) return 0;
     if (binding == SDL_GAMEPAD_BUTTON_COUNT) return SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000;
@@ -3579,8 +3605,7 @@ static int Host_PadBindingHeld(SDL_Gamepad *pad, int binding) {
 static struct { SDL_JoystickID id; int held; } host_settings_pads[16];
 static int host_settings_keys_held;
 
-/* The Settings binding: both inputs held together (or the one bound) open the settings menu.
- * The inputs still reach the game, so a chord of game buttons keeps working in play. */
+/* Both Settings inputs held (or the one bound) open the menu; the inputs still reach the game. */
 static bool Host_SettingsBindingEvent(const SDL_Event *event, SDL_Window *game) {
     const int first = host_options.buttons[HOST_SETTINGS_BINDING];
     const int second = host_options.buttons[HOST_SETTINGS2_BINDING];
@@ -3633,8 +3658,6 @@ static bool Host_SettingsBindingEvent(const SDL_Event *event, SDL_Window *game) 
 }
 
 #ifndef PE_PS5
-/* Every page of the settings menu, with the Mods page's "Mods menu" row opening the F1 panel and
- * returning here, until Start game (or Quit). */
 static void Host_Setup(SDL_Window *game) {
     host_setup_mode = 1;
     for (;;) {
@@ -3656,7 +3679,6 @@ static bool Host_SettingsEvent(const SDL_Event *event) {
 #endif
     SDL_Window *game = Psyz_GetWindow_SDL3();
 #ifndef PE_PS5
-    /* The first event after the game window opens; the event itself is handled as usual after. */
     if (host_setup_pending && game && !s_overlayState.open) {
         host_setup_pending = 0;
         Host_Setup(game);
@@ -4096,11 +4118,14 @@ int main(int argc, char **argv) {
 #ifndef PE_PS5
     int setup_argument = 0;
     for (int i = 1; i < argc; ++i) if (!strcmp(argv[i], "--setup")) setup_argument = 1;
-    /* First launch: the welcome asks where to keep settings and saves, unless that is already
-     * decided (a portable userdata folder, or PE_CONFIG_HOME). */
-    const char *preset_config = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "PE_CONFIG_HOME");
+    snprintf(host_executable, sizeof(host_executable), "%s%s", SDL_GetBasePath() ? SDL_GetBasePath() : "",
+             Welcome_FileName(argv[0]));
     const int first_launch = interactive && Host_FirstLaunch();
-    if (first_launch && !(preset_config && *preset_config) && !Host_Welcome(1, NULL)) return EXIT_SUCCESS;
+    if (interactive && (first_launch || setup_argument)) {
+        /* --setup: the current preferences fill the disc rows before the storage may change. */
+        if (!first_launch) Host_InitOptions(interactive);
+        if (!Host_Welcome(first_launch, first_launch ? NULL : host_options.discs)) return EXIT_SUCCESS;
+    }
 #endif
 
     CrashReport_Install(interactive, Host_DescribeCrash);
@@ -4110,11 +4135,6 @@ int main(int argc, char **argv) {
     CrashReport_SetMods(pe_mod_crash_describe);
 #endif
     Host_InitOptions(interactive);
-#ifndef PE_PS5
-    /* First launch: no preferences file yet. */
-    if (interactive && *host_options.user_file && !SDL_GetPathInfo(host_options.user_file, NULL)) host_setup_pending = 1;
-    if (!interactive) host_setup_pending = 0;
-#endif
 #ifdef PE_PS5
     SDL_Log("[CPE NATIVE GPU launch] SDL_GPU/static RADV requested; normal display preferences; controls/audio/cheats/paths preserved; exclusive launch log");
 #endif
@@ -4144,7 +4164,6 @@ int main(int argc, char **argv) {
             choose_discs = 1;
 #ifndef PE_PS5
         } else if (!strcmp(argv[arg], "--setup")) {
-            host_setup_pending = 1;
 #endif
         } else if (!strcmp(argv[arg], "--headless") || !strcmp(argv[arg], "--headless-gpu")) {
             if (headless_argument++) {
@@ -4296,10 +4315,8 @@ int main(int argc, char **argv) {
 #endif
     if (interactive) {
 #ifndef PE_PS5
-        /* --setup, or a first launch whose storage was already decided: the welcome's disc step. */
-        if (!s_welcome.done && (setup_argument || first_launch) && !Host_Welcome(0, host_options.discs))
-            return EXIT_SUCCESS;
         Host_WelcomeApplyDiscs();
+        host_setup_pending = setup_argument || first_launch;
 #endif
         if (!paths[0] && !paths[1]) {
             for (unsigned i = 0; i < 2; ++i) {

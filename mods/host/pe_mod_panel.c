@@ -595,9 +595,6 @@ int pe_mod_panel_open_page(const char *page) {
 }
 
 int pe_mod_panel_open(void) {
-#ifdef PE_PS5_GPU_NATIVE
-    extern int CPE_HostOpenRegistryPage(const char *);return CPE_HostOpenRegistryPage(NULL);
-#endif
     if (!pe_ui_gpu_ready() || s_panel.open) return 0;
     pe_panel_run();
     return 1;
