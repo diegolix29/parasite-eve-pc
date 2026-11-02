@@ -101,11 +101,18 @@ projecting them through the room's camera onto its background tiles. F7 writes a
 (chasecam_dump beside the settings): the room picture, an overlay of every floor and wall piece
 on it (textured or not), a map from above, and a report of layers, wall loops and coverage.
 
-F6 is the fit editor, per room and camera: numpad 4/6/8/2 move the room's picture on the walls
-and floor, +/- size it, 7/9 and 1/3 width and height, PageUp/PageDown and Insert/Delete the wall
-and obstacle heights, 5 resets, 0 saves (F1 > Chase camera > Room fit has the same values). Fits
-are kept in chasecam_rooms.txt beside the settings. An obstacle Aya stands inside (a stage) gets
-no walls and a floor at her height.
+F9 is the fit editor (F6 is PsyZ's VRAM view), per room and camera. It splits the screen: the room's own picture on top
+(with the selection's texture area outlined), the chase view below (the selected wall in yellow).
+Numpad . steps through the walls out from Aya (Shift: back), / selects the floor, * the whole
+room. 4/6/8/2 move the selection's part of the picture and +/- size it; on a wall or the floor
+7/9 turn it and 1/3 stretch its width (Ctrl: height), on the whole room 7/9 and 1/3 are width
+and height. PageUp/PageDown set the selected wall's own height (the room's wall height when the whole
+room is selected), Insert/Delete the obstacle height. End switches the selected wall to a
+rectangle (its texture from its bounding box on the picture, spread evenly over the wall) and
+back; with the whole room selected it switches every wall, 5 resets the
+selection, 0 saves; Shift is faster. Fits are kept in chasecam_rooms.txt beside the settings
+(room lines, and "L" lines for single walls and the floor). An obstacle Aya stands inside (a
+stage) gets no walls and a floor at her height.
 
 ## Cheats (pe_cheats)
 

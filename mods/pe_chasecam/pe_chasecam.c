@@ -60,7 +60,7 @@ static unsigned s_frame, s_drawn_frame;
 
 /* Mouse deltas and wheel, gathered by an event watch between frames. */
 static float s_mouse_dx, s_mouse_dy, s_wheel;
-static int s_f8_down, s_home_down, s_f7_down, s_f6_down, s_dump_pending;
+static int s_f8_down, s_home_down, s_f7_down, s_f9_down, s_dump_pending;
 
 /* Per room and camera: how the room's picture sits on the rebuilt walls and floor. The picture
  * position of every surface point is moved by (ox, oy) and scaled by (sx, sy) about the screen
@@ -72,7 +72,7 @@ static RoomFit s_fits[MAX_FITS];
 static int s_fit_count;
 static RoomFit s_fit = {-1, -1, 0, 0, 1, 1, 1400, 500};
 static int s_fit_saved = 1;   /* the current fit matches the file */
-static int s_edit;            /* F6: fit editor keys on the numpad */
+static int s_edit;            /* F9: fit editor keys on the numpad */
 static unsigned s_edit_toast;
 static void dump_room(void);
 
@@ -113,6 +113,37 @@ static u16 s_surf_pieces[MAX_SURFACES]; /* textured pieces per surface, for the 
  * -1 for none, and her height there; the mesh is built with it. */
 static int s_inside_loop = -1, s_mesh_inside_loop = -2;
 static float s_inside_y;
+
+/* Texture layers: on top of the room's fit, every wall edge and the floor can move, size and turn
+ * their own part of the picture (about the wall's centre / the screen centre, in picture pixels). */
+/* h: the wall's own height (< 0: the room's). rect: the wall takes its texture from a plain
+ * rectangle of the picture (its bounding box there), spread evenly over the wall, instead of
+ * its perspective outline. */
+typedef struct { float ox, oy, sx, sy, rot, h, rect; } Adjust;
+static const Adjust k_identity = {0, 0, 1, 1, 0, -1, 0};
+static Adjust s_wall_adj[MAX_WALLS], s_floor_adj = {0, 0, 1, 1, 0, -1, 0};
+static float s_wall_rect[MAX_WALLS][4]; /* x, y, w, h on the picture; w <= 0 when not seen */
+static unsigned s_height_version, s_mesh_height_version = ~0u;
+static float s_wall_pivot[MAX_WALLS][2];
+typedef struct { int room, group, layer; Adjust a; } LayerFit; /* layer -1 floor, >= 0 wall edge */
+#define MAX_LAYER_FITS 8192
+static LayerFit s_layer_fits[MAX_LAYER_FITS];
+static int s_layer_fit_count;
+static unsigned s_adj_version;
+static int s_sel = -2; /* editor selection: -2 the whole room, -1 the floor, >= 0 a wall edge */
+static float s_cy = 112.0f; /* chase view centre: lower while the editor splits the screen */
+
+static int adjust_is_identity(const Adjust *a) {
+    return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
+           a->rect == 0;
+}
+
+static void apply_adjust(float *x, float *y, const Adjust *a, float px, float py) {
+    float dx = (*x - px) * a->sx, dy = (*y - py) * a->sy;
+    float c = cosf(a->rot), sn = sinf(a->rot);
+    *x = px + c * dx - sn * dy + a->ox;
+    *y = py + sn * dx + c * dy + a->oy;
+}
 
 /* ---- background tiles this frame, where Render_DrawSpriteEntry would have put them ---- */
 typedef struct {
@@ -400,9 +431,10 @@ static void build_mesh(void) {
     }
     if (s_mesh_key == db->triangles.pointer && s_mesh_tris == db->triangleCount &&
         s_mesh_wall_height == s_fit.wall && s_mesh_obstacle_height == s_fit.obst &&
-        s_mesh_inside_loop == s_inside_loop)
+        s_mesh_inside_loop == s_inside_loop && s_mesh_height_version == s_height_version)
         return;
     s_mesh_inside_loop = s_inside_loop;
+    s_mesh_height_version = s_height_version;
     s_mesh_key = db->triangles.pointer;
     s_mesh_tris = db->triangleCount;
     s_mesh_wall_height = s_fit.wall;
@@ -460,6 +492,8 @@ static void build_mesh(void) {
         }
     }
     build_loops();
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+        if (s_wall_adj[i].h >= 0) s_walls_list[i].height = s_wall_adj[i].h;
     if (s_inside_loop >= 0 && s_inside_loop < s_loop_count && !s_loops[s_inside_loop].outer)
         push_platform(s_inside_loop, s_inside_y);
     s_floor_surf_count = s_surf_count;
@@ -610,8 +644,32 @@ static void add_piece(const CV *a, const CV *b, const CV *c, const Tile *t, int 
     p->wall = wall;
 }
 
+static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float maxx, float miny,
+                           float maxy);
+static int wall_rect_xy(int i, const V3 *p, float *x, float *y);
+static int picture_xy(const V3 *p, float *x, float *y);
+
 /* Cuts one surface along every tile it covers in the room camera's picture. */
 static void project_surface(const Surface *s) {
+    if (s->wall && s->src < MAX_WALLS && s_wall_adj[s->src].rect > 0.5f) {
+        /* Rectangle mode: picture position is an even (affine) spread over the wall, so 1/z = 1. */
+        CV base[3];
+        float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+        const Adjust *a = &s_wall_adj[s->src];
+        const float *r = s_wall_rect[s->src];
+        for (int k = 0; k < 3; ++k) {
+            if (!wall_rect_xy(s->src, &s->v[k], &base[k].sx, &base[k].sy)) return;
+            apply_adjust(&base[k].sx, &base[k].sy, a, r[0] + r[2] * 0.5f, r[1] + r[3] * 0.5f);
+            base[k].q = 1.0f;
+            base[k].wx = s->v[k].x;
+            base[k].wy = s->v[k].y;
+            base[k].wz = s->v[k].z;
+            minx = fminf(minx, base[k].sx); maxx = fmaxf(maxx, base[k].sx);
+            miny = fminf(miny, base[k].sy); maxy = fmaxf(maxy, base[k].sy);
+        }
+        cut_into_tiles(base, 3, s->wall, minx, maxx, miny, maxy);
+        return;
+    }
     const float H = (float)s_saved_scratch[8];
     const float ox = s_saved_offset_x, oy = s_saved_offset_y;
     float view[3][3];
@@ -643,6 +701,11 @@ static void project_surface(const Surface *s) {
         float q = 1.0f / poly[k][2];
         base[k].sx = 160.0f + (ox + H * poly[k][0] * q - 160.0f) * s_fit.sx + s_fit.ox;
         base[k].sy = 112.0f + (oy + H * poly[k][1] * q - 112.0f) * s_fit.sy + s_fit.oy;
+        if (s->wall && s->src < MAX_WALLS)
+            apply_adjust(&base[k].sx, &base[k].sy, &s_wall_adj[s->src], s_wall_pivot[s->src][0],
+                         s_wall_pivot[s->src][1]);
+        else
+            apply_adjust(&base[k].sx, &base[k].sy, &s_floor_adj, 160.0f, 112.0f);
         base[k].q = q;
         base[k].wx = poly[k][3] * q;
         base[k].wy = poly[k][4] * q;
@@ -652,6 +715,11 @@ static void project_surface(const Surface *s) {
         if (base[k].sy < miny) miny = base[k].sy;
         if (base[k].sy > maxy) maxy = base[k].sy;
     }
+    cut_into_tiles(base, n, s->wall, minx, maxx, miny, maxy);
+}
+
+static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float maxx, float miny,
+                           float maxy) {
     int cx0 = (int)floorf((minx - CELL_X0) / 16), cx1 = (int)floorf((maxx - CELL_X0) / 16);
     int cy0 = (int)floorf((miny - CELL_Y0) / 16), cy1 = (int)floorf((maxy - CELL_Y0) / 16);
     if (cx1 < 0 || cy1 < 0 || cx0 >= CELLS_W || cy0 >= CELLS_H) return;
@@ -679,9 +747,79 @@ static void project_surface(const Surface *s) {
                 if (m < 3) continue;
                 m = clip_edge(b, m, a, 1, (float)t->y + 16, 0);
                 if (m < 3) continue;
-                for (int k = 1; k + 1 < m; ++k) add_piece(&a[0], &a[k], &a[k + 1], t, ti, s->wall);
+                for (int k = 1; k + 1 < m; ++k) add_piece(&a[0], &a[k], &a[k + 1], t, ti, wall);
             }
         }
+}
+
+/* Where a world point sits on the room's picture (room camera and room fit), 0 behind it. */
+static int picture_xy(const V3 *p, float *x, float *y) {
+    float v[3];
+    room_view(p, v);
+    if (v[2] < 16.0f) return 0;
+    float H = (float)s_saved_scratch[8];
+    *x = 160.0f + (s_saved_offset_x + H * v[0] / v[2] - 160.0f) * s_fit.sx + s_fit.ox;
+    *y = 112.0f + (s_saved_offset_y + H * v[1] / v[2] - 112.0f) * s_fit.sy + s_fit.oy;
+    return 1;
+}
+
+/* The same with the point's layer adjustment (wall edge `wall`, or -1 for the floor). */
+static int picture_xy_layer(const V3 *p, int wall, float *x, float *y) {
+    if (wall >= 0 && wall < MAX_WALLS && s_wall_adj[wall].rect > 0.5f) {
+        const float *r = s_wall_rect[wall];
+        if (!wall_rect_xy(wall, p, x, y)) return 0;
+        apply_adjust(x, y, &s_wall_adj[wall], r[0] + r[2] * 0.5f, r[1] + r[3] * 0.5f);
+        return 1;
+    }
+    if (!picture_xy(p, x, y)) return 0;
+    if (wall >= 0 && wall < MAX_WALLS)
+        apply_adjust(x, y, &s_wall_adj[wall], s_wall_pivot[wall][0], s_wall_pivot[wall][1]);
+    else
+        apply_adjust(x, y, &s_floor_adj, 160.0f, 112.0f);
+    return 1;
+}
+
+/* A point of wall i in its rectangle: along the edge left to right, floor to top. */
+static int wall_rect_xy(int i, const V3 *p, float *x, float *y) {
+    const float *r = s_wall_rect[i];
+    const WallEdge *w = &s_walls_list[i];
+    if (r[2] <= 0 || r[3] <= 0) return 0;
+    float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
+    float u = len2 > 0 ? ((p->x - w->a.x) * ex + (p->z - w->a.z) * ez) / len2 : 0;
+    float base_y = w->a.y + (w->b.y - w->a.y) * u;
+    float v = w->height > 0 ? (base_y - p->y) / w->height : 0; /* 0 floor, 1 top (y is down) */
+    *x = r[0] + u * r[2];
+    *y = r[1] + (1.0f - v) * r[3];
+    return 1;
+}
+
+/* Each wall turns and sizes about its centre as the room camera sees it; its rectangle is the
+ * bounding box of its four corners on the picture. */
+static void wall_pivots(void) {
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
+        const WallEdge *w = &s_walls_list[i];
+        {
+            V3 c[4] = {w->a, w->b, {w->b.x, w->b.y - w->height, w->b.z},
+                       {w->a.x, w->a.y - w->height, w->a.z}};
+            float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f, x, y;
+            int ok = 1;
+            for (int k = 0; k < 4 && ok; ++k) {
+                ok = picture_xy(&c[k], &x, &y);
+                x0 = fminf(x0, x); x1 = fmaxf(x1, x);
+                y0 = fminf(y0, y); y1 = fmaxf(y1, y);
+            }
+            s_wall_rect[i][0] = x0;
+            s_wall_rect[i][1] = y0;
+            s_wall_rect[i][2] = ok ? x1 - x0 : 0;
+            s_wall_rect[i][3] = ok ? y1 - y0 : 0;
+        }
+        V3 mid = {(w->a.x + w->b.x) * 0.5f, (w->a.y + w->b.y) * 0.5f - w->height * 0.5f,
+                  (w->a.z + w->b.z) * 0.5f};
+        if (!picture_xy(&mid, &s_wall_pivot[i][0], &s_wall_pivot[i][1])) {
+            s_wall_pivot[i][0] = 160.0f;
+            s_wall_pivot[i][1] = 112.0f;
+        }
+    }
 }
 
 static void build_pieces(void) {
@@ -695,10 +833,12 @@ static void build_pieces(void) {
         memcpy(bits, f, sizeof bits);
         for (int i = 0; i < 4; ++i) key = hash_add(key, bits[i]);
     }
+    key = hash_add(key, s_adj_version);
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
     bin_tiles();
+    wall_pivots();
     memset(s_surf_pieces, 0, sizeof s_surf_pieces);
     for (int i = 0; i < s_surf_count; ++i) {
         s_projecting = i;
@@ -720,7 +860,7 @@ static void to_view(const V3 *p, float out[3]) {
 
 static int project(const float v[3], s16 *x, s16 *y) {
     float sx = 160.0f + s_h * v[0] / v[2];
-    float sy = 112.0f + s_h * v[1] / v[2];
+    float sy = s_cy + s_h * v[1] / v[2];
     if (sx < -1000 || sx > 1320 || sy < -1000 || sy > 1224) return 0;
     *x = (s16)lrintf(sx);
     *y = (s16)lrintf(sy);
@@ -742,7 +882,7 @@ static void link_prim(RenderNativeTag *tag, int depth) {
 }
 
 static int screen_ok(int minx, int maxx, int miny, int maxy) {
-    if (maxx < 0 || minx > 320 || maxy < 0 || miny > 224) return 0;
+    if (maxx < 0 || minx > 320 || maxy < (s_edit ? 112 : 0) || miny > 224) return 0;
     return maxx - minx <= 1023 && maxy - miny <= 511; /* the GPU drops bigger ones */
 }
 
@@ -863,6 +1003,8 @@ static void draw_piece(const Piece *pc) {
     if (n == 4) emit_tex(&poly[0], &poly[2], &poly[3], t, depth);
 }
 
+static int s_line_depth; /* > 0: lines go to this ordering-table entry (drawn on top) */
+
 static void draw_line(const V3 *pa, const V3 *pb, int r, int g, int b) {
     if (s_line_used >= MAX_LINE_PRIMS) return;
     float a[3], c[3];
@@ -887,7 +1029,153 @@ static void draw_line(const V3 *pa, const V3 *pb, int r, int g, int b) {
     p->r = fog(z, r);
     p->g = fog(z, g);
     p->b = fog(z, b);
-    link_prim(&p->tag, clamp_depth((int)(z / 4.0f)));
+    link_prim(&p->tag, s_line_depth > 0 ? s_line_depth : clamp_depth((int)(z / 4.0f)));
+}
+
+/* ---- editor panel: the room's own picture, half size, over the top half of the screen ---- */
+typedef struct {
+    RenderNativeTag tag;
+    u8 r, g, b, code;
+    s16 x0, y0;
+    u8 u0, v0;
+    u16 clut;
+    s16 x1, y1;
+    u8 u1, v1;
+    u16 tpage;
+    s16 x2, y2;
+    u8 u2, v2;
+    u16 pad2;
+    s16 x3, y3;
+    u8 u3, v3;
+    u16 pad3;
+} PrimFT4;
+typedef struct {
+    RenderNativeTag tag;
+    u8 r, g, b, code;
+    s16 x0, y0, x1, y1, x2, y2, x3, y3;
+} PrimF4;
+#define PANEL_X0 80.0f
+#define PANEL_W 160.0f
+#define PANEL_H 112.0f
+#define PANEL_DEPTH_LINES 8
+#define PANEL_DEPTH_TILES 10
+#define PANEL_DEPTH_BACK 14
+static PrimFT4 s_panel_tiles[2][MAX_TILES];
+static PrimF4 s_panel_back[2];
+
+static void panel_xy(float px, float py, float *x, float *y) {
+    *x = PANEL_X0 + px * 0.5f;
+    *y = py * 0.5f;
+}
+
+/* A line on the panel, clipped to it (Liang-Barsky). */
+static void panel_line(float x0, float y0, float x1, float y1, int r, int g, int b) {
+    float t0 = 0, t1 = 1, dx = x1 - x0, dy = y1 - y0;
+    const float p[4] = {-dx, dx, -dy, dy};
+    const float q[4] = {x0 - PANEL_X0, PANEL_X0 + PANEL_W - x0, y0, PANEL_H - y0};
+    for (int i = 0; i < 4; ++i) {
+        if (p[i] == 0) {
+            if (q[i] < 0) return;
+            continue;
+        }
+        float t = q[i] / p[i];
+        if (p[i] < 0) { if (t > t1) return; if (t > t0) t0 = t; }
+        else { if (t < t0) return; if (t < t1) t1 = t; }
+    }
+    if (s_line_used >= MAX_LINE_PRIMS) return;
+    PrimLine *l = &s_line_prims[g_ActiveDrawSlot][s_line_used++];
+    l->tag.length = 3;
+    l->code = 0x40;
+    l->r = (u8)r;
+    l->g = (u8)g;
+    l->b = (u8)b;
+    l->x0 = (s16)lrintf(x0 + dx * t0);
+    l->y0 = (s16)lrintf(y0 + dy * t0);
+    l->x1 = (s16)lrintf(x0 + dx * t1);
+    l->y1 = (s16)lrintf(y0 + dy * t1);
+    link_prim(&l->tag, PANEL_DEPTH_LINES);
+}
+
+/* A world-space triangle or quad outline on the panel, through its layer. */
+static void panel_outline(const V3 *pts, int n, int layer, int r, int g, int b) {
+    float x[4], y[4];
+    for (int k = 0; k < n; ++k) {
+        if (!picture_xy_layer(&pts[k], layer, &x[k], &y[k])) return;
+        panel_xy(x[k], y[k], &x[k], &y[k]);
+    }
+    for (int k = 0; k < n; ++k) panel_line(x[k], y[k], x[(k + 1) % n], y[(k + 1) % n], r, g, b);
+}
+
+static void wall_corners(int i, V3 out[4]) {
+    const WallEdge *w = &s_walls_list[i];
+    out[0] = w->a;
+    out[1] = w->b;
+    out[2] = (V3){w->b.x, w->b.y - w->height, w->b.z};
+    out[3] = (V3){w->a.x, w->a.y - w->height, w->a.z};
+}
+
+static void draw_panel(void) {
+    int slot = g_ActiveDrawSlot;
+    wall_pivots();
+    PrimF4 *bg = &s_panel_back[slot];
+    bg->tag.length = 5;
+    bg->code = 0x28;
+    bg->r = bg->g = bg->b = 8;
+    bg->x0 = 0; bg->y0 = 0; bg->x1 = 320; bg->y1 = 0;
+    bg->x2 = 0; bg->y2 = (s16)PANEL_H; bg->x3 = 320; bg->y3 = (s16)PANEL_H;
+    link_prim(&bg->tag, PANEL_DEPTH_BACK);
+    /* The picture as the player normally sees it: on-screen tiles, nearer layers on top. */
+    for (int i = 0; i < s_tile_count; ++i) {
+        const Tile *t = &s_tiles[i];
+        if (t->x <= -16 || t->x >= 320 || t->y <= -16 || t->y >= 224) continue;
+        PrimFT4 *q = &s_panel_tiles[slot][i];
+        float x, y;
+        panel_xy((float)t->x, (float)t->y, &x, &y);
+        int x0 = (int)lrintf(x), y0 = (int)lrintf(y), x1 = x0 + 8, y1 = y0 + 8;
+        int u1 = t->u + 16 > 255 ? 255 : t->u + 16, v1 = t->v + 16 > 255 ? 255 : t->v + 16;
+        q->tag.length = 9;
+        q->code = (u8)(0x2C | (t->code & 3));
+        q->r = t->r;
+        q->g = t->g;
+        q->b = t->b;
+        q->x0 = (s16)x0; q->y0 = (s16)y0; q->u0 = t->u; q->v0 = t->v;
+        q->x1 = (s16)x1; q->y1 = (s16)y0; q->u1 = (u8)u1; q->v1 = t->v;
+        q->x2 = (s16)x0; q->y2 = (s16)y1; q->u2 = t->u; q->v2 = (u8)v1;
+        q->x3 = (s16)x1; q->y3 = (s16)y1; q->u3 = (u8)u1; q->v3 = (u8)v1;
+        q->clut = t->clut;
+        q->tpage = t->tpage;
+        q->pad2 = q->pad3 = 0;
+        int layer = 3 - ((t->ot >> 10) & 3); /* nearer tiles (lower ot) draw later */
+        link_prim(&q->tag, PANEL_DEPTH_TILES + 3 - layer);
+    }
+    /* Frame of the picture, Aya, and what the selection takes its texture from. */
+    panel_line(PANEL_X0, 0, PANEL_X0 + PANEL_W, 0, 90, 90, 90);
+    panel_line(PANEL_X0, PANEL_H - 1, PANEL_X0 + PANEL_W, PANEL_H - 1, 90, 90, 90);
+    {
+        const FieldActor *aya = g_PlayerEntity;
+        V3 feet = {(float)(aya->pos_x >> 16), (float)(aya->pos_y >> 16), (float)(aya->pos_z >> 16)};
+        float x, y;
+        if (picture_xy(&feet, &x, &y)) {
+            panel_xy(x, y, &x, &y);
+            panel_line(x - 3, y, x + 3, y, 255, 255, 255);
+            panel_line(x, y - 3, x, y + 3, 255, 255, 255);
+        }
+    }
+    if (s_sel >= 0 && s_sel < s_wall_count) {
+        V3 c[4];
+        wall_corners(s_sel, c);
+        panel_outline(c, 4, s_sel, 255, 230, 0);
+    } else if (s_sel == -1) {
+        for (int i = 0; i < s_floor_surf_count; ++i)
+            if (s_surf[i].src != 0xFFFF) panel_outline(s_surf[i].v, 3, -1, 0, 255, 90);
+    } else {
+        for (int i = 0; i < s_wall_count; ++i) {
+            if (s_walls_list[i].height <= 0) continue;
+            V3 c[4];
+            wall_corners(i, c);
+            panel_outline(c, 4, i, 0, 200, 255);
+        }
+    }
 }
 
 static void draw_room(void) {
@@ -900,6 +1188,17 @@ static void draw_room(void) {
     if (textured)
         for (int i = 0; i < s_piece_count; ++i)
             if (!s_pieces[i].wall || s_solid_walls) draw_piece(&s_pieces[i]);
+    if (s_edit) {
+        draw_panel();
+        if (s_sel >= 0 && s_sel < s_wall_count) {
+            V3 c[4];
+            wall_corners(s_sel, c);
+            s_line_depth = 16; /* the selected wall shows through everything below the panel */
+            for (int k = 0; k < 4; ++k) draw_line(&c[k], &c[(k + 1) % 4], 255, 230, 0);
+            draw_line(&c[0], &c[2], 255, 230, 0);
+            s_line_depth = 0;
+        }
+    }
     if (!s_outlines && !s_edit) return;
     for (int i = 0; i < s_wall_count; ++i) {
         const WallEdge *w = &s_walls_list[i];
@@ -1008,17 +1307,29 @@ static void fits_load(void) {
     char path[512], line[256];
     fit_path(path, sizeof path);
     s_fit_count = 0;
+    s_layer_fit_count = 0;
     FILE *f = path[0] ? fopen(path, "r") : NULL;
     if (!f) return;
     while (fgets(line, sizeof line, f) && s_fit_count < MAX_FITS) {
         RoomFit r;
         if (line[0] == '#') continue;
+        if (line[0] == 'L') {
+            LayerFit lf;
+            if (s_layer_fit_count < MAX_LAYER_FITS &&
+                (lf.a.h = -1, lf.a.rect = 0,
+                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
+                        &lf.a.ox, &lf.a.oy, &lf.a.sx, &lf.a.sy, &lf.a.rot, &lf.a.h,
+                        &lf.a.rect) >= 8) &&
+                lf.a.sx > 0.01f && lf.a.sy > 0.01f)
+                s_layer_fits[s_layer_fit_count++] = lf;
+            continue;
+        }
         if (sscanf(line, "%d %d %f %f %f %f %d %d", &r.room, &r.group, &r.ox, &r.oy, &r.sx, &r.sy,
                    &r.wall, &r.obst) == 8 && r.sx > 0.01f && r.sy > 0.01f)
             s_fits[s_fit_count++] = r;
     }
     fclose(f);
-    pe_mod_log(MOD_ID, "%d room fits loaded", s_fit_count);
+    pe_mod_log(MOD_ID, "%d room fits and %d wall/floor fits loaded", s_fit_count, s_layer_fit_count);
 }
 
 static void fits_save(void) {
@@ -1030,6 +1341,17 @@ static void fits_save(void) {
             found = 1;
         }
     if (!found && s_fit_count < MAX_FITS) s_fits[s_fit_count++] = s_fit;
+    /* This room and camera's layers replace the stored ones. */
+    int kept = 0;
+    for (int i = 0; i < s_layer_fit_count; ++i)
+        if (s_layer_fits[i].room != s_fit.room || s_layer_fits[i].group != s_fit.group)
+            s_layer_fits[kept++] = s_layer_fits[i];
+    s_layer_fit_count = kept;
+    if (!adjust_is_identity(&s_floor_adj) && s_layer_fit_count < MAX_LAYER_FITS)
+        s_layer_fits[s_layer_fit_count++] = (LayerFit){s_fit.room, s_fit.group, -1, s_floor_adj};
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+        if (!adjust_is_identity(&s_wall_adj[i]) && s_layer_fit_count < MAX_LAYER_FITS)
+            s_layer_fits[s_layer_fit_count++] = (LayerFit){s_fit.room, s_fit.group, i, s_wall_adj[i]};
     fit_path(path, sizeof path);
     FILE *f = path[0] ? fopen(path, "w") : NULL;
     if (!f) {
@@ -1041,6 +1363,13 @@ static void fits_save(void) {
         fprintf(f, "%d %d %.2f %.2f %.4f %.4f %d %d\n", s_fits[i].room, s_fits[i].group,
                 s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
                 s_fits[i].obst);
+    fprintf(f, "# L room group layer(-1 floor, else wall edge) offset_x offset_y scale_x scale_y "
+               "rotation height(-1 = the room's) rectangle(0/1)\n");
+    for (int i = 0; i < s_layer_fit_count; ++i) {
+        const LayerFit *l = &s_layer_fits[i];
+        fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d\n", l->room, l->group, l->layer,
+                l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
+    }
     fclose(f);
     s_fit_saved = 1;
     char msg[96];
@@ -1058,6 +1387,17 @@ static void fit_select(void) {
         if (s_fits[i].room == room && s_fits[i].group == group) r = s_fits[i];
     s_fit = r;
     s_fit_saved = 1;
+    s_floor_adj = k_identity;
+    for (int i = 0; i < MAX_WALLS; ++i) s_wall_adj[i] = k_identity;
+    for (int i = 0; i < s_layer_fit_count; ++i) {
+        const LayerFit *l = &s_layer_fits[i];
+        if (l->room != room || l->group != group) continue;
+        if (l->layer == -1) s_floor_adj = l->a;
+        else if (l->layer >= 0 && l->layer < MAX_WALLS) s_wall_adj[l->layer] = l->a;
+    }
+    s_sel = -2;
+    s_adj_version++;
+    s_height_version++;
 }
 
 static void fit_reset(void) {
@@ -1076,40 +1416,174 @@ static void fit_toast(void) {
     pe_toast(msg);
 }
 
-/* F6 editor: numpad 4/6/8/2 move the picture, +/- size, 7/9 width, 1/3 height,
- * PageUp/PageDown wall height, Insert/Delete obstacle height, 5 reset, 0 save; Shift is faster. */
+static const char *sel_name(char *buf, size_t size) {
+    if (s_sel == -2) snprintf(buf, size, "Whole room");
+    else if (s_sel == -1) snprintf(buf, size, "Floor");
+    else {
+        const WallEdge *w = &s_walls_list[s_sel];
+        int outer = w->loop >= 0 && w->loop < s_loop_count && s_loops[w->loop].outer;
+        snprintf(buf, size, "Wall %d/%d (%s)", s_sel, s_wall_count, outer ? "outer" : "obstacle");
+    }
+    return buf;
+}
+
+static void sel_toast(void) {
+    char msg[220], name[64];
+    sel_name(name, sizeof name);
+    if (s_sel == -2) {
+        fit_toast();
+        return;
+    }
+    const Adjust *a = s_sel == -1 ? &s_floor_adj : &s_wall_adj[s_sel];
+    char height[40] = "";
+    if (s_sel >= 0)
+        snprintf(height, sizeof height, "  height %.0f%s%s", s_walls_list[s_sel].height,
+                 a->h >= 0 ? "" : " (room's)", a->rect > 0.5f ? "  rectangle" : "");
+    snprintf(msg, sizeof msg, "%s  move %.1f, %.1f  size %.3f x %.3f  turn %.1f deg%s%s", name,
+             a->ox, a->oy, a->sx, a->sy, a->rot * 180.0f / PI_F, height,
+             s_fit_saved ? "" : "  (not saved)");
+    pe_toast(msg);
+}
+
+/* Walls by distance from Aya: numpad . steps to the next one out (Shift: back in). */
+static float s_wall_dist[MAX_WALLS];
+static int cmp_wall_dist(const void *a, const void *b) {
+    float da = s_wall_dist[*(const int *)a], db = s_wall_dist[*(const int *)b];
+    return da < db ? -1 : da > db;
+}
+
+static void select_next_wall(int back) {
+    static int order[MAX_WALLS];
+    int n = 0;
+    const FieldActor *aya = g_PlayerEntity;
+    float x = (float)(aya->pos_x >> 16), z = (float)(aya->pos_z >> 16);
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
+        const WallEdge *w = &s_walls_list[i];
+        if (w->height <= 0) continue;
+        float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
+        float t = len2 > 0 ? clampf(((x - w->a.x) * ex + (z - w->a.z) * ez) / len2, 0, 1) : 0;
+        float dx = w->a.x + ex * t - x, dz = w->a.z + ez * t - z;
+        s_wall_dist[i] = dx * dx + dz * dz;
+        order[n++] = i;
+    }
+    if (!n) return;
+    qsort(order, (size_t)n, sizeof order[0], cmp_wall_dist);
+    int at = -1;
+    for (int i = 0; i < n; ++i)
+        if (order[i] == s_sel) at = i;
+    if (at < 0) at = back ? 0 : n - 1;
+    s_sel = order[(at + (back ? n - 1 : 1)) % n];
+}
+
+/* F9 editor, numpad. Selection: . next wall out from Aya (Shift: back), / the floor, * the whole
+ * room. The selection: 4/6/8/2 move, +/- size. Wall or floor: 7/9 turn, 1/3 width, Ctrl+1/3
+ * height. Whole room: 7/9 width, 1/3 height. Always: PageUp/PageDown wall height,
+ * Insert/Delete obstacle height, 5 reset the selection, 0 save; Shift is faster. */
 static void edit_keys(const bool *keys) {
+    static int dot_down, div_down, mul_down, end_down;
     if (!s_edit) return;
-    float fast = (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) ? 5.0f : 1.0f;
-    float step = 0.25f * fast, grow = 1.0f + 0.002f * fast;
+    int shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
+    int ctrl = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+    float fast = shift ? 5.0f : 1.0f;
+    float step = 0.25f * fast, grow = 1.0f + 0.002f * fast, turn = 0.002f * fast;
     int hstep = (int)(10 * fast);
+
+    int moved_sel = 0;
+    if (keys[SDL_SCANCODE_KP_PERIOD] && !dot_down) { select_next_wall(shift); moved_sel = 1; }
+    if (keys[SDL_SCANCODE_KP_DIVIDE] && !div_down) { s_sel = -1; moved_sel = 1; }
+    if (keys[SDL_SCANCODE_KP_MULTIPLY] && !mul_down) { s_sel = -2; moved_sel = 1; }
+    if (keys[SDL_SCANCODE_END] && !end_down) {
+        /* Rectangle mode: the selected wall, or with the whole room selected every wall
+         * (all of them off again when all are on). */
+        if (s_sel >= 0) {
+            s_wall_adj[s_sel].rect = s_wall_adj[s_sel].rect > 0.5f ? 0.0f : 1.0f;
+        } else if (s_sel == -2) {
+            int all = 1;
+            for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+                if (s_walls_list[i].height > 0 && s_wall_adj[i].rect < 0.5f) all = 0;
+            for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) s_wall_adj[i].rect = all ? 0.0f : 1.0f;
+            pe_toast(all ? "All walls: perspective" : "All walls: rectangles");
+        }
+        if (s_sel != -1) {
+            s_adj_version++;
+            s_fit_saved = 0;
+            if (s_sel >= 0) sel_toast();
+        }
+    }
+    end_down = keys[SDL_SCANCODE_END];
+    dot_down = keys[SDL_SCANCODE_KP_PERIOD];
+    div_down = keys[SDL_SCANCODE_KP_DIVIDE];
+    mul_down = keys[SDL_SCANCODE_KP_MULTIPLY];
+    if (s_sel >= s_wall_count) s_sel = -2;
+    if (moved_sel) sel_toast();
+
     RoomFit before = s_fit;
-    if (keys[SDL_SCANCODE_KP_4]) s_fit.ox -= step;
-    if (keys[SDL_SCANCODE_KP_6]) s_fit.ox += step;
-    if (keys[SDL_SCANCODE_KP_8]) s_fit.oy -= step;
-    if (keys[SDL_SCANCODE_KP_2]) s_fit.oy += step;
-    if (keys[SDL_SCANCODE_KP_PLUS]) { s_fit.sx *= grow; s_fit.sy *= grow; }
-    if (keys[SDL_SCANCODE_KP_MINUS]) { s_fit.sx /= grow; s_fit.sy /= grow; }
-    if (keys[SDL_SCANCODE_KP_9]) s_fit.sx *= grow;
-    if (keys[SDL_SCANCODE_KP_7]) s_fit.sx /= grow;
-    if (keys[SDL_SCANCODE_KP_3]) s_fit.sy *= grow;
-    if (keys[SDL_SCANCODE_KP_1]) s_fit.sy /= grow;
-    if (keys[SDL_SCANCODE_PAGEUP]) s_fit.wall += hstep;
-    if (keys[SDL_SCANCODE_PAGEDOWN]) s_fit.wall -= hstep;
+    int changed = 0;
+    if (s_sel == -2) {
+        if (keys[SDL_SCANCODE_KP_4]) s_fit.ox -= step;
+        if (keys[SDL_SCANCODE_KP_6]) s_fit.ox += step;
+        if (keys[SDL_SCANCODE_KP_8]) s_fit.oy -= step;
+        if (keys[SDL_SCANCODE_KP_2]) s_fit.oy += step;
+        if (keys[SDL_SCANCODE_KP_PLUS]) { s_fit.sx *= grow; s_fit.sy *= grow; }
+        if (keys[SDL_SCANCODE_KP_MINUS]) { s_fit.sx /= grow; s_fit.sy /= grow; }
+        if (keys[SDL_SCANCODE_KP_9]) s_fit.sx *= grow;
+        if (keys[SDL_SCANCODE_KP_7]) s_fit.sx /= grow;
+        if (keys[SDL_SCANCODE_KP_3]) s_fit.sy *= grow;
+        if (keys[SDL_SCANCODE_KP_1]) s_fit.sy /= grow;
+        if (keys[SDL_SCANCODE_KP_5]) {
+            s_fit.ox = s_fit.oy = 0;
+            s_fit.sx = s_fit.sy = 1;
+        }
+    } else {
+        Adjust *a = s_sel == -1 ? &s_floor_adj : &s_wall_adj[s_sel];
+        Adjust old = *a;
+        if (keys[SDL_SCANCODE_KP_4]) a->ox -= step;
+        if (keys[SDL_SCANCODE_KP_6]) a->ox += step;
+        if (keys[SDL_SCANCODE_KP_8]) a->oy -= step;
+        if (keys[SDL_SCANCODE_KP_2]) a->oy += step;
+        if (keys[SDL_SCANCODE_KP_PLUS]) { a->sx *= grow; a->sy *= grow; }
+        if (keys[SDL_SCANCODE_KP_MINUS]) { a->sx /= grow; a->sy /= grow; }
+        if (keys[SDL_SCANCODE_KP_9]) a->rot += turn;
+        if (keys[SDL_SCANCODE_KP_7]) a->rot -= turn;
+        if (keys[SDL_SCANCODE_KP_3]) { if (ctrl) a->sy *= grow; else a->sx *= grow; }
+        if (keys[SDL_SCANCODE_KP_1]) { if (ctrl) a->sy /= grow; else a->sx /= grow; }
+        if (keys[SDL_SCANCODE_KP_5]) *a = k_identity;
+        a->sx = clampf(a->sx, 0.05f, 20.0f);
+        a->sy = clampf(a->sy, 0.05f, 20.0f);
+        if (memcmp(&old, a, sizeof old) != 0) {
+            changed = 1;
+            s_adj_version++;
+            if (old.h != a->h) s_height_version++; /* 5 reset it */
+        }
+    }
+    if (s_sel >= 0 && (keys[SDL_SCANCODE_PAGEUP] || keys[SDL_SCANCODE_PAGEDOWN])) {
+        /* This wall's own height, starting from what it has now. */
+        Adjust *a = &s_wall_adj[s_sel];
+        float h = a->h >= 0 ? a->h : s_walls_list[s_sel].height;
+        h += keys[SDL_SCANCODE_PAGEUP] ? hstep : -hstep;
+        a->h = clampf(h, 0, 8000);
+        s_height_version++;
+        s_adj_version++;
+        changed = 1;
+    } else {
+        if (keys[SDL_SCANCODE_PAGEUP]) s_fit.wall += hstep;
+        if (keys[SDL_SCANCODE_PAGEDOWN]) s_fit.wall -= hstep;
+    }
     if (keys[SDL_SCANCODE_INSERT]) s_fit.obst += hstep;
     if (keys[SDL_SCANCODE_DELETE]) s_fit.obst -= hstep;
-    if (keys[SDL_SCANCODE_KP_5]) fit_reset();
     s_fit.sx = clampf(s_fit.sx, 0.1f, 10.0f);
     s_fit.sy = clampf(s_fit.sy, 0.1f, 10.0f);
     if (s_fit.wall < 0) s_fit.wall = 0;
     if (s_fit.wall > 8000) s_fit.wall = 8000;
     if (s_fit.obst < 0) s_fit.obst = 0;
     if (s_fit.obst > 8000) s_fit.obst = 8000;
-    if (memcmp(&before, &s_fit, sizeof before) != 0) {
+    if (memcmp(&before, &s_fit, sizeof before) != 0) changed = 1;
+    if (changed) {
         s_fit_saved = 0;
         if (s_frame - s_edit_toast > 12) {
             s_edit_toast = s_frame;
-            fit_toast();
+            if (s_sel < 0 && (s_fit.wall != before.wall || s_fit.obst != before.obst)) fit_toast();
+            else sel_toast();
         }
     }
     if (keys[SDL_SCANCODE_KP_0] && !s_fit_saved) fits_save();
@@ -1180,17 +1654,17 @@ static void read_keys(void) {
     if (home && !s_home_down) s_place_behind = 1;
     if (keys[SDL_SCANCODE_F7] && !s_f7_down) s_dump_pending = 1;
     s_f7_down = keys[SDL_SCANCODE_F7];
-    if (keys[SDL_SCANCODE_F6] && !s_f6_down && s_enabled) {
+    if (keys[SDL_SCANCODE_F9] && !s_f9_down && s_enabled) {
         s_edit = !s_edit;
         if (s_edit)
-            pe_toast("Fit editor: numpad 4/6/8/2 move, +/- size, 7/9 width, 1/3 height, "
-                     "PgUp/PgDn wall, Ins/Del obstacle, 5 reset, 0 save, Shift faster");
+            pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
+                     "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
         }
     }
-    s_f6_down = keys[SDL_SCANCODE_F6];
+    s_f9_down = keys[SDL_SCANCODE_F9];
     edit_keys(keys);
     s_f8_down = f8;
     s_home_down = home;
@@ -1280,8 +1754,9 @@ static int on_camera(void *ctx, void *user) {
             pe_mod_log(MOD_ID, "room camera is %s", mirror < 0 ? "mirrored" : "a plain rotation");
         }
         build_camera();
+        s_cy = s_edit ? 168.0f : 112.0f;
         g_GeomScroll.state.position.screenOffsetX = 160;
-        g_GeomScroll.state.position.screenOffsetY = 112;
+        g_GeomScroll.state.position.screenOffsetY = (u16)lrintf(s_cy);
         SetGeomScreen(s_fov);
         draw_room();
         /* Wait (a few frames at most) for tiles read this frame. */
@@ -1307,7 +1782,7 @@ static int on_background(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     if (!can_run() || s_frame - s_drawn_frame > 2) return 0;
-    if (s_textures || s_dump_pending) gather_tiles();
+    if (s_textures || s_dump_pending || s_edit) gather_tiles();
     return 1;
 }
 
@@ -1354,7 +1829,7 @@ static int chasecam_init(void) {
                             &s_collide, NULL);
     pe_menu_register_toggle(0, "Wall outlines", "Lines along the floor's edges and wall tops.",
                             &s_outlines, NULL);
-    pe_menu_page("Room fit", "Line the room's picture up with its walls, per room and camera (F6).", 0);
+    pe_menu_page("Room fit", "Line the room's picture up with its walls, per room and camera (F9).", 0);
     pe_menu_register_live_int("Room fit", "Move right", "Picture offset, quarter pixels (numpad 4/6).",
                               -4000, 4000, 1, get_ox, set_ox);
     pe_menu_register_live_int("Room fit", "Move down", "Picture offset, quarter pixels (numpad 8/2).",
@@ -1673,6 +2148,13 @@ static void dump_room(void) {
     fprintf(f, "room fit (camera %d): move %.2f %.2f size %.4f x %.4f wall %d obstacle %d%s\n",
             s_fit.group, s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy, s_fit.wall, s_fit.obst,
             s_fit_saved ? "" : " (not saved)");
+    fprintf(f, "floor layer: move %.2f %.2f size %.4f x %.4f turn %.4f\n", s_floor_adj.ox,
+            s_floor_adj.oy, s_floor_adj.sx, s_floor_adj.sy, s_floor_adj.rot);
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+        if (!adjust_is_identity(&s_wall_adj[i]))
+            fprintf(f, "wall %d layer: move %.2f %.2f size %.4f x %.4f turn %.4f height %.0f\n", i,
+                    s_wall_adj[i].ox, s_wall_adj[i].oy, s_wall_adj[i].sx, s_wall_adj[i].sy,
+                    s_wall_adj[i].rot, s_wall_adj[i].h);
     fprintf(f, "floor polygon (scene command 0x2E): %u vertices", g_FloorPolygonVertexCount);
     for (unsigned i = 0; g_FloorPolygonVertices && i < g_FloorPolygonVertexCount && i < 64; ++i)
         fprintf(f, " (%d,%d)", g_FloorPolygonVertices[i].x, g_FloorPolygonVertices[i].z);
@@ -1753,5 +2235,5 @@ static void dump_room(void) {
     pe_mod_log(MOD_ID, "dump written to %s", dir);
 }
 
-const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.4", NULL, chasecam_init,
+const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.5", NULL, chasecam_init,
                                   chasecam_shutdown};
