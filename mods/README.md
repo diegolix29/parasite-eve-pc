@@ -95,6 +95,12 @@ with outlines where the walls are, and the stick moves Aya relative to this came
 FIELD_CAMERA (the view matrix is swapped around the actor draw pass and restored after it) and
 FIELD_BACKGROUND (the room's sprites are skipped). Battles keep the room camera.
 
+Walls stand on the floor's edges. Edges that close around a hole in the floor (seat rows,
+tables) are obstacles and get their own lower height. The floor and walls are textured by
+projecting them through the room's camera onto its background tiles. F7 writes a debug dump
+(chasecam_dump beside the settings): the room picture, an overlay of every floor and wall piece
+on it (textured or not), a map from above, and a report of layers, wall loops and coverage.
+
 ## Cheats (pe_cheats)
 
 F1 > Cheats: God mode, Infinite ammo and PE, Win this battle, and Learn all / Restore PE powers.
