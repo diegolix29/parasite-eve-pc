@@ -2,7 +2,7 @@
 # Each mod is a folder here holding .c files and defining `const PeMod pe_mod_<folder>`.
 # pe_hello is the example mod; add it to the list to build it. Language packs
 # are available in standard builds, but the original text remains the default and no pack ships.
-set(pe_default_mods pe_qol pe_rebalance pe_economy pe_rewards pe_catalog pe_shops pe_collection pe_wardrobe pe_styles pe_stacks pe_warp pe_quicksave pe_cheats pe_phone)
+set(pe_default_mods pe_qol pe_rebalance pe_economy pe_rewards pe_catalog pe_shops pe_collection pe_wardrobe pe_styles pe_stacks pe_warp pe_quicksave pe_cheats pe_phone pe_chasecam)
 if(NOT PE_PS5_GAME)
     list(APPEND pe_default_mods pe_lang)
 endif()
@@ -102,6 +102,22 @@ if(TARGET pe_download_json AND TARGET pe_download_zip)
         # Zipped .pelang files (pe_lang/pe_lang_bundle.c).
         target_compile_definitions(pe-mods PRIVATE PE_LANG_ZIP=1)
     endif()
+endif()
+
+if("pe_chasecam" IN_LIST PE_MOD_LIST)
+    # The chase camera's room data (fits, wall heights, wall images in pe_chasecam/data) is built
+    # into the game: no files on the player's machine. A build made from this tree also reads and
+    # saves the folder itself while the in-game editor is used, so edits land in the repository.
+    set(pe_chasecam_data ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/data)
+    file(GLOB_RECURSE pe_chasecam_data_files CONFIGURE_DEPENDS ${pe_chasecam_data}/*)
+    set(pe_chasecam_embedded ${CMAKE_CURRENT_BINARY_DIR}/pe_chasecam_data.c)
+    add_custom_command(OUTPUT ${pe_chasecam_embedded}
+        COMMAND ${CMAKE_COMMAND} -DDATA_DIR=${pe_chasecam_data} -DOUT=${pe_chasecam_embedded}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/embed_data.cmake
+        DEPENDS ${pe_chasecam_data_files} ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/embed_data.cmake
+        COMMENT "Building the chase camera's room data into the game")
+    target_sources(pe-mods PRIVATE ${pe_chasecam_embedded})
+    target_compile_definitions(pe-mods PRIVATE "PE_CHASECAM_SOURCE_DATA=\"${pe_chasecam_data}\"")
 endif()
 
 if(BUILD_TESTING AND "pe_qol" IN_LIST PE_MOD_LIST)

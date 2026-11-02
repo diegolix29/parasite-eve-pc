@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_rewards;pe_catalog;pe_shops;pe_collection;pe_wardrobe;pe_stacks;pe_warp;pe_quicksave;pe_cheats;pe_phone` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_rewards;pe_catalog;pe_shops;pe_collection;pe_wardrobe;pe_stacks;pe_warp;pe_quicksave;pe_cheats;pe_phone;pe_chasecam` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -62,6 +62,7 @@ mods/
   pe_phone/            Phone Calls: after saving at a phone, "Stay on the line?" and a short call
   pe_challenges/       optional harder rules per run (one file per challenge, Hardcore permadeath),
                        bundles, assisted marker, run summary (opt-in via PE_MOD_LIST)
+  pe_chasecam/         experimental camera behind Aya over the walkable floor (F8)
   pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
                        by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
@@ -91,7 +92,76 @@ A quick save is the game's own 8 KB card file (Save_BuildCardFile, with every mo
 in the free field and kept beside the preferences as quicksave_<slot>.mcd. Loading commits it the
 way Save_LoadCardFileIntoRuntime does, without the card menu's dialogs, then runs the field
 script's room transfer to the saved room: the room starts again as after a loaded save. It holds
-what a save holds, not Aya's place in the room or a fight in progress.
+what a save holds, not Aya's place in the room or a fight in progress. A load also works on the
+title, its logos and its intro movie (TITLE_FRAME hook), which end as Continue does. A save during
+a story movie or a scripted event is the last moment before it (a copy taken when the room starts
+and about every second of free walking), since the event's half-made changes wouldn't reload.
+
+## Chase camera (pe_chasecam)
+
+Experimental. F8 (or F1 > Chase camera) puts a camera behind Aya in the free field: the right
+stick or a right-mouse drag turns it, the wheel sets its distance, Home or the middle button puts
+it back behind her. The rooms are pre-rendered pictures for one fixed camera, so while it is on
+the background is hidden and the room's walkable floor (its collision triangles) is drawn instead,
+with outlines where the walls are, and the stick moves Aya relative to this camera. Hooks:
+FIELD_CAMERA (the view matrix is swapped around the actor draw pass and restored after it) and
+FIELD_BACKGROUND (the room's sprites are skipped). Battles keep the room camera.
+
+Room shape: F1 > Chase camera > Rooms' shape for every room, or a room's own choice
+(Backspace in the editor; Room fit > Room shape, where "As the F1 option" goes back). Picture box, the default: the room is rebuilt from its picture. Every point of
+the background is the room camera's ray through it, landing on the floor (the collision floor's
+usual height) or, beyond it, on a side wall of a box holding everything the picture shows, so the
+textures line up by construction and a hall seen from above stays a hall even when Aya may only
+walk its carpet. The collision floor still moves Aya and the camera stays inside the box.
+Collision walls: walls stand on the walkable floor's edges.
+
+In collision-walls rooms walls stand on the floor's edges. Edges that close around a hole in the floor (seat rows,
+tables) are obstacles and get their own lower height. The floor and walls are textured by
+projecting them through the room's camera onto its background tiles. F7 writes a debug dump
+(chasecam_dump beside the settings): the room picture, an overlay of every floor and wall piece
+on it (textured or not), a map from above, and a report of layers, wall loops and coverage.
+
+F9 is the fit editor (F6 is PsyZ's VRAM view), per room and camera. It splits the screen: the room's own picture on top
+(with the selection's texture area outlined), the chase view below (the selected wall in yellow).
+Numpad . steps through the walls out from Aya (Shift: back), / selects the floor, * the whole
+room. 4/6/8/2 move the selection's part of the picture and +/- size it; on a wall or the floor
+7/9 turn it and 1/3 stretch its width (Ctrl: height), on the whole room 7/9 and 1/3 are width
+and height. PageUp/PageDown set the selected wall's own height (the room's wall height when the whole
+room is selected), Insert/Delete the obstacle height. End switches the selected wall to a
+rectangle (its texture from its bounding box on the picture, spread evenly over the wall) and
+back; with the whole room selected it switches every wall, 5 resets the
+selection, 0 saves; Shift is faster. Numpad . also stops on each obstacle's top (just before
+its nearest wall, outlined in orange): the numpad keys move, size and turn its texture about its
+centre, PageUp/PageDown set the obstacle's own height (its walls and top), F5 cycles its image.
+Objects whose collision joins the room's outer wall have no loop of their own and so no top: M
+marks the selected wall (magenta; again to unmark), N clears the marks, B makes a flat top over
+the marked walls (the gaps between them bridged by straight edges, at the tallest marked wall's
+height) and selects it. A made top works like an obstacle top (height, texture, F5 image);
+Ctrl+B deletes the selected one. They are kept as "C room group wall wall ..." lines.
+G held + numpad 4/6/8/2 moves the selected wall itself (8 away from the chase camera, 2 toward
+it, 4/6 left/right; Ctrl faster), to widen a room that feels cramped: the walls next to it
+stretch to stay joined, a floor strip fills the gap, and the wall keeps the picture of where it
+really is. Only the drawing moves: collision stays. 5 resets it; L lines keep the move as two
+extra numbers.
+F mirrors the selection's F5 image left-right and Shift+F upside down (again to undo), on walls,
+the floor, the ceiling and tops; L lines keep it as a 13th number (1, 2 or 3 for both).
+Fits are kept in the mod's room data (below): room lines, and "L" lines for single walls, the
+floor, the ceiling and obstacle tops (layer -100-N for loop N). An obstacle Aya stands inside (a
+stage) gets no walls and a floor at her height.
+
+Wall images: 256-colour BMPs (palette entry 0 transparent, at most 1024x256) in the room
+data's textures/room_NNN or textures/common; make them with tools/make_texture.py. In a collision-walls room, select a wall in the editor and press F5 to
+cycle its image, Shift+F5 / Ctrl+F5 to spread it over one more / one fewer wall along its loop;
+numpad 4/6/8/2 and +/- then move and size it. The mod uploads the image into video memory the
+room leaves blank (halving it until it fits), checks it every frame and moves it if the game
+writes there. Saved as "W" lines in rooms.txt. The F7 dump adds vram.bmp.
+
+Room data is part of the mod: mods/pe_chasecam/data (rooms.txt, textures/common,
+textures/room_NNN) is built into the game as C arrays (embed_data.cmake), so every player gets
+the per-room fixes on every platform with no files to install. Only a build made from this tree,
+whose data folder is still there (PE_CHASECAM_SOURCE_DATA), reads and saves that folder, so the
+in-game editor's changes land in the repository; anywhere else the built-in data is read-only.
+The editor is a development tool and goes away once every room is done.
 
 ## Phone Calls (pe_phone)
 

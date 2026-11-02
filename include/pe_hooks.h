@@ -66,9 +66,10 @@ typedef enum PeHookId {
     PE_HOOK_SLOT_DRAWN,  /* PeHookSlotDrawn: a bag or storage row was drawn (presentation only) */
     PE_HOOK_HP_LOSS, /* PeHookHpLoss: combat HP commit only; previous hook IDs unchanged */
     PE_HOOK_EQUIPMENT_GUARD, /* PeHookEquipmentGuard: nonzero refuses BEFORE native mutation */
-    PE_HOOK_TITLE_FRAME, /* int *: each title-menu frame; set to 1 after loading a save into the runtime
-                          * (as the card load does) to leave the title the way Continue does; appended,
-                          * previous hook IDs unchanged */
+    PE_HOOK_TITLE_FRAME, /* int *: each frame of the title: its logos, its intro movie and its menu;
+                          * set to 1 after loading a save into the runtime (as the card load does) to
+                          * end them (a movie stops as a skipped one does) and leave the way Continue
+                          * does; appended, previous hook IDs unchanged */
     PE_HOOK_TEXT_STRETCH, /* PeHookTextStretch: the Unicode letters of an F1 C6 stretch; nonzero
                            * gives them (pe1/text_render.h) */
     PE_HOOK_TEXT_LETTER,  /* PeHookTextLetter: how a Unicode letter draws; nonzero handles it */
@@ -92,6 +93,11 @@ typedef enum PeHookId {
                            * appended, previous hook IDs unchanged */
     PE_HOOK_SPELL_DONE,  /* PeHookSpellDone: Battle_ApplySpellEffect after the power's effect,
                           * before the HP clamp and the PE drain; *drain may change; appended */
+    PE_HOOK_FIELD_CAMERA, /* PeHookFieldCamera: Entity_FrameUpdate, around the actor draw pass;
+                           * phase 0 after the room camera is set, phase 1 after the actors drew;
+                           * phases 2/3 around the battle range dome (Render_AnimationFrame) */
+    PE_HOOK_FIELD_BACKGROUND, /* NULL: Render_BuildMeshList entry; nonzero skips the room's
+                               * background sprites this frame */
     PE_HOOK_COUNT
 } PeHookId;
 
@@ -155,6 +161,15 @@ typedef struct PeHookHpLoss {
     int *loss;
     unsigned source; /* 1hit,2contact,3periodic,4HP-reduction attack */
 } PeHookHpLoss;
+
+/* Phase 0: the room camera (g_EntityRenderScratch) and screen offset are set for this frame and
+ * the actors are about to draw; a handler may swap the camera. Phase 1: the actors and their
+ * effects drew; a handler that swapped the camera puts the room's back. Phases 2 and 3 do the
+ * same around the battle range dome, drawn in world space after the actor pass: a handler that
+ * drew the actors from its own camera swaps it in at 2 and puts the room's back at 3. */
+typedef struct PeHookFieldCamera {
+    int phase;
+} PeHookFieldCamera;
 
 typedef struct PeHookPlayerMove {
     const void *actor;
