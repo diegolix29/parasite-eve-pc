@@ -39,7 +39,6 @@
 #define PE_CARD_CRC (0x100 + 0x12E4 + 0x8A8)   /* the checksum after the tail */
 #define PE_RELOAD_SAME 0x800u                  /* g_GameState.flags: the same room again */
 
-#define PE_TOKEN_TITLE    0xA9400048u
 #define PE_TOKEN_NEW_GAME 0xAA108448u
 #define PE_TOKEN_BOOT     0xA8000048u
 #define PE_TOKEN_PROLOGUE 0xA80830C8u
@@ -58,8 +57,7 @@ static void pe_slot_path(char *out, size_t size, int slot) {
 static int pe_ready(int load) {
     const unsigned token = (unsigned)g_SceneDispatchToken;
     if (!token || token == PE_TOKEN_BOOT) return -1;
-    if (!load && (!pe_game_loaded() || token == PE_TOKEN_TITLE || token == PE_TOKEN_NEW_GAME ||
-                  token == PE_TOKEN_PROLOGUE)) return -1;
+    if (!load && (!pe_game_loaded() || token == PE_TOKEN_NEW_GAME || token == PE_TOKEN_PROLOGUE)) return -1;
     return (unsigned)g_SceneDispatchCur == token;
 }
 
@@ -124,7 +122,8 @@ static void pe_save(int slot) {
     pe_log("quicksave", "slot=%d room=%d", slot, pe_room_number());
 }
 
-static void pe_load(int slot) {
+/* title: from the title menu, which then goes on as Continue does. 1 when the save was loaded. */
+static int pe_load(int slot, int title) {
     char path[1024], msg[64];
     FILE *f;
     size_t n;
@@ -133,7 +132,7 @@ static void pe_load(int slot) {
 
     pe_slot_path(path, sizeof path, slot);
     f = fopen(path, "rb");
-    if (!f) { snprintf(msg, sizeof msg, "Slot %d is empty", slot); pe_toast(msg); return; }
+    if (!f) { snprintf(msg, sizeof msg, "Slot %d is empty", slot); pe_toast(msg); return 0; }
     n = fread(g_MemCardFileBuffer, 1, PE_CARD_SIZE, f);
     fclose(f);
     memcpy(&crc, g_MemCardFileBuffer + PE_CARD_CRC, sizeof crc);
@@ -141,30 +140,34 @@ static void pe_load(int slot) {
         !Inv_ValidateSavedInventory((const SaveRuntimeState *)&g_MemCardSaveStateBuffer)) {
         snprintf(msg, sizeof msg, "Slot %d is damaged", slot);
         pe_toast(msg);
-        return;
+        return 0;
     }
     /* A movie stops as a skipped one does; open menus go with the scene. */
-    if (Draw_CheckDrawStatus() != 0) {
-        MenuCardFirst_StopVideo();
-        Script_StopMovieMusic();
+    if (!title) {
+        if (Draw_CheckDrawStatus() != 0) {
+            MenuCardFirst_StopVideo();
+            Script_StopMovieMusic();
+        }
+        MenuWidget_InitPool();
     }
-    MenuWidget_InitPool();
     /* Save_LoadCardFileIntoRuntime's commit, without the card menu's dialogs. */
     g_SaveIoCursor = g_MemCardFileBuffer + 0x100 + 0x12E4;
-    if (Save_DeserializeTail() != 0) { pe_toast("Quick load failed: the save's records don't match"); return; }
+    if (Save_DeserializeTail() != 0) { pe_toast("Quick load failed: the save's records don't match"); return 0; }
     memcpy(&g_SaveRuntimeState, &g_MemCardSaveStateBuffer, sizeof g_SaveRuntimeState);
     g_SaveIoCursor += 4;
     Save_RestoreHeader();
     PE_HOOK(PE_HOOK_SAVE_READ, g_MemCardFileBuffer);
-    /* Into the saved room, the way a field script changes rooms. The frame loop only ends for a
-     * new token, so a save of the room Aya is in also asks for the game's same-room reload (the
-     * Wardrobe's, script command 2101). */
     token = g_SceneDispatchToken;
-    (void)Script_EncodeBarcode(args);
-    if (token == g_SceneDispatchCur) g_GameState.flags |= PE_RELOAD_SAME;
     snprintf(msg, sizeof msg, "Quick loaded slot %d", slot);
     pe_toast(msg);
     pe_log("quickload", "slot=%d token=%08X", slot, (unsigned)token);
+    if (title) return 1;                    /* the title starts the saved room itself */
+    /* Into the saved room, the way a field script changes rooms. The frame loop only ends for a
+     * new token, so a save of the room Aya is in also asks for the game's same-room reload (the
+     * Wardrobe's, script command 2101). */
+    (void)Script_EncodeBarcode(args);
+    if (token == g_SceneDispatchCur) g_GameState.flags |= PE_RELOAD_SAME;
+    return 1;
 }
 
 static void pe_keys(void) {
@@ -199,7 +202,16 @@ static int pe_on_frame(void *ctx, void *user) {
         return 0;
     }
     if (!ready) return 0;
-    if (s_pending == PE_SAVE) pe_save(s_slot); else pe_load(s_slot);
+    if (s_pending == PE_SAVE) pe_save(s_slot); else pe_load(s_slot, 0);
+    s_pending = PE_NONE;
+    return 0;
+}
+static int pe_on_title(void *ctx, void *user) {
+    int *loaded = ctx;
+    (void)user;
+    pe_keys();
+    if (s_pending == PE_SAVE) pe_toast("Quick save: start or load a game first");
+    else if (s_pending == PE_LOAD && pe_load(s_slot, 1)) *loaded = 1;
     s_pending = PE_NONE;
     return 0;
 }
@@ -222,6 +234,7 @@ static void pe_slot_info(char *out, unsigned size) {
 
 static int quicksave_init(void) {
     pe_hook_add(PE_HOOK_FRAME, pe_on_frame, NULL, PE_PRIORITY_LATE, MOD_ID);
+    pe_hook_add(PE_HOOK_TITLE_FRAME, pe_on_title, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     pe_hook_add(PE_HOOK_NEW_GAME, pe_on_new_game, NULL, PE_PRIORITY_NORMAL, MOD_ID);
 
     pe_menu_begin(PE_PAGE_QUICKSAVE);
