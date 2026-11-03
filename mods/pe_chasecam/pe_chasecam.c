@@ -87,6 +87,10 @@ static void dump_room(void);
 static u32 s_saved_scratch[9];
 /* Signed: rooms that scroll put the screen origin above or left of the picture. */
 static s16 s_saved_offset_x, s_saved_offset_y;
+/* The same, as they were when the tiles were read (the frame before the one being drawn):
+ * the picture moves with the game's scroll, so it is projected with its own camera. */
+static u32 s_pic_scratch[9];
+static s16 s_pic_offset_x, s_pic_offset_y;
 static int s_swapped;
 static float s_mirror = 1.0f;    /* -1 when the room's camera is a mirror (det < 0) */
 
@@ -634,6 +638,9 @@ static void gather_tiles(void) {
     GeomState *state = g_GeomState;
     s_tile_count = 0;
     s_tile_frame = s_frame;
+    memcpy(s_pic_scratch, s_saved_scratch, sizeof s_pic_scratch);
+    s_pic_offset_x = s_saved_offset_x;
+    s_pic_offset_y = s_saved_offset_y;
     if (!state) return;
     u16 out_x = (u16)(state->disp_src_x - ((u16)g_GeomScroll.state.position.x - 160));
     u16 out_y = (u16)(state->disp_src_y - ((u16)g_GeomScroll.state.position.y - 112));
@@ -720,7 +727,7 @@ static void bin_tiles(void) {
 typedef struct { float sx, sy, q, wx, wy, wz; } CV;
 
 static void room_view(const V3 *p, float out[3]) {
-    const GteMatrix *m = (const GteMatrix *)s_saved_scratch;
+    const GteMatrix *m = (const GteMatrix *)s_pic_scratch;
     for (int r = 0; r < 3; ++r)
         out[r] = (m->m[r][0] * p->x + m->m[r][1] * p->y + m->m[r][2] * p->z) / 4096.0f +
                  (float)m->t[r];
@@ -843,8 +850,8 @@ static void project_surface(const Surface *s) {
         cut_into_tiles(base, 3, s->wall, minx, maxx, miny, maxy);
         return;
     }
-    const float H = (float)s_saved_scratch[8];
-    const float ox = s_saved_offset_x, oy = s_saved_offset_y;
+    const float H = (float)s_pic_scratch[8];
+    const float ox = s_pic_offset_x, oy = s_pic_offset_y;
     float view[3][3];
     for (int k = 0; k < 3; ++k) room_view(&s->v[k], view[k]);
     /* Near clip in the room's view space, keeping world positions. */
@@ -930,9 +937,9 @@ static int picture_xy(const V3 *p, float *x, float *y) {
     float v[3];
     room_view(p, v);
     if (v[2] < 16.0f) return 0;
-    float H = (float)s_saved_scratch[8];
-    *x = 160.0f + (s_saved_offset_x + H * v[0] / v[2] - 160.0f) * s_fit.sx + s_fit.ox;
-    *y = 112.0f + (s_saved_offset_y + H * v[1] / v[2] - 112.0f) * s_fit.sy + s_fit.oy;
+    float H = (float)s_pic_scratch[8];
+    *x = 160.0f + (s_pic_offset_x + H * v[0] / v[2] - 160.0f) * s_fit.sx + s_fit.ox;
+    *y = 112.0f + (s_pic_offset_y + H * v[1] / v[2] - 112.0f) * s_fit.sy + s_fit.oy;
     return 1;
 }
 
@@ -997,9 +1004,9 @@ static void wall_pivots(void) {
 
 static void build_pieces(void) {
     unsigned key = hash_add(s_tile_hash, (unsigned)s_surf_count);
-    for (int i = 0; i < 8; ++i) key = hash_add(key, s_saved_scratch[i]);
-    key = hash_add(key, s_saved_scratch[8] | ((unsigned)(u16)s_saved_offset_x << 16));
-    key = hash_add(key, (u16)s_saved_offset_y | ((unsigned)(uintptr_t)s_mesh_key << 16));
+    for (int i = 0; i < 8; ++i) key = hash_add(key, s_pic_scratch[i]);
+    key = hash_add(key, s_pic_scratch[8] | ((unsigned)(u16)s_pic_offset_x << 16));
+    key = hash_add(key, (u16)s_pic_offset_y | ((unsigned)(uintptr_t)s_mesh_key << 16));
     {
         const float f[4] = {s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy};
         unsigned bits[4];
@@ -1110,20 +1117,20 @@ static void box_backing(void) {
 static void build_box(void) {
     if (s_tile_count <= 0 || s_surf_count <= 0) return;
     unsigned key = hash_add(s_tile_hash, s_mesh_version);
-    for (int i = 0; i < 9; ++i) key = hash_add(key, s_saved_scratch[i]);
-    key = hash_add(key, (u16)s_saved_offset_x | ((unsigned)(u16)s_saved_offset_y << 16));
+    for (int i = 0; i < 9; ++i) key = hash_add(key, s_pic_scratch[i]);
+    key = hash_add(key, (u16)s_pic_offset_x | ((unsigned)(u16)s_pic_offset_y << 16));
     key = hash_add(key, (unsigned)s_fit.wall);
     if (s_box_active && key == s_box_key) return;
 
     /* Room camera: position and axes in the world. */
-    const GteMatrix *m = (const GteMatrix *)s_saved_scratch;
+    const GteMatrix *m = (const GteMatrix *)s_pic_scratch;
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 3; ++c) s_cam_axes[r][c] = m->m[r][c] / 4096.0f;
     for (int c = 0; c < 3; ++c)
         s_cam_pos[c] = -(s_cam_axes[0][c] * m->t[0] + s_cam_axes[1][c] * m->t[1] + s_cam_axes[2][c] * m->t[2]);
-    s_cam_h = (float)s_saved_scratch[8];
-    s_cam_ox = s_saved_offset_x;
-    s_cam_oy = s_saved_offset_y;
+    s_cam_h = (float)s_pic_scratch[8];
+    s_cam_ox = s_pic_offset_x;
+    s_cam_oy = s_pic_offset_y;
     if (s_cam_h <= 0) return;
 
     /* The picture's extent on screen. */
@@ -2869,9 +2876,9 @@ static int room_to_canvas(const V3 *p, float *x, float *y) {
     float v[3];
     room_view(p, v);
     if (v[2] < 16.0f) return 0;
-    float H = (float)s_saved_scratch[8];
-    *x = s_saved_offset_x + H * v[0] / v[2] - s_dox;
-    *y = s_saved_offset_y + H * v[1] / v[2] - s_doy;
+    float H = (float)s_pic_scratch[8];
+    *x = s_pic_offset_x + H * v[0] / v[2] - s_dox;
+    *y = s_pic_offset_y + H * v[1] / v[2] - s_doy;
     return 1;
 }
 
