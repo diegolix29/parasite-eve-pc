@@ -171,6 +171,9 @@ typedef struct {
     u8 *pix;                  /* full-size indices, w0 x h0 */
     int w0, h0;
     u16 clut[256];
+    u16 *up;                  /* what was uploaded: chunk k's rows at k * 64 * h */
+    unsigned checked;         /* the frame image_check last compared it */
+    unsigned retry;           /* no room in video memory: the frame to look again, or 0 */
 } CustomImage;
 static CustomImage s_images[MAX_IMAGES];
 static int s_image_count, s_images_room = -999, s_images_group = -1;
@@ -178,7 +181,9 @@ static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 non
 static int s_wall_cover[MAX_WALLS];      /* the first wall of the image covering this one, or -1 */
 static float s_wall_cum[MAX_WALLS];      /* along the covering image: length before this wall */
 static float s_cover_len[MAX_WALLS];     /* the covering image's total length (on its first wall) */
-static unsigned s_img_version, s_cover_key;
+static unsigned s_img_version;
+static unsigned s_cover_img = ~0u, s_cover_mesh = ~0u; /* versions update_cover last saw */
+static int s_cover_walls = -1;
 typedef struct { int room, group, wall, span; char name[96]; } WallImage;
 #define MAX_WALL_IMAGES 1024
 static WallImage s_wall_images[MAX_WALL_IMAGES];
@@ -1403,6 +1408,7 @@ static void images_enter_room(int room, int group) {
     for (int i = 0; i < s_image_count; ++i) {
         image_forget_vram(&s_images[i]);
         free(s_images[i].pix);
+        free(s_images[i].up);
     }
     memset(s_images, 0, sizeof s_images);
     s_image_count = 0;
@@ -1493,10 +1499,21 @@ static void reserve(int x, int y, int w, int h, u8 v) {
         for (int i = 0; i < w; ++i) s_vram_reserved[y + j][x + i] = v;
 }
 
+/* Reserves only what the other loaded images hold (their transparent texels read as blank). */
+static void reserve_loaded(const CustomImage *except) {
+    memset(s_vram_reserved, 0, sizeof s_vram_reserved);
+    for (int i = 0; i < s_image_count; ++i) {
+        const CustomImage *o = &s_images[i];
+        if (o == except || !o->loaded) continue;
+        for (int k = 0; k < o->chunks; ++k) reserve(o->vx[k], o->vy[k], 64, o->h, 1);
+        reserve(o->cx, o->cy, 256, 1, 1);
+    }
+}
+
 /* Reads the BMP (once) and uploads it at the largest size the blank video memory takes. */
 static int image_load(CustomImage *im) {
     if (im->loaded) return 1;
-    if (im->failed) return 0;
+    if (im->failed || (im->retry && (int)(s_frame - im->retry) < 0)) return 0;
     if (!im->pix) {
         SDL_Surface *surf = im->file ? SDL_LoadBMP_IO(SDL_IOFromConstMem(im->file->data, im->file->size), true)
                                      : SDL_LoadBMP(im->path);
@@ -1537,19 +1554,15 @@ static int image_load(CustomImage *im) {
         }
         if (ok) ok = find_clut(vram, known, &im->cx, &im->cy);
         if (!ok) {
-            memset(s_vram_reserved, 0, sizeof s_vram_reserved);
-            for (int i = 0; i < s_image_count; ++i) {
-                CustomImage *o = &s_images[i];
-                if (o == im || !o->loaded) continue;
-                for (int k = 0; k < o->chunks; ++k) reserve(o->vx[k], o->vy[k], 64, o->h, 1);
-                reserve(o->cx, o->cy, 256, 1, 1);
-            }
+            reserve_loaded(im);
             continue;
         }
         reserve(im->cx, im->cy, 256, 1, 1);
         im->w = w;
         im->h = h;
         im->chunks = chunks;
+        free(im->up);
+        im->up = malloc((size_t)chunks * 64 * h * sizeof *im->up);
         /* Upload: two 8-bit texels per halfword, left one in the low byte. */
         static u16 buf[64 * 256];
         for (int k = 0; k < chunks; ++k) {
@@ -1566,55 +1579,63 @@ static int image_load(CustomImage *im) {
             RECT r = {(short)im->vx[k], (short)im->vy[k], (short)cols, (short)h};
             LoadImage(&r, buf);
             DrawSync(0);
+            if (im->up) memcpy(im->up + (size_t)k * 64 * h, buf, (size_t)cols * h * sizeof *buf);
         }
         RECT r = {(short)im->cx, (short)im->cy, 256, 1};
         LoadImage(&r, im->clut);
         DrawSync(0);
         im->loaded = 1;
+        im->checked = s_frame;
         pe_mod_log(MOD_ID, "image %s: %dx%d (1/%d size) in video memory at x %d y %d, palette %d,%d",
                    im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy);
         return 1;
     }
-    pe_mod_log(MOD_ID, "image %s: no blank video memory for it, even at 1/8 size", im->name);
-    im->failed = 1;
+    /* Video memory changes while a room loads: try again in a second. */
+    if (!im->retry) pe_mod_log(MOD_ID, "image %s: no blank video memory for it, even at 1/8 size", im->name);
+    im->retry = s_frame + 60;
     return 0;
 }
 
-/* Still ours? The game may load textures into what was blank; then the image moves. */
+/* Still ours? The game may load textures into what was blank, or clear it while a room loads
+ * (a cleared image would still pass a check of its transparent corners); then the image moves.
+ * Every texel and the palette are compared, once a frame. */
 static int image_check(CustomImage *im) {
     if (!im->loaded) return 0;
+    if (im->checked == s_frame) return 1;
     const unsigned char *known;
     const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
     if (!vram) return 1;
-    for (int k = 0; k < im->chunks; ++k) {
-        int at = im->vy[k] * 1024 + im->vx[k];
-        int at2 = (im->vy[k] + im->h - 1) * 1024 + im->vx[k];
-        int ok = known[at] && known[at2];
-        if (ok) {
-            const u8 *row0 = im->pix, *rowl = im->pix + (size_t)((im->h - 1) * (im->h0 / im->h)) * im->w0;
-            int sh = im->w0 / im->w, base = k * IMG_CHUNK * sh;
-            u16 e0 = (u16)(row0[base] | ((base + sh < im->w0 ? row0[base + sh] : 0) << 8));
-            u16 e1 = (u16)(rowl[base] | ((base + sh < im->w0 ? rowl[base + sh] : 0) << 8));
-            ok = vram[at] == e0 && vram[at2] == e1;
-        }
-        if (!ok) {
-            pe_mod_log(MOD_ID, "image %s: its video memory was taken, moving it", im->name);
-            for (int y = 0; y < im->h; ++y)
-                for (int x = 0; x < 64; ++x) s_vram_reserved[im->vy[0] + y][im->vx[0] + x] = 0;
-            im->loaded = 0;
-            memset(s_vram_reserved, 0, sizeof s_vram_reserved);
-            return image_load(im);
+    int ok = 1;
+    for (int k = 0; k < im->chunks && ok && im->up; ++k) {
+        int tw = im->w - k * IMG_CHUNK < IMG_CHUNK ? im->w - k * IMG_CHUNK : IMG_CHUNK;
+        int cols = (tw + 1) / 2;
+        for (int y = 0; y < im->h && ok; ++y) {
+            int at = (im->vy[k] + y) * 1024 + im->vx[k];
+            ok = known[at] && known[at + cols - 1] &&
+                 !memcmp(vram + at, im->up + (size_t)k * 64 * im->h + (size_t)y * cols, (size_t)cols * 2);
         }
     }
+    if (ok) {
+        int at = im->cy * 1024 + im->cx;
+        ok = known[at] && known[at + 255] && !memcmp(vram + at, im->clut, sizeof im->clut);
+    }
+    if (!ok) {
+        pe_mod_log(MOD_ID, "image %s: its video memory was taken, moving it", im->name);
+        im->loaded = 0;
+        reserve_loaded(im);
+        return image_load(im);
+    }
+    im->checked = s_frame;
     return 1;
 }
 
 /* Which wall each image covers, and how far along it each wall starts. */
 static void update_cover(void) {
-    unsigned key = hash_add(s_img_version, s_mesh_version);
-    key = hash_add(key, (unsigned)s_wall_count);
-    if (key == s_cover_key) return;
-    s_cover_key = key;
+    if (s_cover_img == s_img_version && s_cover_mesh == s_mesh_version && s_cover_walls == s_wall_count)
+        return;
+    s_cover_img = s_img_version;
+    s_cover_mesh = s_mesh_version;
+    s_cover_walls = s_wall_count;
     for (int i = 0; i < MAX_WALLS; ++i) s_wall_cover[i] = -1;
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
         if (s_wall_img[i] < 0) continue;
@@ -1696,6 +1717,7 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
 /* One wall surface with its image: cut to the image and to its 128-texel columns. */
 static void draw_wall_image(const Surface *s) {
     int first = s_wall_cover[s->src];
+    if (first < 0 || s_wall_img[first] < 0 || s_wall_img[first] >= s_image_count) return;
     CustomImage *im = &s_images[s_wall_img[first]];
     if (!image_load(im) || !image_check(im)) return;
     IV a[12], b[12];
