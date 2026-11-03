@@ -45,6 +45,22 @@ target_include_directories(pe-mods PRIVATE ${PROJECT_SOURCE_DIR}/include host
 target_compile_definitions(pe-mods PRIVATE __psyz)
 target_link_libraries(pe-mods PRIVATE psyz)
 
+if("pe_chasecam" IN_LIST PE_MOD_LIST)
+    # The chase camera's room data (fits, wall heights, wall images in pe_chasecam/data) is built
+    # into the game: no files on the player's machine. A build made from this tree also reads and
+    # saves the folder itself while the in-game editor is used, so edits land in the repository.
+    set(pe_chasecam_data ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/data)
+    file(GLOB_RECURSE pe_chasecam_data_files CONFIGURE_DEPENDS ${pe_chasecam_data}/*)
+    set(pe_chasecam_embedded ${CMAKE_CURRENT_BINARY_DIR}/pe_chasecam_data.c)
+    add_custom_command(OUTPUT ${pe_chasecam_embedded}
+        COMMAND ${CMAKE_COMMAND} -DDATA_DIR=${pe_chasecam_data} -DOUT=${pe_chasecam_embedded}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/embed_data.cmake
+        DEPENDS ${pe_chasecam_data_files} ${CMAKE_CURRENT_SOURCE_DIR}/pe_chasecam/embed_data.cmake
+        COMMENT "Building the chase camera's room data into the game")
+    target_sources(pe-mods PRIVATE ${pe_chasecam_embedded})
+    target_compile_definitions(pe-mods PRIVATE "PE_CHASECAM_SOURCE_DATA=\"${pe_chasecam_data}\"")
+endif()
+
 if(BUILD_TESTING AND "pe_qol" IN_LIST PE_MOD_LIST)
     add_executable(pe-mod-frequency
         ${PROJECT_SOURCE_DIR}/tests/pe_mod_frequency_test.c

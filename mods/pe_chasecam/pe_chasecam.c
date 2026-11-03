@@ -66,8 +66,8 @@ static int s_f8_down, s_home_down, s_f7_down, s_f9_down, s_dump_pending;
 
 /* Per room and camera: how the room's picture sits on the rebuilt walls and floor. The picture
  * position of every surface point is moved by (ox, oy) and scaled by (sx, sy) about the screen
- * centre before it picks its tile; walls are wall / obst high. chasecam_rooms.txt beside the
- * settings keeps them, one "room group ox oy sx sy wall obst" line each. */
+ * centre before it picks its tile; walls are wall / obst high. The mod's data/rooms.txt (see
+ * data_dir) keeps them, one "room group ox oy sx sy wall obst shape" line each. */
 /* shape 1: the room is a box built from the picture (see build_box); 0: walls on the collision
  * floor's edges. */
 typedef struct { int room, group; float ox, oy, sx, sy; int wall, obst, shape; } RoomFit;
@@ -150,15 +150,20 @@ static unsigned s_adj_version;
 static int s_sel = -2; /* editor selection: -2 the whole room, -1 the floor, >= 0 a wall edge */
 static float s_cy = 112.0f; /* chase view centre: lower while the editor splits the screen */
 
-/* ---- custom wall images (chasecam_textures/room_NNN and /common: 256-colour BMPs, entry 0
+/* ---- custom wall images (data/textures/room_NNN and /common: 256-colour BMPs, entry 0
  * transparent; make them with tools/make_texture.py). An image put on wall edge i spreads over
  * walls i .. i+span-1 of its loop (by length) and floor to wall top. It is uploaded into video
  * memory the room leaves blank (all zero, never drawn into), in 128-texel-wide 8-bit columns,
  * halved until it fits, and checked every frame; if the game writes there it moves. ---- */
+/* The room data built into the game (embed_data.cmake; see data_dir). */
+typedef struct PeChasecamFile { const char *path; const unsigned char *data; unsigned size; } PeChasecamFile;
+extern const PeChasecamFile pe_chasecam_files[];
+extern const unsigned pe_chasecam_file_count;
 #define MAX_IMAGES 48
 #define IMG_CHUNK 128
 typedef struct {
     char name[96], path[600];
+    const PeChasecamFile *file; /* built in (path unused), or NULL: read path */
     int loaded, failed;       /* loaded: in video memory now */
     int w, h;                 /* size as uploaded */
     int chunks, vx[8], vy[8]; /* each 128-texel column's place in video memory */
@@ -1265,10 +1270,63 @@ static void draw_line(const V3 *pa, const V3 *pb, int r, int g, int b) {
 int ClearImage(RECT *rect, u_char r, u_char g, u_char b);
 static u8 s_vram_reserved[512][1024]; /* blocks this module took in the current search */
 
+/* The room data (rooms.txt, textures/common, textures/room_NNN) is built into the game from
+ * mods/pe_chasecam/data (embed_data.cmake): the player's machine needs no files. Only a build made
+ * from the source tree, whose folder is still there, reads and saves that folder instead, so the
+ * in-game editor's changes land in the repository; everywhere else the data is read-only. */
+
+static int is_dir(const char *path) {
+    SDL_PathInfo info;
+    return path && *path && SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_DIRECTORY;
+}
+
+/* The source tree's data folder when this build can edit it, else "". */
+static const char *data_dir(void) {
+    static char dir[1024];
+    static int checked;
+    if (checked) return dir;
+    checked = 1;
+#ifdef PE_CHASECAM_SOURCE_DATA
+    if (is_dir(PE_CHASECAM_SOURCE_DATA)) snprintf(dir, sizeof dir, "%s", PE_CHASECAM_SOURCE_DATA);
+#endif
+    if (dir[0]) pe_mod_log(MOD_ID, "room data: editing %s", dir);
+    else pe_mod_log(MOD_ID, "room data: built in (%u files), read-only", pe_chasecam_file_count);
+    return dir;
+}
+
+static const PeChasecamFile *embedded_file(const char *rel) {
+    for (unsigned i = 0; i < pe_chasecam_file_count; ++i)
+        if (!strcmp(pe_chasecam_files[i].path, rel)) return &pe_chasecam_files[i];
+    return NULL;
+}
+
+/* A data file as a NUL-terminated buffer (SDL_free it), from the source folder or built in. */
+static char *data_read(const char *rel, size_t *size) {
+    const char *dir = data_dir();
+    if (dir[0]) {
+        char path[1200];
+        snprintf(path, sizeof path, "%s/%s", dir, rel);
+        return SDL_LoadFile(path, size);
+    }
+    const PeChasecamFile *f = embedded_file(rel);
+    if (!f) return NULL;
+    char *buf = SDL_malloc((size_t)f->size + 1);
+    if (!buf) return NULL;
+    memcpy(buf, f->data, f->size);
+    buf[f->size] = 0;
+    if (size) *size = f->size;
+    return buf;
+}
+
 static void textures_dir(char *out, size_t size, const char *sub) {
-    char base[512];
-    if (pe_mod_path(base, sizeof base, "chasecam_textures") != 0) { out[0] = 0; return; }
-    snprintf(out, size, "%s/%s", base, sub);
+    const char *base = data_dir();
+    if (!base[0]) { out[0] = 0; return; }
+    snprintf(out, size, "%s/textures/%s", base, sub);
+}
+
+static int ends_with_bmp(const char *name) {
+    size_t n = strlen(name);
+    return n > 4 && !SDL_strcasecmp(name + n - 4, ".bmp");
 }
 
 static void image_forget_vram(CustomImage *im) {
@@ -1306,6 +1364,24 @@ static void images_enter_room(int room, int group) {
     snprintf(sub, sizeof sub, "room_%03d", room);
     const char *subs[2] = {sub, "common"};
     for (int d = 0; d < 2; ++d) {
+        if (!data_dir()[0]) {
+            /* Built in: textures/<sub>/<name>.bmp entries. */
+            char prefix[64];
+            snprintf(prefix, sizeof prefix, "textures/%s/", subs[d]);
+            size_t pl = strlen(prefix);
+            for (unsigned i = 0; i < pe_chasecam_file_count && s_image_count < MAX_IMAGES; ++i) {
+                const PeChasecamFile *f = &pe_chasecam_files[i];
+                const char *name = f->path + pl;
+                if (strncmp(f->path, prefix, pl) || strchr(name, '/') || !ends_with_bmp(name)) continue;
+                int dup = 0;
+                for (int j = 0; j < s_image_count; ++j) dup |= !strcmp(s_images[j].name, name);
+                if (dup) continue;
+                CustomImage *im = &s_images[s_image_count++];
+                snprintf(im->name, sizeof im->name, "%s", name);
+                im->file = f;
+            }
+            continue;
+        }
         textures_dir(dir, sizeof dir, subs[d]);
         if (!dir[0]) continue;
         int count = 0;
@@ -1374,7 +1450,8 @@ static int image_load(CustomImage *im) {
     if (im->loaded) return 1;
     if (im->failed) return 0;
     if (!im->pix) {
-        SDL_Surface *surf = SDL_LoadBMP(im->path);
+        SDL_Surface *surf = im->file ? SDL_LoadBMP_IO(SDL_IOFromConstMem(im->file->data, im->file->size), true)
+                                     : SDL_LoadBMP(im->path);
         SDL_Palette *pal = surf ? SDL_GetSurfacePalette(surf) : NULL;
         if (!surf || surf->format != SDL_PIXELFORMAT_INDEX8 || !pal) {
             pe_mod_log(MOD_ID, "image %s: not a 256-colour BMP (%s)", im->name, surf ? "wrong format" : SDL_GetError());
@@ -1892,20 +1969,25 @@ static int can_run(void) {
 
 /* ================= per-room fit ================= */
 
+static const char *data_dir(void);
+
 static void fit_path(char *out, size_t size) {
-    if (pe_mod_path(out, size, "chasecam_rooms.txt") != 0) out[0] = 0;
+    const char *base = data_dir();
+    if (base[0]) snprintf(out, size, "%s/rooms.txt", base);
+    else out[0] = 0;
 }
 
 static void fits_load(void) {
-    char path[512], line[256];
-    fit_path(path, sizeof path);
     int v2 = 0; /* older files saved shape 1 for every room: the old default, not a choice */
     s_fit_count = 0;
     s_layer_fit_count = 0;
     s_wall_image_count = 0;
-    FILE *f = path[0] ? fopen(path, "r") : NULL;
-    if (!f) return;
-    while (fgets(line, sizeof line, f) && s_fit_count < MAX_FITS) {
+    char *buf = data_read("rooms.txt", NULL);
+    if (!buf) return;
+    for (char *line = buf, *next; line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        if (s_fit_count >= MAX_FITS) break;
         RoomFit r;
         if (!strncmp(line, "# v2", 4)) v2 = 1;
         if (line[0] == '#') continue;
@@ -1936,13 +2018,19 @@ static void fits_load(void) {
             s_fits[s_fit_count++] = r;
         }
     }
-    fclose(f);
+    SDL_free(buf);
     pe_mod_log(MOD_ID, "%d room fits and %d wall/floor fits loaded", s_fit_count, s_layer_fit_count);
 }
 
 static void fits_save(void) {
     char path[512];
     int found = 0;
+    if (!data_dir()[0]) {
+        /* Built-in data is read-only: edits last until the game closes. */
+        if (s_edit) pe_toast("Room data is built into this game: save from a build of the source tree");
+        s_fit_saved = 1;
+        return;
+    }
     for (int i = 0; i < s_fit_count; ++i)
         if (s_fits[i].room == s_fit.room && s_fits[i].group == s_fit.group) {
             s_fits[i] = s_fit;
@@ -1980,7 +2068,7 @@ static void fits_save(void) {
     fit_path(path, sizeof path);
     FILE *f = path[0] ? fopen(path, "w") : NULL;
     if (!f) {
-        pe_toast("Chase camera: can't write chasecam_rooms.txt");
+        pe_toast("Chase camera: can't write rooms.txt");
         return;
     }
     fprintf(f, "# v2\n# room group offset_x offset_y scale_x scale_y wall_height obstacle_height "
@@ -1996,7 +2084,7 @@ static void fits_save(void) {
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d\n", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
     }
-    fprintf(f, "# W room group wall span image (a file in chasecam_textures/room_NNN or common)\n");
+    fprintf(f, "# W room group wall span image (a file in textures/room_NNN or textures/common)\n");
     for (int i = 0; i < s_wall_image_count; ++i) {
         const WallImage *w = &s_wall_images[i];
         fprintf(f, "W %d %d %d %d %s\n", w->room, w->group, w->wall, w->span, w->name);
@@ -2161,7 +2249,7 @@ static void edit_keys(const bool *keys) {
             } else if (s_sel < 0) {
                 pe_toast("Select a wall first (numpad .)");
             } else if (!s_image_count) {
-                pe_toast("No images: put 256-colour BMPs in chasecam_textures/common");
+                pe_toast("No images: put 256-colour BMPs in the mod's data/textures/common");
             } else {
                 if (shift) s_wall_span[s_sel]++;
                 else if (ctrl) { if (s_wall_span[s_sel] > 1) s_wall_span[s_sel]--; }

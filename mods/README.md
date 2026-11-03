@@ -118,17 +118,23 @@ and height. PageUp/PageDown set the selected wall's own height (the room's wall 
 room is selected), Insert/Delete the obstacle height. End switches the selected wall to a
 rectangle (its texture from its bounding box on the picture, spread evenly over the wall) and
 back; with the whole room selected it switches every wall, 5 resets the
-selection, 0 saves; Shift is faster. Fits are kept in chasecam_rooms.txt beside the settings
-(room lines, and "L" lines for single walls and the floor). An obstacle Aya stands inside (a
+selection, 0 saves; Shift is faster. Fits are kept in the mod's room data (below): room lines,
+and "L" lines for single walls and the floor. An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
 
-Wall images: 256-colour BMPs (palette entry 0 transparent, at most 1024x256) in
-chasecam_textures/room_NNN or chasecam_textures/common beside the settings; make them with
-tools/make_texture.py. In a collision-walls room, select a wall in the editor and press F5 to
+Wall images: 256-colour BMPs (palette entry 0 transparent, at most 1024x256) in the room
+data's textures/room_NNN or textures/common; make them with tools/make_texture.py. In a collision-walls room, select a wall in the editor and press F5 to
 cycle its image, Shift+F5 / Ctrl+F5 to spread it over one more / one fewer wall along its loop;
 numpad 4/6/8/2 and +/- then move and size it. The mod uploads the image into video memory the
 room leaves blank (halving it until it fits), checks it every frame and moves it if the game
-writes there. Saved as "W" lines in chasecam_rooms.txt. The F7 dump adds vram.bmp.
+writes there. Saved as "W" lines in rooms.txt. The F7 dump adds vram.bmp.
+
+Room data is part of the mod: mods/pe_chasecam/data (rooms.txt, textures/common,
+textures/room_NNN) is built into the game as C arrays (embed_data.cmake), so every player gets
+the per-room fixes on every platform with no files to install. Only a build made from this tree,
+whose data folder is still there (PE_CHASECAM_SOURCE_DATA), reads and saves that folder, so the
+in-game editor's changes land in the repository; anywhere else the built-in data is read-only.
+The editor is a development tool and goes away once every room is done.
 
 ## Cheats (pe_cheats)
 
