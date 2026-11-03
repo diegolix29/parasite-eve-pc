@@ -733,6 +733,10 @@ static void gather_tiles(void) {
     s_tile_hash = h;
 }
 
+/* Tiles the picture never shows: opaque tiles drawn over them cover every texel (see
+ * hide_covered_tiles). They get no pieces, so a hidden layer can't show through at the edges. */
+static u8 s_tile_hidden[MAX_TILES];
+
 static void bin_tiles(void) {
     static int counts[CELLS_W * CELLS_H];
     memset(counts, 0, sizeof counts);
@@ -747,6 +751,7 @@ static void bin_tiles(void) {
             s_cell_start[CELLS_W * CELLS_H] = sum;
         }
         for (int i = 0; i < s_tile_count; ++i) {
+            if (s_tile_hidden[i]) continue;
             int cx0 = (s_tiles[i].x - CELL_X0) >> 4, cy0 = (s_tiles[i].y - CELL_Y0) >> 4;
             int cx1 = (s_tiles[i].x + 15 - CELL_X0) >> 4, cy1 = (s_tiles[i].y + 15 - CELL_Y0) >> 4;
             for (int cy = cy0; cy <= cy1; ++cy)
@@ -975,7 +980,8 @@ static void build_fill_map(void) {
     static int votes[16][16];
     static int queue[CELLS_W * CELLS_H];
     memset(votes, 0, sizeof votes);
-    for (int i = 0; i < s_tile_count; ++i) votes[s_tiles[i].y & 15][s_tiles[i].x & 15]++;
+    for (int i = 0; i < s_tile_count; ++i)
+        if (!s_tile_hidden[i]) votes[s_tiles[i].y & 15][s_tiles[i].x & 15]++;
     int best = -1;
     for (int y = 0; y < 16; ++y)
         for (int x = 0; x < 16; ++x)
@@ -986,6 +992,7 @@ static void build_fill_map(void) {
     s_fill_count = 0;
     int head = 0, tail = 0;
     for (int i = 0; i < s_tile_count; ++i) {
+        if (s_tile_hidden[i]) continue;
         const Tile *t = &s_tiles[i];
         int gx0 = (int)floorf((float)(t->x - CELL_X0 - s_fill_ax) / 16), gx1 = gx0 + ((t->x & 15) != s_fill_ax);
         int gy0 = (int)floorf((float)(t->y - CELL_Y0 - s_fill_ay) / 16), gy1 = gy0 + ((t->y & 15) != s_fill_ay);
@@ -1174,6 +1181,57 @@ static void wall_pivots(void) {
     }
 }
 
+/* The game draws farther entries first (higher ordering-table entry, then the later tile), so
+ * the top of the picture is the lowest entry, then the earliest tile. */
+static int tile_cmp_top_first(const void *a, const void *b) {
+    int ia = *(const u16 *)a, ib = *(const u16 *)b;
+    if (s_tiles[ia].ot != s_tiles[ib].ot) return (int)s_tiles[ia].ot - (int)s_tiles[ib].ot;
+    return ia - ib;
+}
+
+/* Marks the tiles whose texels (all but fewer than HIDE_BELOW) lie under opaque texels of tiles
+ * drawn over them. */
+#define HIDE_BELOW 32
+static void hide_covered_tiles(const u16 *vram) {
+    static u8 opaque[CELLS_W * 16 * CELLS_H * 16];
+    static u16 order[MAX_TILES];
+    memset(s_tile_hidden, 0, sizeof s_tile_hidden);
+    if (!vram || s_tile_count <= 0) return;
+    int x0 = 1 << 30, x1 = -(1 << 30), y0 = 1 << 30, y1 = -(1 << 30);
+    for (int i = 0; i < s_tile_count; ++i) {
+        order[i] = (u16)i;
+        if (s_tiles[i].x < x0) x0 = s_tiles[i].x;
+        if (s_tiles[i].x + 16 > x1) x1 = s_tiles[i].x + 16;
+        if (s_tiles[i].y < y0) y0 = s_tiles[i].y;
+        if (s_tiles[i].y + 16 > y1) y1 = s_tiles[i].y + 16;
+    }
+    const int pitch = CELLS_W * 16;
+    for (int y = y0; y < y1; ++y) memset(&opaque[(y - CELL_Y0) * pitch + (x0 - CELL_X0)], 0, (size_t)(x1 - x0));
+    qsort(order, (size_t)s_tile_count, sizeof order[0], tile_cmp_top_first);
+    for (int n = 0; n < s_tile_count; ++n) {
+        const Tile *t = &s_tiles[order[n]];
+        u8 solid[16][16];
+        int visible = 0, solid_n = 0;
+        u8 *row0 = &opaque[(t->y - CELL_Y0) * pitch + (t->x - CELL_X0)];
+        for (int j = 0; j < 16; ++j)
+            for (int i = 0; i < 16; ++i) {
+                solid[j][i] = vram_tile_texel(vram, t, i, j) != 0;
+                solid_n += solid[j][i];
+                if (solid[j][i] && !row0[j * pitch + i]) visible++;
+            }
+        /* A few texels through the specks of the art over it would only add pieces whose
+         * edges show through the top layer: those go too (the flat colour fills the specks). */
+        if (visible == 0 || (visible < HIDE_BELOW && visible < solid_n)) {
+            s_tile_hidden[order[n]] = 1;
+            continue;
+        }
+        if (t->code & 2) continue; /* semi-transparent: what is under it still shows */
+        for (int j = 0; j < 16; ++j)
+            for (int i = 0; i < 16; ++i)
+                if (solid[j][i]) row0[j * pitch + i] = 1;
+    }
+}
+
 static int piece_cmp_tile(const void *a, const void *b) {
     return (int)((const Piece *)a)->tile - (int)((const Piece *)b)->tile;
 }
@@ -1195,12 +1253,13 @@ static void build_pieces(void) {
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
+    s_piece_vram = Psyz_GpuGetVramCopy(NULL);
+    hide_covered_tiles(s_piece_vram);
     bin_tiles();
     build_fill_map();
     wall_pivots();
     memset(s_surf_pieces, 0, sizeof s_surf_pieces);
     memset(s_surf_rgb, 0, sizeof s_surf_rgb);
-    s_piece_vram = Psyz_GpuGetVramCopy(NULL);
     for (int i = 0; i < s_surf_count; ++i) {
         s_projecting = i;
         int first = s_piece_count;
