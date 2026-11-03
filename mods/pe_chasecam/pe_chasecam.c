@@ -950,14 +950,22 @@ static void project_surface(const Surface *s) {
 
 /* ---- filling what the picture leaves out ----
  * Where a surface runs past the picture's edge or over a hole in it, the 16x16 cells there get
- * the nearest tile's texture again (on the grid most tiles sit on), so the last pattern repeats
- * up to FILL_CELLS cells out instead of leaving the flat colour. Filled cells are extra tiles
- * after the frame's own in s_tiles, rebuilt with the pieces. */
+ * the picture's last FILL_PERIOD cells before the edge again (on the grid most tiles sit on), so
+ * that strip repeats as a pattern up to FILL_CELLS cells out instead of leaving the flat colour
+ * (one cell repeated looked like a smear). Filled cells are extra tiles after the frame's own in
+ * s_tiles, rebuilt with the pieces. */
 #define FILL_CELLS 40
+#define FILL_PERIOD 3
+/* F1 "Gap fill": how far the pattern repeats; past that the surface keeps its flat average
+ * colour. */
+static int s_fill_mode = 2;
+static const char *const kFillModes[] = {"Off", "Short", "Long"};
+static int fill_limit(void) { return s_fill_mode <= 0 ? 0 : s_fill_mode == 1 ? 2 : FILL_CELLS; }
 static int s_fill_ax, s_fill_ay;             /* the grid: x, y of tiles mod 16 */
 static u8 s_fill_covered[CELLS_W * CELLS_H]; /* some tile covers (part of) the cell */
 static u8 s_fill_dist[CELLS_W * CELLS_H];    /* cells to the nearest tile on the grid, 255 none */
 static s16 s_fill_src[CELLS_W * CELLS_H];    /* that tile */
+static int s_fill_from[CELLS_W * CELLS_H];   /* and its cell */
 static s16 s_fill_tile[CELLS_W * CELLS_H];   /* the cell's filled tile once made, -1 not yet */
 static int s_fill_count;
 
@@ -991,11 +999,12 @@ static void build_fill_map(void) {
         }
         s_fill_dist[c] = 0;
         s_fill_src[c] = (s16)i;
+        s_fill_from[c] = c;
         queue[tail++] = c;
     }
     while (head < tail) {
         int c = queue[head++], d = s_fill_dist[c] + 1;
-        if (d > FILL_CELLS) continue;
+        if (d > fill_limit()) continue;
         int x = c % CELLS_W, y = c / CELLS_W;
         const int nb[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
         for (int k = 0; k < 4; ++k) {
@@ -1004,9 +1013,16 @@ static void build_fill_map(void) {
             if (s_fill_dist[o] <= d) continue;
             s_fill_dist[o] = (u8)d;
             s_fill_src[o] = s_fill_src[c];
+            s_fill_from[o] = s_fill_from[c];
             queue[tail++] = o;
         }
     }
+}
+
+/* The picture's own tile at cell (x, y), or -1 when the picture doesn't cover it. */
+static int fill_source_at(int x, int y) {
+    if (x < 0 || y < 0 || x >= CELLS_W || y >= CELLS_H) return -1;
+    return s_fill_dist[y * CELLS_W + x] == 0 ? s_fill_src[y * CELLS_W + x] : -1;
 }
 
 /* The filled tile of cell c (made on first use), or -1. */
@@ -1014,8 +1030,18 @@ static int fill_tile(int c) {
     if (s_fill_tile[c] >= 0) return s_fill_tile[c];
     int at = s_tile_count + s_fill_count;
     if (at >= MAX_TILES) return -1;
+    /* Which of the last FILL_PERIOD source cells back from the edge, along each axis. */
+    int from = s_fill_from[c], fx = from % CELLS_W, fy = from / CELLS_W;
+    int dx = c % CELLS_W - fx, dy = c / CELLS_W - fy;
+    int px = fx, py = fy;
+    if (dx) px = fx - (dx > 0 ? 1 : -1) * (FILL_PERIOD - 1 - (abs(dx) - 1) % FILL_PERIOD);
+    if (dy) py = fy - (dy > 0 ? 1 : -1) * (FILL_PERIOD - 1 - (abs(dy) - 1) % FILL_PERIOD);
+    int src = fill_source_at(px, py);
+    if (src < 0) src = fill_source_at(px, fy);
+    if (src < 0) src = fill_source_at(fx, py);
+    if (src < 0) src = s_fill_src[c];
     Tile *t = &s_tiles[at];
-    *t = s_tiles[s_fill_src[c]];
+    *t = s_tiles[src];
     t->x = (s16)(CELL_X0 + s_fill_ax + (c % CELLS_W) * 16);
     t->y = (s16)(CELL_Y0 + s_fill_ay + (c / CELLS_W) * 16);
     s_fill_count++;
@@ -1070,7 +1096,7 @@ static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float max
     for (int gy = gy0; gy <= gy1; ++gy)
         for (int gx = gx0; gx <= gx1; ++gx) {
             int c = gy * CELLS_W + gx;
-            if (s_fill_covered[c] || s_fill_dist[c] > FILL_CELLS) continue;
+            if (s_fill_covered[c] || s_fill_dist[c] > fill_limit()) continue;
             int ti = fill_tile(c);
             if (ti >= 0) cut_by_tile(base, n, wall, ti);
         }
@@ -1159,6 +1185,7 @@ static void build_pieces(void) {
     }
     key = hash_add(key, s_adj_version);
     key = hash_add(key, s_img_version);
+    key = hash_add(key, (unsigned)s_fill_mode);
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
@@ -3039,6 +3066,9 @@ static int chasecam_init(void) {
                             &s_textures, NULL);
     pe_menu_register_toggle(0, "Solid walls", "Walls on the edges where the floor ends.",
                             &s_solid_walls, NULL);
+    pe_menu_register_choice(0, "Gap fill",
+                            "Where the picture shows nothing: Off leaves the plain colour, Short "
+                            "repeats the picture's edge a little, Long repeats it far.", &s_fill_mode, kFillModes, 3);
     pe_menu_register_choice(0, "Rooms' shape",
                             "Every room without a choice of its own (Backspace): built from the "
                             "picture, or walls on the walkable floor's edges.", &s_default_shape,
