@@ -204,6 +204,8 @@ typedef struct {
     u16 clut, tpage;
     u8 code, r, g, b;
     u16 ot;        /* the tile's ordering-table entry: lower is nearer */
+    u16 cell;      /* the sprite's index in its mesh entry = its HD atlas cell */
+    uint64_t hd;   /* the entry's HD atlas key, 0 when there is none */
 } Tile;
 #define MAX_TILES 6144
 static Tile s_tiles[MAX_TILES];
@@ -245,6 +247,9 @@ typedef struct {
 } PrimG3;
 typedef struct {
     RenderNativeTag tag;
+    /* HD background cell for the polygon (see hd_select): command, key low/high, the
+     * sprite's texel origin, then PsyZ's packed-stream marker. All no-ops (0) without one. */
+    u32 hd_command, hd_key_low, hd_key_high, hd_tile, packed_marker;
     u8 r, g, b, code;
     s16 x0, y0;
     u8 u0, v0;
@@ -270,6 +275,42 @@ static PrimG3 s_tri_prims[2][MAX_TRI_PRIMS];
 static PrimFT3 s_tex_prims[2][MAX_TEX_PRIMS];
 static PrimLine s_line_prims[2][MAX_LINE_PRIMS];
 static int s_tri_used, s_tex_used, s_line_used;
+
+/* ---- HD backgrounds ----
+ * The game's room tiles carry a command that makes PsyZ draw them from the HD background
+ * pack (Render_LoadMeshEntry). Triangles cut from those tiles send the same cell with the
+ * tile's texel origin (opcode 0xFA), so PsyZ samples the matching part of the HD cell. */
+#define HD_TILE_OPCODE 0xFAu
+#define HD_PACKED_MARKER 0x005A4D50u /* PsyZ PSYZ_MERGED_PRIM_NOP: the packet holds packed 32-bit words */
+static int s_hd_registered;
+
+static int hd_tile_command(const u_long *words, int available, void *user) {
+    (void)user;
+    if (available < 4) return -1;
+    u32 tile = (u32)words[3];
+    Psyz_GpuSelectSpriteAtlasTile((uint64_t)(u32)words[1] | ((uint64_t)(u32)words[2] << 32),
+                                  (u32)words[0] & 0xFFFFFF, tile & 0xFF, (tile >> 8) & 0xFF);
+    return 4;
+}
+
+/* Render_HdHash: the key of mesh entry `index` in the room's HD pack. */
+static uint64_t hd_entry_key(uint64_t geometry_key, u32 index) {
+    const u8 *bytes = (const u8 *)&index;
+    for (int i = 0; i < 4; ++i) geometry_key = (geometry_key ^ bytes[i]) * UINT64_C(1099511628211);
+    return geometry_key;
+}
+
+static void hd_select(PrimFT3 *p, const Tile *t) {
+    p->packed_marker = HD_PACKED_MARKER;
+    if (!t || !t->hd || !s_hd_registered) {
+        p->hd_command = p->hd_key_low = p->hd_key_high = p->hd_tile = 0;
+        return;
+    }
+    p->hd_command = (HD_TILE_OPCODE << 24) | t->cell;
+    p->hd_key_low = (u32)t->hd;
+    p->hd_key_high = (u32)(t->hd >> 32);
+    p->hd_tile = t->u | ((u32)t->v << 8);
+}
 
 /* ---- chase camera basis for this frame ---- */
 static float s_rx[3], s_ry[3], s_rz[3], s_cam[3], s_h;
@@ -593,6 +634,9 @@ static void gather_tiles(void) {
     u16 out_y = (u16)(state->disp_src_y - ((u16)g_GeomScroll.state.position.y - 112));
     GeomEntry *entries = (GeomEntry *)((u8 *)state + state->entry_offset);
     unsigned h = 2166136261u;
+    PeBackgroundInfo bg;
+    Render_GetBackgroundInfo(&bg);
+    uint64_t geometry_key = bg.hd_enabled && bg.hd_pack_path && *bg.hd_pack_path ? bg.geometry_key : 0;
     for (unsigned e = 0; e < state->entry_count06; ++e) {
         GeomEntry *entry = &entries[e];
         if (!(entry->head.b.flags & 2) || entry->group != g_GeomScroll.state.position.groupSelect)
@@ -605,6 +649,7 @@ static void gather_tiles(void) {
         int raw_x = (s16)(u16)(entry->scr_x + out_x);
         int raw_y = (s16)(u16)(entry->scr_y + out_y);
         int base_ot = state->field26 + (int)((*(const u32 *)entry >> 8) & 0xFFF);
+        uint64_t hd = geometry_key ? hd_entry_key(geometry_key, e) : 0;
         for (unsigned i = 0; i < entry->prim_count && s_tile_count < MAX_TILES; ++i) {
             u32 word = pos[i];
             int x = (s16)(raw_x + (int)(word >> 22));
@@ -626,6 +671,8 @@ static void gather_tiles(void) {
             t->g = sprites[i].g;
             t->b = sprites[i].b;
             t->ot = (u16)ot;
+            t->cell = (u16)i;
+            t->hd = hd;
             h = hash_add(h, (unsigned)x | ((unsigned)y << 16));
             h = hash_add(h, t->u | (t->v << 8) | ((unsigned)t->clut << 16));
             h = hash_add(h, t->tpage | ((unsigned)t->ot << 16));
@@ -1201,7 +1248,8 @@ static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int d
     if (!screen_ok(minx, maxx, miny, maxy)) return;
     s_tex_used++;
     float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
-    p->tag.length = 7;
+    p->tag.length = 12;
+    hd_select(p, t);
     p->code = (u8)(0x24 | (t->code & 3));
     p->r = (u8)(t->r * k);
     p->g = (u8)(t->g * k);
@@ -1632,7 +1680,8 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     if (!screen_ok(minx, maxx, miny, maxy)) return;
     s_tex_used++;
     float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
-    p->tag.length = 7;
+    p->tag.length = 12;
+    hd_select(p, NULL);
     p->code = 0x24;
     p->r = p->g = p->b = (u8)(128 * k);
     p->u0 = (u8)lrintf(a->u); p->v0 = (u8)lrintf(a->w);
@@ -2554,6 +2603,8 @@ static int chasecam_init(void) {
     pe_hook_add(PE_HOOK_FIELD_CAMERA, on_camera, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     pe_hook_add(PE_HOOK_FIELD_BACKGROUND, on_background, NULL, PE_PRIORITY_NORMAL, MOD_ID);
     SDL_AddEventWatch(on_event, NULL);
+    s_hd_registered = Psyz_GpuRegisterCommandHandlerIfVacant(HD_TILE_OPCODE, hd_tile_command, NULL) == 0;
+    if (!s_hd_registered) pe_mod_log(MOD_ID, "GPU command %02X is taken: no HD backgrounds", HD_TILE_OPCODE);
     fits_load();
 
     pe_menu_begin(PAGE);
@@ -2621,6 +2672,8 @@ static int chasecam_init(void) {
 static void chasecam_shutdown(void) {
     if (!s_fit_saved && s_fit.room >= 0) fits_save();
     SDL_RemoveEventWatch(on_event, NULL);
+    if (s_hd_registered) Psyz_GpuRegisterCommandHandler(HD_TILE_OPCODE, NULL, NULL);
+    s_hd_registered = 0;
     release_angles();
 }
 
