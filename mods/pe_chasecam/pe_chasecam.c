@@ -158,7 +158,9 @@ static float s_cy = 112.0f; /* chase view centre: lower while the editor splits 
  * transparent; make them with tools/make_texture.py). An image put on wall edge i spreads over
  * walls i .. i+span-1 of its loop (by length) and floor to wall top. It is uploaded into video
  * memory the room leaves blank (all zero, never drawn into), in 128-texel-wide 8-bit columns,
- * halved until it fits, and checked every frame; if the game writes there it moves. ---- */
+ * halved until it fits, and checked every frame; if the game writes there it moves. An image on
+ * the floor (rooms.txt wall -1) covers the collision floor's bounds once at size 1, repeating as
+ * the floor layer shrinks it. ---- */
 /* The room data built into the game (embed_data.cmake; see data_dir). */
 typedef struct PeChasecamFile { const char *path; const unsigned char *data; unsigned size; } PeChasecamFile;
 extern const PeChasecamFile pe_chasecam_files[];
@@ -182,6 +184,7 @@ typedef struct {
 static CustomImage s_images[MAX_IMAGES];
 static int s_image_count, s_images_room = -999, s_images_group = -1;
 static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 none) on a first wall */
+static int s_floor_img = -1;             /* image index (-1 none) on the floor */
 static int s_wall_cover[MAX_WALLS];      /* the first wall of the image covering this one, or -1 */
 static float s_wall_cum[MAX_WALLS];      /* along the covering image: length before this wall */
 static float s_cover_len[MAX_WALLS];     /* the covering image's total length (on its first wall) */
@@ -1661,11 +1664,14 @@ static void images_enter_room(int room, int group) {
     }
     /* This room's assignments. */
     for (int i = 0; i < MAX_WALLS; ++i) { s_wall_img[i] = -1; s_wall_span[i] = 1; }
+    s_floor_img = -1;
     for (int i = 0; i < s_wall_image_count; ++i) {
         const WallImage *w = &s_wall_images[i];
-        if (w->room != room || w->group != group || w->wall < 0 || w->wall >= MAX_WALLS) continue;
+        if (w->room != room || w->group != group || w->wall < -1 || w->wall >= MAX_WALLS) continue;
         for (int j = 0; j < s_image_count; ++j)
-            if (!strcmp(s_images[j].name, w->name)) {
+            if (!strcmp(s_images[j].name, w->name) && w->wall == -1) {
+                s_floor_img = j;
+            } else if (!strcmp(s_images[j].name, w->name)) {
                 s_wall_img[w->wall] = j;
                 s_wall_span[w->wall] = w->span < 1 ? 1 : w->span;
             }
@@ -1923,18 +1929,10 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     link_prim(&p->tag, depth);
 }
 
-/* One wall surface with its image: cut to the image and to its 128-texel columns. */
-static void draw_wall_image(const Surface *s) {
-    int first = s_wall_cover[s->src];
-    if (first < 0 || s_wall_img[first] < 0 || s_wall_img[first] >= s_image_count) return;
-    CustomImage *im = &s_images[s_wall_img[first]];
-    if (!image_load(im) || !image_check(im)) return;
-    IV a[12], b[12];
-    for (int k = 0; k < 3; ++k) {
-        a[k].p = s->v[k];
-        wall_image_uv(s->src, &s->v[k], im, &a[k].u, &a[k].v);
-    }
-    int n = 3;
+/* A polygon in image texels (u may run past the image: it is cut to it), cut to the image's rows
+ * and to its 128-texel columns; it sorts just over the floor's or the walls' own textures. */
+static void draw_image_poly(CustomImage *im, IV *a, int n, int on_floor) {
+    IV b[12];
     n = clip_iv(a, n, b, 1, 0, 1); if (n < 3) return;
     n = clip_iv(b, n, a, 1, (float)im->h, 0); if (n < 3) return;
     for (int c = 0; c < im->chunks; ++c) {
@@ -1959,12 +1957,67 @@ static void draw_wall_image(const Surface *s) {
             if (q < 3) continue;
             float maxz = 0;
             for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
-            int depth = clamp_depth(wall_depth(maxz) - 20);
+            int depth = clamp_depth((on_floor ? floor_depth(maxz) : wall_depth(maxz)) - 20);
             TriJob job = {TRI_IMAGE, NULL, tpage, clut, 0, 0, 0, depth};
             emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
             if (q == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
         }
     }
+}
+
+/* One wall surface with its image. */
+static void draw_wall_image(const Surface *s) {
+    int first = s_wall_cover[s->src];
+    if (first < 0 || s_wall_img[first] < 0 || s_wall_img[first] >= s_image_count) return;
+    CustomImage *im = &s_images[s_wall_img[first]];
+    if (!image_load(im) || !image_check(im)) return;
+    IV a[12];
+    for (int k = 0; k < 3; ++k) {
+        a[k].p = s->v[k];
+        wall_image_uv(s->src, &s->v[k], im, &a[k].u, &a[k].v);
+    }
+    draw_image_poly(im, a, 3, 0);
+}
+
+/* Floor image place of a point, in images (0..1 = one copy): over the collision floor's bounds,
+ * through the floor layer's move (in % of the image), size and turn. */
+static void floor_image_st(const V3 *p, float *s, float *t) {
+    const Adjust *a = &s_floor_adj;
+    float bw = s_coll[1] - s_coll[0], bd = s_coll[3] - s_coll[2];
+    float fx = (p->x - s_coll[0]) / (bw > 1 ? bw : 1) - 0.5f;
+    float fz = (p->z - s_coll[2]) / (bd > 1 ? bd : 1) - 0.5f;
+    float c = cosf(a->rot), sn = sinf(a->rot);
+    float rx = fx * c + fz * sn, rz = -fx * sn + fz * c;
+    *s = 0.5f + (rx - a->ox / 100.0f) / (fabsf(a->sx) > 1e-3f ? a->sx : 1e-3f);
+    *t = 0.5f + (rz - a->oy / 100.0f) / (fabsf(a->sy) > 1e-3f ? a->sy : 1e-3f);
+}
+
+/* One floor triangle with the floor image, cut into the image's repeats. */
+static void draw_floor_image(const Surface *s) {
+    if (s_floor_img < 0 || s_floor_img >= s_image_count) return;
+    CustomImage *im = &s_images[s_floor_img];
+    if (!image_load(im) || !image_check(im)) return;
+    float st[3][2], s0 = 1e9f, s1 = -1e9f, t0 = 1e9f, t1 = -1e9f;
+    for (int k = 0; k < 3; ++k) {
+        floor_image_st(&s->v[k], &st[k][0], &st[k][1]);
+        s0 = fminf(s0, st[k][0]); s1 = fmaxf(s1, st[k][0]);
+        t0 = fminf(t0, st[k][1]); t1 = fmaxf(t1, st[k][1]);
+    }
+    int i0 = (int)floorf(s0), i1 = (int)floorf(s1), j0 = (int)floorf(t0), j1 = (int)floorf(t1);
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) return; /* shrunk too far */
+    for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i) {
+            IV a[12], b[12];
+            for (int k = 0; k < 3; ++k) {
+                a[k].p = s->v[k];
+                a[k].u = (st[k][0] - (float)i) * (float)im->w;
+                a[k].v = (st[k][1] - (float)j) * (float)im->h;
+            }
+            /* This repeat's columns; draw_image_poly cuts the rows. */
+            int n = clip_iv(a, 3, b, 0, 0, 1); if (n < 3) continue;
+            n = clip_iv(b, n, a, 0, (float)im->w, 0); if (n < 3) continue;
+            draw_image_poly(im, a, n, 1);
+        }
 }
 
 /* ---- editor panel: the room's own picture, half size, over the top half of the screen ---- */
@@ -2131,6 +2184,8 @@ static void draw_room(void) {
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0)
                 draw_wall_image(&s_surf[i]);
+    if (room_shape() == 0 && s_floor_img >= 0)
+        for (int i = 0; i < s_floor_surf_count; ++i) draw_floor_image(&s_surf[i]);
     if (s_edit) {
         draw_panel();
         if (s_sel >= 0 && s_sel < s_wall_count) {
@@ -2346,6 +2401,14 @@ static void fits_save(void) {
                 w->span = s_wall_span[i];
                 snprintf(w->name, sizeof w->name, "%s", s_images[s_wall_img[i]].name);
             }
+        if (s_floor_img >= 0 && s_floor_img < s_image_count && s_wall_image_count < MAX_WALL_IMAGES) {
+            WallImage *w = &s_wall_images[s_wall_image_count++];
+            w->room = s_fit.room;
+            w->group = s_fit.group;
+            w->wall = -1;
+            w->span = 1;
+            snprintf(w->name, sizeof w->name, "%s", s_images[s_floor_img].name);
+        }
     }
     fit_path(path, sizeof path);
     FILE *f = path[0] ? fopen(path, "w") : NULL;
@@ -2366,7 +2429,7 @@ static void fits_save(void) {
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d\n", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
     }
-    fprintf(f, "# W room group wall span image (a file in textures/room_NNN or textures/common)\n");
+    fprintf(f, "# W room group wall(-1 floor) span image (a file in textures/room_NNN or textures/common)\n");
     for (int i = 0; i < s_wall_image_count; ++i) {
         const WallImage *w = &s_wall_images[i];
         fprintf(f, "W %d %d %d %d %s\n", w->room, w->group, w->wall, w->span, w->name);
@@ -2446,7 +2509,7 @@ static void sel_toast(void) {
     pe_toast(msg);
 }
 
-/* Walls by distance from Aya: numpad . steps to the next one out (Shift: back in). */
+/* The floor, then walls by distance from Aya: numpad . steps to the next one out (Shift: back in). */
 static float s_wall_dist[MAX_WALLS];
 static int cmp_wall_dist(const void *a, const void *b) {
     float da = s_wall_dist[*(const int *)a], db = s_wall_dist[*(const int *)b];
@@ -2454,7 +2517,7 @@ static int cmp_wall_dist(const void *a, const void *b) {
 }
 
 static void select_next_wall(int back) {
-    static int order[MAX_WALLS];
+    static int order[MAX_WALLS + 1];
     int n = 0;
     const FieldActor *aya = g_PlayerEntity;
     float x = (float)(aya->pos_x >> 16), z = (float)(aya->pos_z >> 16);
@@ -2467,8 +2530,10 @@ static void select_next_wall(int back) {
         s_wall_dist[i] = dx * dx + dz * dz;
         order[n++] = i;
     }
-    if (!n) return;
     qsort(order, (size_t)n, sizeof order[0], cmp_wall_dist);
+    memmove(order + 1, order, sizeof order[0] * (size_t)n);
+    order[0] = -1;
+    n++;
     int at = -1;
     for (int i = 0; i < n; ++i)
         if (order[i] == s_sel) at = i;
@@ -2476,7 +2541,7 @@ static void select_next_wall(int back) {
     s_sel = order[(at + (back ? n - 1 : 1)) % n];
 }
 
-/* F9 editor, numpad. Selection: . next wall out from Aya (Shift: back), / the floor, * the whole
+/* F9 editor, numpad. Selection: . the floor, then the next wall out from Aya (Shift: back), / the floor, * the whole
  * room. The selection: 4/6/8/2 move, +/- size. Wall or floor: 7/9 turn, 1/3 width, Ctrl+1/3
  * height. Whole room: 7/9 width, 1/3 height. Always: PageUp/PageDown wall height,
  * Insert/Delete obstacle height, 5 reset the selection, 0 save; Shift is faster. */
@@ -2522,16 +2587,27 @@ static void edit_keys(const bool *keys) {
         back_down = keys[SDL_SCANCODE_BACKSPACE];
     }
     {
-        /* F5: next image on the selected wall (none, then each file); Shift+F5 / Ctrl+F5 spread
-         * it over one more / one fewer wall along its loop. */
+        /* F5: next image on the selected wall or the floor (none, then each file); Shift+F5 /
+         * Ctrl+F5 spread a wall's over one more / one fewer wall along its loop. */
         static int f5_down;
         if (keys[SDL_SCANCODE_F5] && !f5_down) {
             if (room_shape() != 0) {
                 pe_toast("Images go on collision walls: Backspace switches the room shape");
-            } else if (s_sel < 0) {
-                pe_toast("Select a wall first (numpad .)");
+            } else if (s_sel == -2) {
+                pe_toast("Select the floor or a wall first (numpad .)");
             } else if (!s_image_count) {
                 pe_toast("No images: put 256-colour BMPs in the mod's data/textures/common");
+            } else if (s_sel == -1) {
+                if (!shift && !ctrl) {
+                    s_floor_img = s_floor_img + 1 >= s_image_count ? -1 : s_floor_img + 1;
+                    s_img_version++;
+                    s_fit_saved = 0;
+                }
+                char msg[200];
+                if (s_floor_img < 0) snprintf(msg, sizeof msg, "Floor: no image");
+                else snprintf(msg, sizeof msg, "Floor: %s (- / + repeats it, 7/9 turns)",
+                              s_images[s_floor_img].name);
+                pe_toast(msg);
             } else {
                 if (shift) s_wall_span[s_sel]++;
                 else if (ctrl) { if (s_wall_span[s_sel] > 1) s_wall_span[s_sel]--; }
@@ -3212,6 +3288,8 @@ static void dump_room(void) {
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (s_wall_img[i] >= 0)
             fprintf(f, "wall %d image %s span %d\n", i, s_images[s_wall_img[i]].name, s_wall_span[i]);
+    if (s_floor_img >= 0 && s_floor_img < s_image_count)
+        fprintf(f, "floor image %s\n", s_images[s_floor_img].name);
     fprintf(f, "room shape: %s  box x %.0f..%.0f z %.0f..%.0f floor %.0f\n",
             room_shape() ? (s_fit.shape < 0 ? "picture box (F1 option)" : "picture box") :
             (s_fit.shape < 0 ? "collision walls (F1 option)" : "collision walls"), s_box[0], s_box[1], s_box[2], s_box[3],
