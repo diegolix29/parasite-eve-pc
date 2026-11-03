@@ -248,6 +248,7 @@ typedef struct {
     u8 uv[3][2];
     u16 tile;
     u8 wall;
+    u16 surf; /* the surface it was cut from: its pieces share one depth (see draw_piece) */
 } Piece;
 #define MAX_PIECES 40000
 static Piece s_pieces[MAX_PIECES];
@@ -859,6 +860,7 @@ static void add_piece(const CV *a, const CV *b, const CV *c, const Tile *t, int 
     }
     p->tile = (u16)tile;
     p->wall = wall;
+    p->surf = (u16)s_projecting;
 }
 
 static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float maxx, float miny,
@@ -1172,6 +1174,10 @@ static void wall_pivots(void) {
     }
 }
 
+static int piece_cmp_tile(const void *a, const void *b) {
+    return (int)((const Piece *)a)->tile - (int)((const Piece *)b)->tile;
+}
+
 static void build_pieces(void) {
     unsigned key = hash_add(s_tile_hash, (unsigned)s_surf_count);
     for (int i = 0; i < 8; ++i) key = hash_add(key, s_pic_scratch[i]);
@@ -1197,7 +1203,11 @@ static void build_pieces(void) {
     s_piece_vram = Psyz_GpuGetVramCopy(NULL);
     for (int i = 0; i < s_surf_count; ++i) {
         s_projecting = i;
+        int first = s_piece_count;
         project_surface(&s_surf[i]);
+        /* In tile order: within one ordering-table entry the first linked draws last (on top),
+         * as the game's earlier background entries cover its later ones at the same depth. */
+        qsort(&s_pieces[first], (size_t)(s_piece_count - first), sizeof(Piece), piece_cmp_tile);
     }
 }
 
@@ -1553,6 +1563,19 @@ static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int d
     link_prim(&p->tag, depth);
 }
 
+static float s_surf_maxz[MAX_SURFACES]; /* this frame's farthest view z per surface, 0 unseen */
+
+static void surf_depths(void) {
+    for (int i = 0; i < s_surf_count; ++i) {
+        float maxz = 0, v[3];
+        for (int k = 0; k < 3; ++k) {
+            to_view(&s_surf[i].v[k], v);
+            if (v[2] > maxz) maxz = v[2];
+        }
+        s_surf_maxz[i] = maxz;
+    }
+}
+
 static void draw_piece(const Piece *pc) {
     TV in[3], poly[4];
     for (int k = 0; k < 3; ++k) {
@@ -1564,8 +1587,11 @@ static void draw_piece(const Piece *pc) {
     if (in[0].v[2] > FAR_Z && in[1].v[2] > FAR_Z && in[2].v[2] > FAR_Z) return;
     int n = near_clip(in, 3, poly);
     if (n < 3) return;
-    float maxz = 0;
-    for (int k = 0; k < n; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
+    /* The surface's depth, not the piece's: pieces of two background layers over the same spot
+     * are cut on different tile grids, so their own depths interleave and the layers fight. */
+    float maxz = pc->surf < s_surf_count ? s_surf_maxz[pc->surf] : 0;
+    if (maxz <= 0)
+        for (int k = 0; k < n; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
     const Tile *t = &s_tiles[pc->tile];
     /* Nearer background layers (masks) draw over farther ones, all over the flat colour. */
     int layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 8);
@@ -2260,6 +2286,7 @@ static void draw_room(void) {
     if (s_solid_walls)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall != 2 || ceil_ok) draw_surface(&s_surf[i]);
+    if (textured) surf_depths();
     if (textured)
         for (int i = 0; i < s_piece_count; ++i)
             if ((!s_pieces[i].wall || s_solid_walls) && (s_pieces[i].wall != 2 || ceil_ok))
@@ -3215,8 +3242,11 @@ static u16 s_vram[1024 * 512];
 static u16 tile_texel(const Tile *t, int i, int j) { return vram_tile_texel(s_vram, t, i, j); }
 
 static int tile_cmp_far_first(const void *a, const void *b) {
-    const Tile *ta = &s_tiles[*(const u16 *)a], *tb = &s_tiles[*(const u16 *)b];
-    return (int)tb->ot - (int)ta->ot;
+    int ia = *(const u16 *)a, ib = *(const u16 *)b;
+    const Tile *ta = &s_tiles[ia], *tb = &s_tiles[ib];
+    /* Same entry depth: the later tile is drawn first (the game's earlier entries cover it). */
+    if (ta->ot != tb->ot) return (int)tb->ot - (int)ta->ot;
+    return ib - ia;
 }
 
 static int s_dox, s_doy; /* dump canvas origin in screen space */
