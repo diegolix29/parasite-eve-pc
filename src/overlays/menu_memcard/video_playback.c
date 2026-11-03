@@ -4,6 +4,7 @@
 #include "pe1/psyq_press.h"
 
 #include "menu_memcard_video.h"
+#include "pe_hooks.h"
 
 #define MENUCARD_SET_VIDEO_DISPLAY_NAME MenuCard_SetVideoDisplay
 #define MENUCARD_VIDEO_DISPLAY_MODE g_MenuCardScreenVideoDecodeMode
@@ -152,10 +153,11 @@ s32 MenuCard_PlayVideo(s32 index) {
                 s32 left = *remainingPtr;
                 if (left<=0) break;
                 Field_HandleStateTransition();
+                PE_HOOK(PE_HOOK_TITLE_FRAME, &g_MemcardTitleLoaded);
                 if (!(s8)MenuCard_StepVideo()) {
                     MenuCard_ResetDisplayState();
                 }
-                else if (g_FieldPadBits & 0x20000004) {
+                else if ((g_FieldPadBits & 0x20000004) || g_MemcardTitleLoaded) {
                     s32 remaining;
                     MenuCard_StopVideo();
                     remaining=*remainingPtr;

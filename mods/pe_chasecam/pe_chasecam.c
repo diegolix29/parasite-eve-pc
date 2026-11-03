@@ -216,7 +216,7 @@ typedef struct {
     u16 cell;      /* the sprite's index in its mesh entry = its HD atlas cell */
     uint64_t hd;   /* the entry's HD atlas key, 0 when there is none */
 } Tile;
-#define MAX_TILES 6144
+#define MAX_TILES 16384 /* the frame's tiles, then the filled cells' (see build_fill_map) */
 static Tile s_tiles[MAX_TILES];
 static int s_tile_count;
 static unsigned s_tile_hash, s_tile_frame;
@@ -898,6 +898,98 @@ static void project_surface(const Surface *s) {
     cut_into_tiles(base, n, s->wall, minx, maxx, miny, maxy);
 }
 
+/* ---- filling what the picture leaves out ----
+ * Where a surface runs past the picture's edge or over a hole in it, the 16x16 cells there get
+ * the nearest tile's texture again (on the grid most tiles sit on), so the last pattern repeats
+ * up to FILL_CELLS cells out instead of leaving the flat colour. Filled cells are extra tiles
+ * after the frame's own in s_tiles, rebuilt with the pieces. */
+#define FILL_CELLS 40
+static int s_fill_ax, s_fill_ay;             /* the grid: x, y of tiles mod 16 */
+static u8 s_fill_covered[CELLS_W * CELLS_H]; /* some tile covers (part of) the cell */
+static u8 s_fill_dist[CELLS_W * CELLS_H];    /* cells to the nearest tile on the grid, 255 none */
+static s16 s_fill_src[CELLS_W * CELLS_H];    /* that tile */
+static s16 s_fill_tile[CELLS_W * CELLS_H];   /* the cell's filled tile once made, -1 not yet */
+static int s_fill_count;
+
+static void build_fill_map(void) {
+    static int votes[16][16];
+    static int queue[CELLS_W * CELLS_H];
+    memset(votes, 0, sizeof votes);
+    for (int i = 0; i < s_tile_count; ++i) votes[s_tiles[i].y & 15][s_tiles[i].x & 15]++;
+    int best = -1;
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x)
+            if (votes[y][x] > best) { best = votes[y][x]; s_fill_ax = x; s_fill_ay = y; }
+    memset(s_fill_covered, 0, sizeof s_fill_covered);
+    memset(s_fill_dist, 255, sizeof s_fill_dist);
+    memset(s_fill_tile, 0xFF, sizeof s_fill_tile);
+    s_fill_count = 0;
+    int head = 0, tail = 0;
+    for (int i = 0; i < s_tile_count; ++i) {
+        const Tile *t = &s_tiles[i];
+        int gx0 = (int)floorf((float)(t->x - CELL_X0 - s_fill_ax) / 16), gx1 = gx0 + ((t->x & 15) != s_fill_ax);
+        int gy0 = (int)floorf((float)(t->y - CELL_Y0 - s_fill_ay) / 16), gy1 = gy0 + ((t->y & 15) != s_fill_ay);
+        for (int gy = gy0; gy <= gy1; ++gy)
+            for (int gx = gx0; gx <= gx1; ++gx)
+                if (gx >= 0 && gy >= 0 && gx < CELLS_W && gy < CELLS_H) s_fill_covered[gy * CELLS_W + gx] = 1;
+        if (gx1 != gx0 || gy1 != gy0 || gx0 < 0 || gy0 < 0 || gx0 >= CELLS_W || gy0 >= CELLS_H) continue;
+        /* On the grid: a source. The farthest layer is the background, the nearer ones masks. */
+        int c = gy0 * CELLS_W + gx0;
+        if (s_fill_dist[c] == 0) {
+            if (t->ot > s_tiles[s_fill_src[c]].ot) s_fill_src[c] = (s16)i;
+            continue;
+        }
+        s_fill_dist[c] = 0;
+        s_fill_src[c] = (s16)i;
+        queue[tail++] = c;
+    }
+    while (head < tail) {
+        int c = queue[head++], d = s_fill_dist[c] + 1;
+        if (d > FILL_CELLS) continue;
+        int x = c % CELLS_W, y = c / CELLS_W;
+        const int nb[4][2] = {{x - 1, y}, {x + 1, y}, {x, y - 1}, {x, y + 1}};
+        for (int k = 0; k < 4; ++k) {
+            if (nb[k][0] < 0 || nb[k][1] < 0 || nb[k][0] >= CELLS_W || nb[k][1] >= CELLS_H) continue;
+            int o = nb[k][1] * CELLS_W + nb[k][0];
+            if (s_fill_dist[o] <= d) continue;
+            s_fill_dist[o] = (u8)d;
+            s_fill_src[o] = s_fill_src[c];
+            queue[tail++] = o;
+        }
+    }
+}
+
+/* The filled tile of cell c (made on first use), or -1. */
+static int fill_tile(int c) {
+    if (s_fill_tile[c] >= 0) return s_fill_tile[c];
+    int at = s_tile_count + s_fill_count;
+    if (at >= MAX_TILES) return -1;
+    Tile *t = &s_tiles[at];
+    *t = s_tiles[s_fill_src[c]];
+    t->x = (s16)(CELL_X0 + s_fill_ax + (c % CELLS_W) * 16);
+    t->y = (s16)(CELL_Y0 + s_fill_ay + (c / CELLS_W) * 16);
+    s_fill_count++;
+    s_fill_tile[c] = (s16)at;
+    return at;
+}
+
+/* The part of a surface inside one tile, as pieces. */
+static void cut_by_tile(const CV *base, int n, u8 wall, int ti) {
+    const Tile *t = &s_tiles[ti];
+    CV a[12], b[12];
+    int m = n;
+    memcpy(a, base, sizeof(CV) * (size_t)n);
+    m = clip_edge(a, m, b, 0, (float)t->x, 1);
+    if (m < 3) return;
+    m = clip_edge(b, m, a, 0, (float)t->x + 16, 0);
+    if (m < 3) return;
+    m = clip_edge(a, m, b, 1, (float)t->y, 1);
+    if (m < 3) return;
+    m = clip_edge(b, m, a, 1, (float)t->y + 16, 0);
+    if (m < 3) return;
+    for (int k = 1; k + 1 < m; ++k) add_piece(&a[0], &a[k], &a[k + 1], t, ti, wall);
+}
+
 static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float maxx, float miny,
                            float maxy) {
     int cx0 = (int)floorf((minx - CELL_X0) / 16), cx1 = (int)floorf((maxx - CELL_X0) / 16);
@@ -915,20 +1007,22 @@ static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float max
                 int ti = s_cell_items[it];
                 if (s_tile_stamp[ti] == s_stamp) continue;
                 s_tile_stamp[ti] = s_stamp;
-                const Tile *t = &s_tiles[ti];
-                CV a[12], b[12];
-                int m = n;
-                memcpy(a, base, sizeof(CV) * (size_t)n);
-                m = clip_edge(a, m, b, 0, (float)t->x, 1);
-                if (m < 3) continue;
-                m = clip_edge(b, m, a, 0, (float)t->x + 16, 0);
-                if (m < 3) continue;
-                m = clip_edge(a, m, b, 1, (float)t->y, 1);
-                if (m < 3) continue;
-                m = clip_edge(b, m, a, 1, (float)t->y + 16, 0);
-                if (m < 3) continue;
-                for (int k = 1; k + 1 < m; ++k) add_piece(&a[0], &a[k], &a[k + 1], t, ti, wall);
+                cut_by_tile(base, n, wall, ti);
             }
+        }
+    /* And the cells no tile covers, from the nearest one. */
+    int gx0 = (int)floorf((minx - CELL_X0 - s_fill_ax) / 16), gx1 = (int)floorf((maxx - CELL_X0 - s_fill_ax) / 16);
+    int gy0 = (int)floorf((miny - CELL_Y0 - s_fill_ay) / 16), gy1 = (int)floorf((maxy - CELL_Y0 - s_fill_ay) / 16);
+    if (gx0 < 0) gx0 = 0;
+    if (gy0 < 0) gy0 = 0;
+    if (gx1 >= CELLS_W) gx1 = CELLS_W - 1;
+    if (gy1 >= CELLS_H) gy1 = CELLS_H - 1;
+    for (int gy = gy0; gy <= gy1; ++gy)
+        for (int gx = gx0; gx <= gx1; ++gx) {
+            int c = gy * CELLS_W + gx;
+            if (s_fill_covered[c] || s_fill_dist[c] > FILL_CELLS) continue;
+            int ti = fill_tile(c);
+            if (ti >= 0) cut_by_tile(base, n, wall, ti);
         }
 }
 
@@ -1019,6 +1113,7 @@ static void build_pieces(void) {
     s_piece_key = key;
     s_piece_count = 0;
     bin_tiles();
+    build_fill_map();
     wall_pivots();
     memset(s_surf_pieces, 0, sizeof s_surf_pieces);
     memset(s_surf_rgb, 0, sizeof s_surf_rgb);
@@ -1277,6 +1372,50 @@ static int near_clip(const TV *in, int n, TV *out) {
     return m;
 }
 
+/* What a triangle needs: 0 draw it, 1 cut it (the GPU drops one over 1023 x 511 on screen, and
+ * project() refuses points far off it), -1 nothing of it is on screen. */
+static int tri_screen(const TV *a, const TV *b, const TV *c) {
+    const TV *v[3] = {a, b, c};
+    float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    for (int k = 0; k < 3; ++k) {
+        float sx = 160.0f + s_h * v[k]->v[0] / v[k]->v[2], sy = s_cy + s_h * v[k]->v[1] / v[k]->v[2];
+        minx = fminf(minx, sx); maxx = fmaxf(maxx, sx);
+        miny = fminf(miny, sy); maxy = fmaxf(maxy, sy);
+    }
+    if (maxx < 0 || minx > 320 || maxy < (s_edit ? 112 : 0) || miny > 224) return -1;
+    if (minx < -990 || maxx > 1310 || miny < -990 || maxy > 1214) return 1;
+    return maxx - minx > 1000 || maxy - miny > 500;
+}
+
+static TV tv_mid(const TV *a, const TV *b) {
+    TV r = {{(a->v[0] + b->v[0]) * 0.5f, (a->v[1] + b->v[1]) * 0.5f, (a->v[2] + b->v[2]) * 0.5f},
+            (a->u + b->u) * 0.5f, (a->w + b->w) * 0.5f};
+    return r;
+}
+
+/* One triangle to draw: flat colour, a background tile, or a custom wall image. */
+typedef struct { int kind; const Tile *t; u16 tpage, clut; int r, g, b, depth; } TriJob;
+enum { TRI_FLAT, TRI_TILE, TRI_IMAGE };
+static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int depth);
+static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth);
+
+/* Draws a triangle, cut in four (a few times over) while it is too big to draw whole. */
+static void emit_split(const TV *a, const TV *b, const TV *c, const TriJob *job, int level) {
+    int need = tri_screen(a, b, c);
+    if (need < 0) return;
+    if (need && level < 6) {
+        TV ab = tv_mid(a, b), bc = tv_mid(b, c), ca = tv_mid(c, a);
+        emit_split(a, &ab, &ca, job, level + 1);
+        emit_split(&ab, b, &bc, job, level + 1);
+        emit_split(&ca, &bc, c, job, level + 1);
+        emit_split(&ab, &bc, &ca, job, level + 1);
+        return;
+    }
+    if (job->kind == TRI_FLAT) emit_tri(a->v, b->v, c->v, job->r, job->g, job->b, job->depth);
+    else if (job->kind == TRI_TILE) emit_tex(a, b, c, job->t, job->depth);
+    else emit_img(a, b, c, job->tpage, job->clut, job->depth);
+}
+
 /* A surface in flat colour: the floor where the room camera shows nothing, and walls. */
 static void draw_surface(const Surface *s) {
     TV in[3], poly[4];
@@ -1303,8 +1442,9 @@ static void draw_surface(const Surface *s) {
         g = (int)clampf(avg[1] / avg[3], 0, 255);
         b = (int)clampf(avg[2] / avg[3], 0, 255);
     }
-    if (n >= 3) emit_tri(poly[0].v, poly[1].v, poly[2].v, r, g, b, depth);
-    if (n == 4) emit_tri(poly[0].v, poly[2].v, poly[3].v, r, g, b, depth);
+    TriJob job = {TRI_FLAT, NULL, 0, 0, r, g, b, depth};
+    if (n >= 3) emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
+    if (n == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
 }
 
 static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int depth) {
@@ -1353,8 +1493,9 @@ static void draw_piece(const Piece *pc) {
     /* Nearer background layers (masks) draw over farther ones, all over the flat colour. */
     int layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 8);
     int depth = clamp_depth((pc->wall ? wall_depth(maxz) : floor_depth(maxz)) - layer);
-    emit_tex(&poly[0], &poly[1], &poly[2], t, depth);
-    if (n == 4) emit_tex(&poly[0], &poly[2], &poly[3], t, depth);
+    TriJob job = {TRI_TILE, t, 0, 0, 0, 0, 0, depth};
+    emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
+    if (n == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
 }
 
 static int s_line_depth; /* > 0: lines go to this ordering-table entry (drawn on top) */
@@ -1819,8 +1960,9 @@ static void draw_wall_image(const Surface *s) {
             float maxz = 0;
             for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
             int depth = clamp_depth(wall_depth(maxz) - 20);
-            emit_img(&poly[0], &poly[1], &poly[2], tpage, clut, depth);
-            if (q == 4) emit_img(&poly[0], &poly[2], &poly[3], tpage, clut, depth);
+            TriJob job = {TRI_IMAGE, NULL, tpage, clut, 0, 0, 0, depth};
+            emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
+            if (q == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
         }
     }
 }

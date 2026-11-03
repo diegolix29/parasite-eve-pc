@@ -83,7 +83,10 @@ A quick save is the game's own 8 KB card file (Save_BuildCardFile, with every mo
 in the free field and kept beside the preferences as quicksave_<slot>.mcd. Loading commits it the
 way Save_LoadCardFileIntoRuntime does, without the card menu's dialogs, then runs the field
 script's room transfer to the saved room: the room starts again as after a loaded save. It holds
-what a save holds, not Aya's place in the room or a fight in progress.
+what a save holds, not Aya's place in the room or a fight in progress. A load also works on the
+title, its logos and its intro movie (TITLE_FRAME hook), which end as Continue does. A save during
+a story movie or a scripted event is the last moment before it (a copy taken when the room starts
+and about every second of free walking), since the event's half-made changes wouldn't reload.
 
 ## Chase camera (pe_chasecam)
 

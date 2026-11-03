@@ -76,6 +76,8 @@ s32 MenuCard_StepVideo(void);
 extern void SetDispMask(s32), ResetGraph(s32), Field_HandleStateTransition(void), Draw_RenderFrame(void);
 
 s32 MenuCard_PlayVideo(s32 index);
+/* Set by a mod that loaded a save on the title (PE_HOOK_TITLE_FRAME): its logos and movie end. */
+extern s32 g_MemcardTitleLoaded;
 
 void MenuCard_SetVideoDisplay(s8 index, s8 wide);
 void MenuCardFirst_SetVideoDisplay(s8 index, s8 wide);

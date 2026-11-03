@@ -13,7 +13,7 @@ MemcardScreenBuffer *g_MemcardScreenBuffers[2] = {
     &g_MemcardScreenStorage[0], &g_MemcardScreenStorage[1]
 };
 MemcardScreenBuffer *g_MemcardCurrentScreen;
-s32 g_MemcardScreenPage, g_LogoFadePlayed;
+s32 g_MemcardScreenPage, g_LogoFadePlayed, g_MemcardTitleLoaded;
 s32 g_MemcardPrevPad, g_MemcardScreenTimer;
 DISPENV g_MemcardListSavedDispEnv[2];
 DRAWENV g_MemcardListSavedDrawEnv[2];
@@ -181,6 +181,11 @@ void MenuCard_ShowLogoFade(void) {
     stalePages = 0;
 
     for (i = 0; i < 480; i++) {
+        /* A mod that loaded a save ends the logo, as a skip would. */
+        PE_HOOK(PE_HOOK_TITLE_FRAME, &g_MemcardTitleLoaded);
+        if (g_MemcardTitleLoaded) {
+            break;
+        }
         /* The logo is drawn over the last frame without a clear. Widescreen
          * switched while it shows changes the logo's drawn shape, so the old
          * shape would stay around the new one: clear each page once before
@@ -263,7 +268,6 @@ s32 MenuCard_RunListScreen(void) {
     s32 initialPage;
     s32 waitFrames;
     s32 result;
-    s32 loaded = 0;
     s32 groupsRemaining;
     u32 rgb0;
     u32 rgb1;
@@ -286,6 +290,7 @@ s32 MenuCard_RunListScreen(void) {
     g_RenderOtBufferBaseAlt[0] = (u8 *)g_MemcardScreenStorage[1].ordering;
     Draw_SetPresentEnabled(1);
     result = -1;
+    g_MemcardTitleLoaded = 0;
     do {
         MemCard_SetDialogActive(1);
         MemCard_InitState();
@@ -319,14 +324,20 @@ s32 MenuCard_RunListScreen(void) {
             g_LogoFadePlayed = 1;
             MenuCard_ShowLogoFade();
         }
+        if (g_MemcardTitleLoaded) {
+            goto leave_screen;
+        }
         if (titleMode != 0) {
-            if (MenuCard_PlayVideo(1) != 0) {
+            if (MenuCard_PlayVideo(1) != 0 && !g_MemcardTitleLoaded) {
                 waitFrames = 0;
                 do {
                     waitFrames += 1;
                     MemCard_UpdateSavePolling();
                     VSync(0);
                 } while (waitFrames < 0x3C);
+            }
+            if (g_MemcardTitleLoaded) {
+                goto leave_screen;
             }
             /* The native movie restores the game's 15-bit/224-line pages.
              * This screen still composites authored RGB24 images in its own
@@ -408,8 +419,8 @@ s32 MenuCard_RunListScreen(void) {
                 MemCard_UpdateSavePolling();
                 Field_HandleStateTransition();
                 MenuCard_HandleListInput();
-                PE_HOOK(PE_HOOK_TITLE_FRAME, &loaded);
-                if (loaded) {
+                PE_HOOK(PE_HOOK_TITLE_FRAME, &g_MemcardTitleLoaded);
+                if (g_MemcardTitleLoaded) {
                     break;
                 }
                 MenuCard_RedrawImageNodes();
@@ -476,6 +487,7 @@ s32 MenuCard_RunListScreen(void) {
                 g_MemcardScreenTimer = elapsed;
             } while (elapsed < 0x3E8);
         }
+leave_screen:
         SetDispMask(0);
         rect.x = 0x2C0;
         rect.w = 0xA0;
@@ -494,7 +506,7 @@ s32 MenuCard_RunListScreen(void) {
         Draw_InitBuffers();
         Draw_SelectBuffer();
         Draw_PresentFrame(2);
-        if (loaded) {
+        if (g_MemcardTitleLoaded) {
             result = 2; /* a mod loaded a save: on as Continue */
         } else if (g_MemcardScreenTimer >= 0x3E9) {
             wantedKind = 7;
