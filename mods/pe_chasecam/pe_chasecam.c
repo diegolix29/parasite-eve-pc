@@ -748,9 +748,58 @@ static int clip_edge(CV *in, int n, CV *out, int axis, float lim, int keep_great
 
 static int s_projecting; /* the surface being cut, for the per-surface counts */
 
+/* One texel of a tile (i, j inside it) from a 1024x512 copy of video memory; 0 = transparent. */
+static u16 vram_tile_texel(const u16 *vram, const Tile *t, int i, int j) {
+    int bx = (t->tpage & 0xF) * 64, by = ((t->tpage >> 4) & 1) * 256, depth = (t->tpage >> 7) & 3;
+    int cx = (t->clut & 0x3F) * 16, cy = (t->clut >> 6) & 0x1FF;
+    int tu = (t->u + i) & 0xFF, tv = (t->v + j) & 0xFF;
+    if (depth == 0) {
+        u16 w = vram[(by + tv) * 1024 + ((bx + tu / 4) & 1023)];
+        return vram[cy * 1024 + ((cx + ((w >> ((tu & 3) * 4)) & 0xF)) & 1023)];
+    }
+    if (depth == 1) {
+        u16 w = vram[(by + tv) * 1024 + ((bx + tu / 2) & 1023)];
+        return vram[cy * 1024 + ((cx + ((w >> ((tu & 1) * 8)) & 0xFF)) & 1023)];
+    }
+    return vram[(by + tv) * 1024 + ((bx + tu) & 1023)];
+}
+
+/* Each surface's average texture colour (r, g, b, weight), for its flat backing: the thin gaps
+ * along the textured pieces' edges then show the same colour instead of grey. */
+static float s_surf_rgb[MAX_SURFACES][4];
+static const u16 *s_piece_vram;
+
+static void add_piece_colour(const CV *a, const CV *b, const CV *c, const Tile *t) {
+    if (!s_piece_vram) return;
+    float area = fabsf((b->sx - a->sx) * (c->sy - a->sy) - (c->sx - a->sx) * (b->sy - a->sy)) * 0.5f;
+    if (area <= 0) return;
+    float mx = (a->sx + b->sx + c->sx) / 3.0f, my = (a->sy + b->sy + c->sy) / 3.0f;
+    const CV *v[3] = {a, b, c};
+    float r = 0, g = 0, bl = 0;
+    int n = 0;
+    for (int k = 0; k < 4; ++k) {
+        float x = k < 3 ? (mx + v[k]->sx) * 0.5f : mx, y = k < 3 ? (my + v[k]->sy) * 0.5f : my;
+        int i = (int)clampf(x - t->x, 0, 15), j = (int)clampf(y - t->y, 0, 15);
+        u16 texel = vram_tile_texel(s_piece_vram, t, i, j);
+        if (!texel) continue;
+        r += (float)((texel & 31) << 3);
+        g += (float)(((texel >> 5) & 31) << 3);
+        bl += (float)(((texel >> 10) & 31) << 3);
+        n++;
+    }
+    if (!n) return;
+    /* Tinted as the GPU does it: texel * colour / 128. */
+    float w = area / (float)n, *acc = s_surf_rgb[s_projecting];
+    acc[0] += r * t->r / 128.0f * w;
+    acc[1] += g * t->g / 128.0f * w;
+    acc[2] += bl * t->b / 128.0f * w;
+    acc[3] += area;
+}
+
 static void add_piece(const CV *a, const CV *b, const CV *c, const Tile *t, int tile, u8 wall) {
     if (s_piece_count >= MAX_PIECES) return;
     if (s_surf_pieces[s_projecting] < 0xFFFF) s_surf_pieces[s_projecting]++;
+    add_piece_colour(a, b, c, t);
     Piece *p = &s_pieces[s_piece_count++];
     const CV *v[3] = {a, b, c};
     for (int k = 0; k < 3; ++k) {
@@ -965,6 +1014,8 @@ static void build_pieces(void) {
     bin_tiles();
     wall_pivots();
     memset(s_surf_pieces, 0, sizeof s_surf_pieces);
+    memset(s_surf_rgb, 0, sizeof s_surf_rgb);
+    s_piece_vram = Psyz_GpuGetVramCopy(NULL);
     for (int i = 0; i < s_surf_count; ++i) {
         s_projecting = i;
         project_surface(&s_surf[i]);
@@ -1156,8 +1207,12 @@ static float fogk(float z) { return clampf(1.15f - z / 10000.0f, 0.2f, 1.0f); }
 static u8 fog(float z, int base) { return (u8)(base * fogk(z)); }
 
 static int clamp_depth(int d) { return d < 1 ? 1 : d > 0xFFE ? 0xFFE : d; }
-/* The floor sorts past everything standing on it; walls by distance, a little back. */
-static int floor_depth(float maxz) { return clamp_depth(0x800 + (int)(maxz / 8.0f)); }
+/* The floor sorts past everything standing on it; walls by distance, a little back. The floor's
+ * flat backing sorts past all of the floor's textures: by its own distance, a nearer flat
+ * triangle would cover the next surface's pieces where their edges round differently. */
+static int floor_depth(float maxz) { return clamp_depth(0x800 + (int)(maxz / 16.0f)); }
+static int floor_back_depth(float maxz) { return clamp_depth(0xC00 + (int)(maxz / 16.0f)); }
+static int s_tint_backing; /* flat surfaces take their textures' average colour this frame */
 static int wall_depth(float maxz) { return clamp_depth((int)(maxz / 4.0f) + 24); }
 
 static void link_prim(RenderNativeTag *tag, int depth) {
@@ -1233,7 +1288,13 @@ static void draw_surface(const Surface *s) {
         depth = wall_depth(maxz);
     } else {
         r = s->shade ? 92 : 78; g = s->shade ? 98 : 84; b = s->shade ? 112 : 98;
-        depth = floor_depth(maxz);
+        depth = floor_back_depth(maxz);
+    }
+    const float *avg = s_surf_rgb[s - s_surf];
+    if (s_tint_backing && avg[3] > 0) {
+        r = (int)clampf(avg[0] / avg[3], 0, 255);
+        g = (int)clampf(avg[1] / avg[3], 0, 255);
+        b = (int)clampf(avg[2] / avg[3], 0, 255);
     }
     if (n >= 3) emit_tri(poly[0].v, poly[1].v, poly[2].v, r, g, b, depth);
     if (n == 4) emit_tri(poly[0].v, poly[2].v, poly[3].v, r, g, b, depth);
@@ -1910,6 +1971,7 @@ static void draw_room(void) {
     update_cover();
     int textured = s_textures && s_tile_frame + 2 >= s_frame && s_tile_count > 0;
     if (textured) build_pieces();
+    s_tint_backing = textured;
     for (int i = 0; i < s_floor_surf_count; ++i) draw_surface(&s_surf[i]);
     if (s_solid_walls)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i) draw_surface(&s_surf[i]);
@@ -2793,20 +2855,7 @@ static int canvas_save(const Canvas *c, const char *path) {
 static u16 s_vram[1024 * 512];
 
 /* One texel of a tile from the VRAM copy; 0 = transparent. */
-static u16 tile_texel(const Tile *t, int i, int j) {
-    int bx = (t->tpage & 0xF) * 64, by = ((t->tpage >> 4) & 1) * 256, depth = (t->tpage >> 7) & 3;
-    int cx = (t->clut & 0x3F) * 16, cy = (t->clut >> 6) & 0x1FF;
-    int tu = (t->u + i) & 0xFF, tv = (t->v + j) & 0xFF;
-    if (depth == 0) {
-        u16 w = s_vram[(by + tv) * 1024 + ((bx + tu / 4) & 1023)];
-        return s_vram[cy * 1024 + ((cx + ((w >> ((tu & 3) * 4)) & 0xF)) & 1023)];
-    }
-    if (depth == 1) {
-        u16 w = s_vram[(by + tv) * 1024 + ((bx + tu / 2) & 1023)];
-        return s_vram[cy * 1024 + ((cx + ((w >> ((tu & 1) * 8)) & 0xFF)) & 1023)];
-    }
-    return s_vram[(by + tv) * 1024 + ((bx + tu) & 1023)];
-}
+static u16 tile_texel(const Tile *t, int i, int j) { return vram_tile_texel(s_vram, t, i, j); }
 
 static int tile_cmp_far_first(const void *a, const void *b) {
     const Tile *ta = &s_tiles[*(const u16 *)a], *tb = &s_tiles[*(const u16 *)b];
