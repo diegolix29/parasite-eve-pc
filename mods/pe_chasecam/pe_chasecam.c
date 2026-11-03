@@ -30,6 +30,8 @@
 #include "pe1/gte_types.h"
 #include "pe1/player_entity.h"
 #include "pe1/psyq_gpu.h"
+#include "pe1/draw_buffers.h"
+#include <psyz/gpu.h>
 #include "pe1/render_buffers.h"
 #include "pe1/render_camera.h"
 #include "pe1/render_packets.h"
@@ -66,11 +68,16 @@ static int s_f8_down, s_home_down, s_f7_down, s_f9_down, s_dump_pending;
  * position of every surface point is moved by (ox, oy) and scaled by (sx, sy) about the screen
  * centre before it picks its tile; walls are wall / obst high. chasecam_rooms.txt beside the
  * settings keeps them, one "room group ox oy sx sy wall obst" line each. */
-typedef struct { int room, group; float ox, oy, sx, sy; int wall, obst; } RoomFit;
+/* shape 1: the room is a box built from the picture (see build_box); 0: walls on the collision
+ * floor's edges. */
+typedef struct { int room, group; float ox, oy, sx, sy; int wall, obst, shape; } RoomFit;
 #define MAX_FITS 512
 static RoomFit s_fits[MAX_FITS];
 static int s_fit_count;
-static RoomFit s_fit = {-1, -1, 0, 0, 1, 1, 1400, 500};
+static RoomFit s_fit = {-1, -1, 0, 0, 1, 1, 1400, 500, -1};
+static int s_default_shape = 0; /* F1 "Rooms' shape": 0 collision walls (default), 1 picture box */
+/* A room's shape: its own choice (Backspace), or -1 = the F1 option. */
+static int room_shape(void) { return s_fit.shape < 0 ? s_default_shape : s_fit.shape; }
 static int s_fit_saved = 1;   /* the current fit matches the file */
 static int s_edit;            /* F9: fit editor keys on the numpad */
 static unsigned s_edit_toast;
@@ -109,6 +116,16 @@ static const void *s_mesh_key;
 static unsigned s_mesh_tris;
 static int s_mesh_wall_height, s_mesh_obstacle_height;
 static u16 s_surf_pieces[MAX_SURFACES]; /* textured pieces per surface, for the dump */
+static unsigned s_mesh_version;   /* bumped whenever build_mesh rebuilds s_surf */
+static float s_floor_y;           /* the collision floor's usual height (median) */
+static int s_mesh_shape = -1;
+static float s_coll[4];           /* the collision floor's bounds: x0, x1, z0, z1 */
+/* Picture box: floor at s_floor_y, side walls on these bounds, walls up to the room's height. */
+static float s_box[4];            /* x0, x1, z0, z1 */
+static int s_box_active;          /* s_surf holds the box this frame */
+static unsigned s_box_key;
+#define SRC_NO_TEXTURE 0xFFFD     /* a plain backing face of the box */
+#define SRC_BOX 0xFFFE            /* a face of the box cut from the picture */
 /* The obstacle loop Aya stands inside (a stage or platform: its floor isn't in the triangles),
  * -1 for none, and her height there; the mesh is built with it. */
 static int s_inside_loop = -1, s_mesh_inside_loop = -2;
@@ -132,6 +149,36 @@ static int s_layer_fit_count;
 static unsigned s_adj_version;
 static int s_sel = -2; /* editor selection: -2 the whole room, -1 the floor, >= 0 a wall edge */
 static float s_cy = 112.0f; /* chase view centre: lower while the editor splits the screen */
+
+/* ---- custom wall images (chasecam_textures/room_NNN and /common: 256-colour BMPs, entry 0
+ * transparent; make them with tools/make_texture.py). An image put on wall edge i spreads over
+ * walls i .. i+span-1 of its loop (by length) and floor to wall top. It is uploaded into video
+ * memory the room leaves blank (all zero, never drawn into), in 128-texel-wide 8-bit columns,
+ * halved until it fits, and checked every frame; if the game writes there it moves. ---- */
+#define MAX_IMAGES 48
+#define IMG_CHUNK 128
+typedef struct {
+    char name[96], path[600];
+    int loaded, failed;       /* loaded: in video memory now */
+    int w, h;                 /* size as uploaded */
+    int chunks, vx[8], vy[8]; /* each 128-texel column's place in video memory */
+    int cx, cy;               /* its palette's place */
+    u8 *pix;                  /* full-size indices, w0 x h0 */
+    int w0, h0;
+    u16 clut[256];
+} CustomImage;
+static CustomImage s_images[MAX_IMAGES];
+static int s_image_count, s_images_room = -999, s_images_group = -1;
+static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 none) on a first wall */
+static int s_wall_cover[MAX_WALLS];      /* the first wall of the image covering this one, or -1 */
+static float s_wall_cum[MAX_WALLS];      /* along the covering image: length before this wall */
+static float s_cover_len[MAX_WALLS];     /* the covering image's total length (on its first wall) */
+static unsigned s_img_version, s_cover_key;
+typedef struct { int room, group, wall, span; char name[96]; } WallImage;
+#define MAX_WALL_IMAGES 1024
+static WallImage s_wall_images[MAX_WALL_IMAGES];
+static int s_wall_image_count;
+static void images_enter_room(int room, int group);
 
 static int adjust_is_identity(const Adjust *a) {
     return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
@@ -229,7 +276,7 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 
 static void push_surface(const V3 *a, const V3 *b, const V3 *c, u8 shade, u8 wall, u16 src, int depth) {
     if (s_surf_count >= MAX_SURFACES) return;
-    if (!wall) {
+    if (!wall && depth < 99) {
         float ab = (b->x - a->x) * (b->x - a->x) + (b->z - a->z) * (b->z - a->z);
         float bc = (c->x - b->x) * (c->x - b->x) + (c->z - b->z) * (c->z - b->z);
         float ca = (a->x - c->x) * (a->x - c->x) + (a->z - c->z) * (a->z - c->z);
@@ -431,8 +478,12 @@ static void build_mesh(void) {
     }
     if (s_mesh_key == db->triangles.pointer && s_mesh_tris == db->triangleCount &&
         s_mesh_wall_height == s_fit.wall && s_mesh_obstacle_height == s_fit.obst &&
-        s_mesh_inside_loop == s_inside_loop && s_mesh_height_version == s_height_version)
+        s_mesh_inside_loop == s_inside_loop && s_mesh_height_version == s_height_version &&
+        s_mesh_shape == room_shape())
         return;
+    s_mesh_shape = room_shape();
+    s_mesh_version++;
+    s_box_active = 0;
     s_mesh_inside_loop = s_inside_loop;
     s_mesh_height_version = s_height_version;
     s_mesh_key = db->triangles.pointer;
@@ -497,6 +548,20 @@ static void build_mesh(void) {
     if (s_inside_loop >= 0 && s_inside_loop < s_loop_count && !s_loops[s_inside_loop].outer)
         push_platform(s_inside_loop, s_inside_y);
     s_floor_surf_count = s_surf_count;
+    {
+        /* Median floor height, for the picture box. */
+        static float ys[MAX_SURFACES];
+        int n = 0;
+        for (int i = 0; i < s_floor_surf_count; ++i) ys[n++] = s_surf[i].v[0].y;
+        for (int i = 1; i < n; ++i) {
+            float v = ys[i];
+            int j = i - 1;
+            while (j >= 0 && ys[j] > v) { ys[j + 1] = ys[j]; --j; }
+            ys[j + 1] = v;
+        }
+        s_floor_y = n ? ys[n / 2] : 0.0f;
+        s_coll[0] = minx; s_coll[1] = maxx; s_coll[2] = minz; s_coll[3] = maxz;
+    }
     for (int i = 0; i < s_wall_count; ++i)
         if (s_walls_list[i].height > 0.0f) push_wall(&s_walls_list[i], i);
     int outer = 0;
@@ -651,6 +716,8 @@ static int picture_xy(const V3 *p, float *x, float *y);
 
 /* Cuts one surface along every tile it covers in the room camera's picture. */
 static void project_surface(const Surface *s) {
+    if (s->src == SRC_NO_TEXTURE) return;
+    if (s->wall && s->src < MAX_WALLS && s_wall_cover[s->src] >= 0) return;
     if (s->wall && s->src < MAX_WALLS && s_wall_adj[s->src].rect > 0.5f) {
         /* Rectangle mode: picture position is an even (affine) spread over the wall, so 1/z = 1. */
         CV base[3];
@@ -704,7 +771,7 @@ static void project_surface(const Surface *s) {
         if (s->wall && s->src < MAX_WALLS)
             apply_adjust(&base[k].sx, &base[k].sy, &s_wall_adj[s->src], s_wall_pivot[s->src][0],
                          s_wall_pivot[s->src][1]);
-        else
+        else if (!s->wall)
             apply_adjust(&base[k].sx, &base[k].sy, &s_floor_adj, 160.0f, 112.0f);
         base[k].q = q;
         base[k].wx = poly[k][3] * q;
@@ -834,6 +901,7 @@ static void build_pieces(void) {
         for (int i = 0; i < 4; ++i) key = hash_add(key, bits[i]);
     }
     key = hash_add(key, s_adj_version);
+    key = hash_add(key, s_img_version);
     if (key == s_piece_key) return;
     s_piece_key = key;
     s_piece_count = 0;
@@ -844,6 +912,166 @@ static void build_pieces(void) {
         s_projecting = i;
         project_surface(&s_surf[i]);
     }
+}
+
+/* ================= picture box ================= */
+/* The room rebuilt from its picture: every point of the background is the room camera's ray
+ * through it, which lands on the floor (at the collision floor's usual height) or, past the
+ * floor, on one of the four side walls of a box that holds everything the picture shows. A grid
+ * over the picture, split where its corners land on different faces, gives the surfaces; seen
+ * from the room camera they cover the picture exactly, so the textures line up by construction.
+ * The collision floor still moves Aya; it only no longer shapes the walls. */
+
+static float s_cam_pos[3], s_cam_axes[3][3], s_cam_h, s_cam_ox, s_cam_oy;
+
+static void room_camera_ray(float sx, float sy, float d[3]) {
+    float v[3] = {(sx - s_cam_ox) / s_cam_h, (sy - s_cam_oy) / s_cam_h, 1.0f};
+    for (int i = 0; i < 3; ++i)
+        d[i] = s_cam_axes[0][i] * v[0] + s_cam_axes[1][i] * v[1] + s_cam_axes[2][i] * v[2];
+}
+
+/* Face hit by the ray through picture point (sx, sy): 0 floor, 1..4 side walls (x0, x1, z0, z1),
+ * -1 nothing (above the walls, or behind). */
+static int box_hit(float sx, float sy, V3 *out) {
+    float d[3], best = 1e30f;
+    int face = -1;
+    room_camera_ray(sx, sy, d);
+    const float *c = s_cam_pos;
+    if (d[1] > 1e-6f) { float t = (s_floor_y - c[1]) / d[1]; if (t > 0 && t < best) { best = t; face = 0; } }
+    if (d[0] < -1e-6f) { float t = (s_box[0] - c[0]) / d[0]; if (t > 0 && t < best) { best = t; face = 1; } }
+    if (d[0] > 1e-6f) { float t = (s_box[1] - c[0]) / d[0]; if (t > 0 && t < best) { best = t; face = 2; } }
+    if (d[2] < -1e-6f) { float t = (s_box[2] - c[2]) / d[2]; if (t > 0 && t < best) { best = t; face = 3; } }
+    if (d[2] > 1e-6f) { float t = (s_box[3] - c[2]) / d[2]; if (t > 0 && t < best) { best = t; face = 4; } }
+    if (face < 0) return -1;
+    out->x = c[0] + d[0] * best;
+    out->y = c[1] + d[1] * best;
+    out->z = c[2] + d[2] * best;
+    if (face > 0 && (out->y < s_floor_y - (float)s_fit.wall || out->y > s_floor_y)) return -1;
+    return face;
+}
+
+static void box_cell(float x, float y, float size, int depth) {
+    V3 p[4];
+    int f[4];
+    const float cx[4] = {x, x + size, x + size, x}, cy[4] = {y, y, y + size, y + size};
+    for (int k = 0; k < 4; ++k) f[k] = box_hit(cx[k], cy[k], &p[k]);
+    if (f[0] >= 0 && f[0] == f[1] && f[0] == f[2] && f[0] == f[3]) {
+        u8 wall = f[0] > 0;
+        push_surface(&p[0], &p[1], &p[2], (u8)(f[0] & 1), wall, SRC_BOX, 99);
+        push_surface(&p[0], &p[2], &p[3], (u8)(f[0] & 1), wall, SRC_BOX, 99);
+        return;
+    }
+    if (depth >= 3) return;
+    float h = size * 0.5f;
+    box_cell(x, y, h, depth + 1);
+    box_cell(x + h, y, h, depth + 1);
+    box_cell(x, y + h, h, depth + 1);
+    box_cell(x + h, y + h, h, depth + 1);
+}
+
+/* Plain backing faces: the whole box floor and walls, untextured, under the picture's faces. */
+static void box_backing(void) {
+    float y0 = s_floor_y + 2.0f, top = s_floor_y - (float)s_fit.wall;
+    V3 a = {s_box[0], y0, s_box[2]}, b = {s_box[1], y0, s_box[2]}, c = {s_box[1], y0, s_box[3]},
+       d = {s_box[0], y0, s_box[3]};
+    push_surface(&a, &b, &c, 0, 0, SRC_NO_TEXTURE, 0);
+    push_surface(&a, &c, &d, 0, 0, SRC_NO_TEXTURE, 0);
+    const V3 *base[4] = {&a, &b, &c, &d};
+    for (int i = 0; i < 4; ++i) {
+        const V3 *p = base[i], *q = base[(i + 1) % 4];
+        WallEdge w = {*p, *q, (float)s_fit.wall + 2.0f, -1};
+        (void)top;
+        float dx = q->x - p->x, dz = q->z - p->z, len = sqrtf(dx * dx + dz * dz);
+        int cols = (int)ceilf(len / WALL_STEP), rows = (int)ceilf(w.height / WALL_STEP);
+        if (cols < 1) cols = 1;
+        if (rows < 1) rows = 1;
+        for (int cc = 0; cc < cols; ++cc)
+            for (int r = 0; r < rows; ++r) {
+                float f0 = (float)cc / cols, f1 = (float)(cc + 1) / cols;
+                float h0 = w.height * r / rows, h1 = w.height * (r + 1) / rows;
+                V3 p00 = {p->x + dx * f0, y0 - 2.0f - h0, p->z + dz * f0}, p10 = {p->x + dx * f1, y0 - 2.0f - h0, p->z + dz * f1};
+                V3 p01 = {p->x + dx * f0, y0 - 2.0f - h1, p->z + dz * f0}, p11 = {p->x + dx * f1, y0 - 2.0f - h1, p->z + dz * f1};
+                push_surface(&p00, &p10, &p11, (u8)(cc & 1), 1, SRC_NO_TEXTURE, 0);
+                push_surface(&p00, &p11, &p01, (u8)(cc & 1), 1, SRC_NO_TEXTURE, 0);
+            }
+    }
+}
+
+/* Replaces s_surf with the picture box for this room camera and picture (rebuilt when either,
+ * the collision mesh or the wall height change). */
+static void build_box(void) {
+    if (s_tile_count <= 0 || s_surf_count <= 0) return;
+    unsigned key = hash_add(s_tile_hash, s_mesh_version);
+    for (int i = 0; i < 9; ++i) key = hash_add(key, s_saved_scratch[i]);
+    key = hash_add(key, (u16)s_saved_offset_x | ((unsigned)(u16)s_saved_offset_y << 16));
+    key = hash_add(key, (unsigned)s_fit.wall);
+    if (s_box_active && key == s_box_key) return;
+
+    /* Room camera: position and axes in the world. */
+    const GteMatrix *m = (const GteMatrix *)s_saved_scratch;
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) s_cam_axes[r][c] = m->m[r][c] / 4096.0f;
+    for (int c = 0; c < 3; ++c)
+        s_cam_pos[c] = -(s_cam_axes[0][c] * m->t[0] + s_cam_axes[1][c] * m->t[1] + s_cam_axes[2][c] * m->t[2]);
+    s_cam_h = (float)s_saved_scratch[8];
+    s_cam_ox = s_saved_offset_x;
+    s_cam_oy = s_saved_offset_y;
+    if (s_cam_h <= 0) return;
+
+    /* The picture's extent on screen. */
+    float px0 = 1e9f, px1 = -1e9f, py0 = 1e9f, py1 = -1e9f;
+    for (int i = 0; i < s_tile_count; ++i) {
+        px0 = fminf(px0, s_tiles[i].x); px1 = fmaxf(px1, s_tiles[i].x + 16.0f);
+        py0 = fminf(py0, s_tiles[i].y); py1 = fmaxf(py1, s_tiles[i].y + 16.0f);
+    }
+
+    /* Box: the collision floor, the floor the picture shows (within reason) and the room camera. */
+    float cx0 = s_coll[0], cx1 = s_coll[1], cz0 = s_coll[2], cz1 = s_coll[3];
+    float reach = fmaxf(cx1 - cx0, cz1 - cz0) * 1.5f + 3000.0f;
+    float mx = (cx0 + cx1) * 0.5f, mz = (cz0 + cz1) * 0.5f;
+    float bx0 = cx0, bx1 = cx1, bz0 = cz0, bz1 = cz1;
+    for (int i = 0; i <= 32; ++i)
+        for (int e = 0; e < 4; ++e) {
+            float f = i / 32.0f;
+            float sx = e < 2 ? px0 + (px1 - px0) * f : (e == 2 ? px0 : px1);
+            float sy = e < 2 ? (e == 0 ? py0 : py1) : py0 + (py1 - py0) * f;
+            float d[3];
+            room_camera_ray(sx, sy, d);
+            if (d[1] <= 1e-6f) continue;
+            float t = (s_floor_y - s_cam_pos[1]) / d[1];
+            if (t <= 0) continue;
+            float x = s_cam_pos[0] + d[0] * t, z = s_cam_pos[2] + d[2] * t;
+            if (fabsf(x - mx) > reach || fabsf(z - mz) > reach) continue;
+            bx0 = fminf(bx0, x); bx1 = fmaxf(bx1, x);
+            bz0 = fminf(bz0, z); bz1 = fmaxf(bz1, z);
+        }
+    bx0 = fminf(bx0, s_cam_pos[0] - 200); bx1 = fmaxf(bx1, s_cam_pos[0] + 200);
+    bz0 = fminf(bz0, s_cam_pos[2] - 200); bz1 = fmaxf(bz1, s_cam_pos[2] + 200);
+    s_box[0] = bx0 - 50; s_box[1] = bx1 + 50; s_box[2] = bz0 - 50; s_box[3] = bz1 + 50;
+
+    /* Rebuild s_surf: backing first, then the picture's faces (floor faces, then wall faces). */
+    s_surf_count = 0;
+    box_backing();
+    int backing = s_surf_count;
+    for (float y = floorf(py0 / 16) * 16; y < py1; y += 16)
+        for (float x = floorf(px0 / 16) * 16; x < px1; x += 16) box_cell(x, y, 16, 0);
+    /* Floors before walls, as draw_room expects. */
+    {
+        static Surface tmp[MAX_SURFACES];
+        int n = 0;
+        for (int pass = 0; pass < 2; ++pass)
+            for (int i = 0; i < s_surf_count; ++i)
+                if (s_surf[i].wall == pass) tmp[n++] = s_surf[i];
+        memcpy(s_surf, tmp, sizeof(Surface) * (size_t)n);
+        s_floor_surf_count = 0;
+        while (s_floor_surf_count < n && !s_surf[s_floor_surf_count].wall) s_floor_surf_count++;
+    }
+    s_box_key = key;
+    s_box_active = 1;
+    s_piece_key = 0;
+    pe_mod_log(MOD_ID, "room %d camera %d picture box x %.0f..%.0f z %.0f..%.0f floor %.0f: %d faces "
+               "(%d backing)", pe_room_number(), s_fit.group, s_box[0], s_box[1], s_box[2], s_box[3],
+               s_floor_y, s_surf_count - backing, backing);
 }
 
 /* ================= drawing from the chase camera ================= */
@@ -1032,6 +1260,355 @@ static void draw_line(const V3 *pa, const V3 *pb, int r, int g, int b) {
     link_prim(&p->tag, s_line_depth > 0 ? s_line_depth : clamp_depth((int)(z / 4.0f)));
 }
 
+/* ================= custom wall images ================= */
+
+int ClearImage(RECT *rect, u_char r, u_char g, u_char b);
+static u8 s_vram_reserved[512][1024]; /* blocks this module took in the current search */
+
+static void textures_dir(char *out, size_t size, const char *sub) {
+    char base[512];
+    if (pe_mod_path(base, sizeof base, "chasecam_textures") != 0) { out[0] = 0; return; }
+    snprintf(out, size, "%s/%s", base, sub);
+}
+
+static void image_forget_vram(CustomImage *im) {
+    /* Blank our blocks again if they are still ours, so they stay free for later. */
+    const unsigned char *known;
+    const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
+    for (int k = 0; k < im->chunks && im->loaded; ++k) {
+        int tw = im->w - k * IMG_CHUNK < IMG_CHUNK ? im->w - k * IMG_CHUNK : IMG_CHUNK;
+        int cols = (tw + 1) / 2;
+        if (cols < 1) cols = 1;
+        RECT r = {(short)im->vx[k], (short)im->vy[k], (short)cols, (short)im->h};
+        if (vram && known[im->vy[k] * 1024 + im->vx[k]]) ClearImage(&r, 0, 0, 0);
+        for (int y = 0; y < im->h; ++y)
+            for (int x = 0; x < 64; ++x) s_vram_reserved[im->vy[k] + y][im->vx[k] + x] = 0;
+    }
+    if (im->loaded) {
+        RECT r = {(short)im->cx, (short)im->cy, 256, 1};
+        ClearImage(&r, 0, 0, 0);
+        for (int x = 0; x < 256; ++x) s_vram_reserved[im->cy][im->cx + x] = 0;
+    }
+    im->loaded = 0;
+}
+
+/* Lists the room's and the common images; forgets the last room's uploads. */
+static void images_enter_room(int room, int group) {
+    for (int i = 0; i < s_image_count; ++i) {
+        image_forget_vram(&s_images[i]);
+        free(s_images[i].pix);
+    }
+    memset(s_images, 0, sizeof s_images);
+    s_image_count = 0;
+    s_images_room = room;
+    s_images_group = group;
+    char sub[32], dir[640];
+    snprintf(sub, sizeof sub, "room_%03d", room);
+    const char *subs[2] = {sub, "common"};
+    for (int d = 0; d < 2; ++d) {
+        textures_dir(dir, sizeof dir, subs[d]);
+        if (!dir[0]) continue;
+        int count = 0;
+        char **files = SDL_GlobDirectory(dir, "*.bmp", SDL_GLOB_CASEINSENSITIVE, &count);
+        for (int i = 0; files && i < count && s_image_count < MAX_IMAGES; ++i) {
+            int dup = 0;
+            for (int j = 0; j < s_image_count; ++j) dup |= !strcmp(s_images[j].name, files[i]);
+            if (dup) continue;
+            CustomImage *im = &s_images[s_image_count++];
+            snprintf(im->name, sizeof im->name, "%s", files[i]);
+            snprintf(im->path, sizeof im->path, "%s/%s", dir, files[i]);
+        }
+        SDL_free(files);
+    }
+    /* This room's assignments. */
+    for (int i = 0; i < MAX_WALLS; ++i) { s_wall_img[i] = -1; s_wall_span[i] = 1; }
+    for (int i = 0; i < s_wall_image_count; ++i) {
+        const WallImage *w = &s_wall_images[i];
+        if (w->room != room || w->group != group || w->wall < 0 || w->wall >= MAX_WALLS) continue;
+        for (int j = 0; j < s_image_count; ++j)
+            if (!strcmp(s_images[j].name, w->name)) {
+                s_wall_img[w->wall] = j;
+                s_wall_span[w->wall] = w->span < 1 ? 1 : w->span;
+            }
+    }
+    s_img_version++;
+}
+
+static int vram_blank(const unsigned short *vram, const unsigned char *known, int x, int y) {
+    int at = y * 1024 + x;
+    return known[at] && vram[at] == 0 && !s_vram_reserved[y][x];
+}
+
+/* A 64-column block of h rows inside one 256-row texture page half, all blank. */
+static int find_block(const unsigned short *vram, const unsigned char *known, int h, int *ox, int *oy) {
+    for (int half = 1; half >= 0; --half)          /* the lower half first: usually emptier */
+        for (int px = 960; px >= 0; px -= 64) {
+            int run = 0;
+            for (int y = half * 256; y < half * 256 + 256; ++y) {
+                int ok = 1;
+                for (int x = px; x < px + 64 && ok; ++x) ok = vram_blank(vram, known, x, y);
+                run = ok ? run + 1 : 0;
+                if (run >= h) { *ox = px; *oy = y - h + 1; return 1; }
+            }
+        }
+    return 0;
+}
+
+static int find_clut(const unsigned short *vram, const unsigned char *known, int *ox, int *oy) {
+    for (int y = 511; y >= 0; --y)
+        for (int x = 0; x + 256 <= 1024; x += 16) {
+            int ok = 1;
+            for (int i = 0; i < 256 && ok; ++i) ok = vram_blank(vram, known, x + i, y);
+            if (ok) { *ox = x; *oy = y; return 1; }
+        }
+    return 0;
+}
+
+static void reserve(int x, int y, int w, int h, u8 v) {
+    for (int j = 0; j < h; ++j)
+        for (int i = 0; i < w; ++i) s_vram_reserved[y + j][x + i] = v;
+}
+
+/* Reads the BMP (once) and uploads it at the largest size the blank video memory takes. */
+static int image_load(CustomImage *im) {
+    if (im->loaded) return 1;
+    if (im->failed) return 0;
+    if (!im->pix) {
+        SDL_Surface *surf = SDL_LoadBMP(im->path);
+        SDL_Palette *pal = surf ? SDL_GetSurfacePalette(surf) : NULL;
+        if (!surf || surf->format != SDL_PIXELFORMAT_INDEX8 || !pal) {
+            pe_mod_log(MOD_ID, "image %s: not a 256-colour BMP (%s)", im->name, surf ? "wrong format" : SDL_GetError());
+            if (surf) SDL_DestroySurface(surf);
+            im->failed = 1;
+            return 0;
+        }
+        im->w0 = surf->w;
+        im->h0 = surf->h;
+        im->pix = malloc((size_t)im->w0 * im->h0);
+        for (int y = 0; y < im->h0; ++y)
+            memcpy(im->pix + (size_t)y * im->w0, (const u8 *)surf->pixels + (size_t)y * surf->pitch, (size_t)im->w0);
+        for (int i = 0; i < 256; ++i) {
+            u16 c = 0;
+            if (i < pal->ncolors && i != 0) {
+                const SDL_Color *k = &pal->colors[i];
+                c = (u16)((k->r >> 3) | ((k->g >> 3) << 5) | ((k->b >> 3) << 10));
+                if (!c) c = 0x8000; /* opaque black */
+            }
+            im->clut[i] = c;
+        }
+        SDL_DestroySurface(surf);
+    }
+    const unsigned char *known;
+    const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
+    if (!vram) { im->failed = 1; return 0; }
+    for (int shift = 0; shift < 4; ++shift) {
+        int w = im->w0 >> shift, h = im->h0 >> shift;
+        if (w > 1024) continue;
+        if (h > 256 || w < 16 || h < 4) continue;
+        int chunks = (w + IMG_CHUNK - 1) / IMG_CHUNK, ok = 1;
+        for (int k = 0; k < chunks && ok; ++k) {
+            ok = find_block(vram, known, h, &im->vx[k], &im->vy[k]);
+            if (ok) reserve(im->vx[k], im->vy[k], 64, h, 1);
+        }
+        if (ok) ok = find_clut(vram, known, &im->cx, &im->cy);
+        if (!ok) {
+            memset(s_vram_reserved, 0, sizeof s_vram_reserved);
+            for (int i = 0; i < s_image_count; ++i) {
+                CustomImage *o = &s_images[i];
+                if (o == im || !o->loaded) continue;
+                for (int k = 0; k < o->chunks; ++k) reserve(o->vx[k], o->vy[k], 64, o->h, 1);
+                reserve(o->cx, o->cy, 256, 1, 1);
+            }
+            continue;
+        }
+        reserve(im->cx, im->cy, 256, 1, 1);
+        im->w = w;
+        im->h = h;
+        im->chunks = chunks;
+        /* Upload: two 8-bit texels per halfword, left one in the low byte. */
+        static u16 buf[64 * 256];
+        for (int k = 0; k < chunks; ++k) {
+            int tw = w - k * IMG_CHUNK < IMG_CHUNK ? w - k * IMG_CHUNK : IMG_CHUNK;
+            int cols = (tw + 1) / 2;
+            for (int y = 0; y < h; ++y)
+                for (int c = 0; c < cols; ++c) {
+                    int sx0 = ((k * IMG_CHUNK + c * 2) << shift), sx1 = ((k * IMG_CHUNK + c * 2 + 1) << shift);
+                    int sy = y << shift;
+                    u8 a = sx0 < im->w0 ? im->pix[(size_t)sy * im->w0 + sx0] : 0;
+                    u8 b = sx1 < im->w0 && c * 2 + 1 < tw ? im->pix[(size_t)sy * im->w0 + sx1] : 0;
+                    buf[y * cols + c] = (u16)(a | (b << 8));
+                }
+            RECT r = {(short)im->vx[k], (short)im->vy[k], (short)cols, (short)h};
+            LoadImage(&r, buf);
+            DrawSync(0);
+        }
+        RECT r = {(short)im->cx, (short)im->cy, 256, 1};
+        LoadImage(&r, im->clut);
+        DrawSync(0);
+        im->loaded = 1;
+        pe_mod_log(MOD_ID, "image %s: %dx%d (1/%d size) in video memory at x %d y %d, palette %d,%d",
+                   im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy);
+        return 1;
+    }
+    pe_mod_log(MOD_ID, "image %s: no blank video memory for it, even at 1/8 size", im->name);
+    im->failed = 1;
+    return 0;
+}
+
+/* Still ours? The game may load textures into what was blank; then the image moves. */
+static int image_check(CustomImage *im) {
+    if (!im->loaded) return 0;
+    const unsigned char *known;
+    const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
+    if (!vram) return 1;
+    for (int k = 0; k < im->chunks; ++k) {
+        int at = im->vy[k] * 1024 + im->vx[k];
+        int at2 = (im->vy[k] + im->h - 1) * 1024 + im->vx[k];
+        int ok = known[at] && known[at2];
+        if (ok) {
+            const u8 *row0 = im->pix, *rowl = im->pix + (size_t)((im->h - 1) * (im->h0 / im->h)) * im->w0;
+            int sh = im->w0 / im->w, base = k * IMG_CHUNK * sh;
+            u16 e0 = (u16)(row0[base] | ((base + sh < im->w0 ? row0[base + sh] : 0) << 8));
+            u16 e1 = (u16)(rowl[base] | ((base + sh < im->w0 ? rowl[base + sh] : 0) << 8));
+            ok = vram[at] == e0 && vram[at2] == e1;
+        }
+        if (!ok) {
+            pe_mod_log(MOD_ID, "image %s: its video memory was taken, moving it", im->name);
+            for (int y = 0; y < im->h; ++y)
+                for (int x = 0; x < 64; ++x) s_vram_reserved[im->vy[0] + y][im->vx[0] + x] = 0;
+            im->loaded = 0;
+            memset(s_vram_reserved, 0, sizeof s_vram_reserved);
+            return image_load(im);
+        }
+    }
+    return 1;
+}
+
+/* Which wall each image covers, and how far along it each wall starts. */
+static void update_cover(void) {
+    unsigned key = hash_add(s_img_version, s_mesh_version);
+    key = hash_add(key, (unsigned)s_wall_count);
+    if (key == s_cover_key) return;
+    s_cover_key = key;
+    for (int i = 0; i < MAX_WALLS; ++i) s_wall_cover[i] = -1;
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
+        if (s_wall_img[i] < 0) continue;
+        float total = 0;
+        for (int k = 0; k < s_wall_span[i] && i + k < s_wall_count; ++k) {
+            const WallEdge *w = &s_walls_list[i + k];
+            if (w->loop != s_walls_list[i].loop) break;
+            s_wall_cover[i + k] = i;
+            s_wall_cum[i + k] = total;
+            total += sqrtf((w->b.x - w->a.x) * (w->b.x - w->a.x) + (w->b.z - w->a.z) * (w->b.z - w->a.z));
+        }
+        s_cover_len[i] = total > 1 ? total : 1;
+    }
+    s_piece_key = 0;
+}
+
+/* Image texel (u, v) of a point on wall j: along the covered walls, floor (v = h) to top (0),
+ * through the first wall's move / size adjustment (move in % of the image). */
+static void wall_image_uv(int j, const V3 *p, const CustomImage *im, float *u, float *v) {
+    int first = s_wall_cover[j];
+    const WallEdge *w = &s_walls_list[j];
+    const Adjust *a = &s_wall_adj[first];
+    float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
+    float t = len2 > 0 ? ((p->x - w->a.x) * ex + (p->z - w->a.z) * ez) / len2 : 0;
+    float sacross = (s_wall_cum[j] + t * sqrtf(len2)) / s_cover_len[first];
+    float base_y = w->a.y + (w->b.y - w->a.y) * t;
+    float up = w->height > 0 ? (base_y - p->y) / w->height : 0;
+    float su = 0.5f + (sacross - 0.5f - a->ox / 100.0f) / a->sx;
+    float sv = 0.5f + ((1.0f - up) - 0.5f - a->oy / 100.0f) / a->sy;
+    *u = su * im->w;
+    *v = sv * im->h;
+}
+
+typedef struct { float u, v; V3 p; } IV; /* image-space clip vertex */
+
+static int clip_iv(const IV *in, int n, IV *out, int axis, float lim, int keep_greater) {
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        const IV *a = &in[i], *b = &in[(i + 1) % n];
+        float va = axis ? a->v : a->u, vb = axis ? b->v : b->u;
+        int ia = keep_greater ? va >= lim : va <= lim, ib = keep_greater ? vb >= lim : vb <= lim;
+        if (ia) out[m++] = *a;
+        if (ia != ib) {
+            float f = (lim - va) / (vb - va);
+            IV r = {a->u + (b->u - a->u) * f, a->v + (b->v - a->v) * f,
+                    {a->p.x + (b->p.x - a->p.x) * f, a->p.y + (b->p.y - a->p.y) * f, a->p.z + (b->p.z - a->p.z) * f}};
+            out[m++] = r;
+        }
+    }
+    return m;
+}
+
+static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth) {
+    if (s_tex_used >= MAX_TEX_PRIMS) return;
+    PrimFT3 *p = &s_tex_prims[g_ActiveDrawSlot][s_tex_used];
+    if (!project(a->v, &p->x0, &p->y0) || !project(b->v, &p->x1, &p->y1) || !project(c->v, &p->x2, &p->y2))
+        return;
+    int minx = p->x0, maxx = p->x0, miny = p->y0, maxy = p->y0;
+    if (p->x1 < minx) minx = p->x1; if (p->x1 > maxx) maxx = p->x1;
+    if (p->x2 < minx) minx = p->x2; if (p->x2 > maxx) maxx = p->x2;
+    if (p->y1 < miny) miny = p->y1; if (p->y1 > maxy) maxy = p->y1;
+    if (p->y2 < miny) miny = p->y2; if (p->y2 > maxy) maxy = p->y2;
+    if (!screen_ok(minx, maxx, miny, maxy)) return;
+    s_tex_used++;
+    float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
+    p->tag.length = 7;
+    p->code = 0x24;
+    p->r = p->g = p->b = (u8)(128 * k);
+    p->u0 = (u8)lrintf(a->u); p->v0 = (u8)lrintf(a->w);
+    p->u1 = (u8)lrintf(b->u); p->v1 = (u8)lrintf(b->w);
+    p->u2 = (u8)lrintf(c->u); p->v2 = (u8)lrintf(c->w);
+    p->clut = clut;
+    p->tpage = tpage;
+    p->pad = 0;
+    link_prim(&p->tag, depth);
+}
+
+/* One wall surface with its image: cut to the image and to its 128-texel columns. */
+static void draw_wall_image(const Surface *s) {
+    int first = s_wall_cover[s->src];
+    CustomImage *im = &s_images[s_wall_img[first]];
+    if (!image_load(im) || !image_check(im)) return;
+    IV a[12], b[12];
+    for (int k = 0; k < 3; ++k) {
+        a[k].p = s->v[k];
+        wall_image_uv(s->src, &s->v[k], im, &a[k].u, &a[k].v);
+    }
+    int n = 3;
+    n = clip_iv(a, n, b, 1, 0, 1); if (n < 3) return;
+    n = clip_iv(b, n, a, 1, (float)im->h, 0); if (n < 3) return;
+    for (int c = 0; c < im->chunks; ++c) {
+        float u0 = (float)(c * IMG_CHUNK), u1 = fminf((float)((c + 1) * IMG_CHUNK), (float)im->w);
+        IV x[12], y[12];
+        int m = clip_iv(a, n, x, 0, u0, 1); if (m < 3) continue;
+        m = clip_iv(x, m, y, 0, u1, 0); if (m < 3) continue;
+        u16 tpage = (u16)(((im->vx[c] >> 6) & 0xF) | (((im->vy[c] >> 8) & 1) << 4) | (1 << 7));
+        u16 clut = (u16)((im->cy << 6) | ((im->cx >> 4) & 0x3F));
+        float voff = (float)(im->vy[c] & 255);
+        for (int t = 1; t + 1 < m; ++t) {
+            const IV *tri[3] = {&y[0], &y[t], &y[t + 1]};
+            TV in[3], poly[4];
+            for (int k = 0; k < 3; ++k) {
+                to_view(&tri[k]->p, in[k].v);
+                in[k].u = tri[k]->u - u0;
+                in[k].w = tri[k]->v + voff;
+            }
+            if (in[0].v[2] < NEAR_Z && in[1].v[2] < NEAR_Z && in[2].v[2] < NEAR_Z) continue;
+            if (in[0].v[2] > FAR_Z && in[1].v[2] > FAR_Z && in[2].v[2] > FAR_Z) continue;
+            int q = near_clip(in, 3, poly);
+            if (q < 3) continue;
+            float maxz = 0;
+            for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
+            int depth = clamp_depth(wall_depth(maxz) - 20);
+            emit_img(&poly[0], &poly[1], &poly[2], tpage, clut, depth);
+            if (q == 4) emit_img(&poly[0], &poly[2], &poly[3], tpage, clut, depth);
+        }
+    }
+}
+
 /* ---- editor panel: the room's own picture, half size, over the top half of the screen ---- */
 typedef struct {
     RenderNativeTag tag;
@@ -1180,6 +1757,9 @@ static void draw_panel(void) {
 
 static void draw_room(void) {
     s_tri_used = s_tex_used = s_line_used = 0;
+    if (pe_room_number() != s_images_room || s_fit.group != s_images_group)
+        images_enter_room(pe_room_number(), s_fit.group);
+    update_cover();
     int textured = s_textures && s_tile_frame + 2 >= s_frame && s_tile_count > 0;
     if (textured) build_pieces();
     for (int i = 0; i < s_floor_surf_count; ++i) draw_surface(&s_surf[i]);
@@ -1188,6 +1768,10 @@ static void draw_room(void) {
     if (textured)
         for (int i = 0; i < s_piece_count; ++i)
             if (!s_pieces[i].wall || s_solid_walls) draw_piece(&s_pieces[i]);
+    if (s_solid_walls && room_shape() == 0)
+        for (int i = s_floor_surf_count; i < s_surf_count; ++i)
+            if (s_surf[i].wall && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0)
+                draw_wall_image(&s_surf[i]);
     if (s_edit) {
         draw_panel();
         if (s_sel >= 0 && s_sel < s_wall_count) {
@@ -1221,6 +1805,15 @@ static float aya_yaw_behind(void) {
 /* The camera stops short of the first wall between it and the focus point (seen from above). */
 static float collide_distance(float tx, float tz, float fx, float fz, float want) {
     if (!s_collide) return want;
+    if (room_shape() == 1 && s_box_active) {
+        /* Stay inside the box: where the line back from the focus leaves it. */
+        float t = want, m = 100.0f;
+        if (-fx < 0) t = fminf(t, (tx - (s_box[0] + m)) / fx);
+        if (-fx > 0) t = fminf(t, ((s_box[1] - m) - tx) / -fx);
+        if (-fz < 0) t = fminf(t, (tz - (s_box[2] + m)) / fz);
+        if (-fz > 0) t = fminf(t, ((s_box[3] - m) - tz) / -fz);
+        return t < 200.0f ? 200.0f : t;
+    }
     float cx = tx - fx * want, cz = tz - fz * want;
     float best = 1.0f;
     for (int i = 0; i < s_wall_count; ++i) {
@@ -1306,13 +1899,24 @@ static void fit_path(char *out, size_t size) {
 static void fits_load(void) {
     char path[512], line[256];
     fit_path(path, sizeof path);
+    int v2 = 0; /* older files saved shape 1 for every room: the old default, not a choice */
     s_fit_count = 0;
     s_layer_fit_count = 0;
+    s_wall_image_count = 0;
     FILE *f = path[0] ? fopen(path, "r") : NULL;
     if (!f) return;
     while (fgets(line, sizeof line, f) && s_fit_count < MAX_FITS) {
         RoomFit r;
+        if (!strncmp(line, "# v2", 4)) v2 = 1;
         if (line[0] == '#') continue;
+        if (line[0] == 'W') {
+            WallImage wi;
+            if (s_wall_image_count < MAX_WALL_IMAGES &&
+                sscanf(line + 1, "%d %d %d %d %95[^\r\n]", &wi.room, &wi.group, &wi.wall, &wi.span,
+                       wi.name) == 5)
+                s_wall_images[s_wall_image_count++] = wi;
+            continue;
+        }
         if (line[0] == 'L') {
             LayerFit lf;
             if (s_layer_fit_count < MAX_LAYER_FITS &&
@@ -1324,9 +1928,13 @@ static void fits_load(void) {
                 s_layer_fits[s_layer_fit_count++] = lf;
             continue;
         }
-        if (sscanf(line, "%d %d %f %f %f %f %d %d", &r.room, &r.group, &r.ox, &r.oy, &r.sx, &r.sy,
-                   &r.wall, &r.obst) == 8 && r.sx > 0.01f && r.sy > 0.01f)
+        r.shape = -1;
+        if (sscanf(line, "%d %d %f %f %f %f %d %d %d", &r.room, &r.group, &r.ox, &r.oy, &r.sx,
+                   &r.sy, &r.wall, &r.obst, &r.shape) >= 8 && r.sx > 0.01f && r.sy > 0.01f) {
+            if (!v2 && r.shape == 1) r.shape = -1;
+            if (r.shape < -1 || r.shape > 1) r.shape = -1;
             s_fits[s_fit_count++] = r;
+        }
     }
     fclose(f);
     pe_mod_log(MOD_ID, "%d room fits and %d wall/floor fits loaded", s_fit_count, s_layer_fit_count);
@@ -1352,23 +1960,46 @@ static void fits_save(void) {
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (!adjust_is_identity(&s_wall_adj[i]) && s_layer_fit_count < MAX_LAYER_FITS)
             s_layer_fits[s_layer_fit_count++] = (LayerFit){s_fit.room, s_fit.group, i, s_wall_adj[i]};
+    /* And its wall images. */
+    if (s_images_room == s_fit.room && s_images_group == s_fit.group) {
+        kept = 0;
+        for (int i = 0; i < s_wall_image_count; ++i)
+            if (s_wall_images[i].room != s_fit.room || s_wall_images[i].group != s_fit.group)
+                s_wall_images[kept++] = s_wall_images[i];
+        s_wall_image_count = kept;
+        for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+            if (s_wall_img[i] >= 0 && s_wall_image_count < MAX_WALL_IMAGES) {
+                WallImage *w = &s_wall_images[s_wall_image_count++];
+                w->room = s_fit.room;
+                w->group = s_fit.group;
+                w->wall = i;
+                w->span = s_wall_span[i];
+                snprintf(w->name, sizeof w->name, "%s", s_images[s_wall_img[i]].name);
+            }
+    }
     fit_path(path, sizeof path);
     FILE *f = path[0] ? fopen(path, "w") : NULL;
     if (!f) {
         pe_toast("Chase camera: can't write chasecam_rooms.txt");
         return;
     }
-    fprintf(f, "# room group offset_x offset_y scale_x scale_y wall_height obstacle_height\n");
+    fprintf(f, "# v2\n# room group offset_x offset_y scale_x scale_y wall_height obstacle_height "
+               "shape(-1 the F1 option, 1 picture box, 0 collision walls)\n");
     for (int i = 0; i < s_fit_count; ++i)
-        fprintf(f, "%d %d %.2f %.2f %.4f %.4f %d %d\n", s_fits[i].room, s_fits[i].group,
+        fprintf(f, "%d %d %.2f %.2f %.4f %.4f %d %d %d\n", s_fits[i].room, s_fits[i].group,
                 s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
-                s_fits[i].obst);
+                s_fits[i].obst, s_fits[i].shape);
     fprintf(f, "# L room group layer(-1 floor, else wall edge) offset_x offset_y scale_x scale_y "
                "rotation height(-1 = the room's) rectangle(0/1)\n");
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d\n", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
+    }
+    fprintf(f, "# W room group wall span image (a file in chasecam_textures/room_NNN or common)\n");
+    for (int i = 0; i < s_wall_image_count; ++i) {
+        const WallImage *w = &s_wall_images[i];
+        fprintf(f, "W %d %d %d %d %s\n", w->room, w->group, w->wall, w->span, w->name);
     }
     fclose(f);
     s_fit_saved = 1;
@@ -1382,7 +2013,7 @@ static void fit_select(void) {
     int room = pe_room_number(), group = g_GeomScroll.state.position.groupSelect;
     if (room == s_fit.room && group == s_fit.group) return;
     if (!s_fit_saved && s_fit.room >= 0) fits_save(); /* leaving an edited room keeps its edits */
-    RoomFit r = {room, group, 0, 0, 1, 1, s_wall_height, s_obstacle_height};
+    RoomFit r = {room, group, 0, 0, 1, 1, s_wall_height, s_obstacle_height, -1};
     for (int i = 0; i < s_fit_count; ++i)
         if (s_fits[i].room == room && s_fits[i].group == group) r = s_fits[i];
     s_fit = r;
@@ -1511,6 +2142,41 @@ static void edit_keys(const bool *keys) {
         }
     }
     end_down = keys[SDL_SCANCODE_END];
+    {
+        static int back_down;
+        if (keys[SDL_SCANCODE_BACKSPACE] && !back_down) {
+            s_fit.shape = !room_shape(); /* this room's own choice from now on */
+            s_fit_saved = 0;
+            pe_toast(s_fit.shape ? "This room: picture box" : "This room: collision walls");
+        }
+        back_down = keys[SDL_SCANCODE_BACKSPACE];
+    }
+    {
+        /* F5: next image on the selected wall (none, then each file); Shift+F5 / Ctrl+F5 spread
+         * it over one more / one fewer wall along its loop. */
+        static int f5_down;
+        if (keys[SDL_SCANCODE_F5] && !f5_down) {
+            if (room_shape() != 0) {
+                pe_toast("Images go on collision walls: Backspace switches the room shape");
+            } else if (s_sel < 0) {
+                pe_toast("Select a wall first (numpad .)");
+            } else if (!s_image_count) {
+                pe_toast("No images: put 256-colour BMPs in chasecam_textures/common");
+            } else {
+                if (shift) s_wall_span[s_sel]++;
+                else if (ctrl) { if (s_wall_span[s_sel] > 1) s_wall_span[s_sel]--; }
+                else s_wall_img[s_sel] = s_wall_img[s_sel] + 1 >= s_image_count ? -1 : s_wall_img[s_sel] + 1;
+                s_img_version++;
+                s_fit_saved = 0;
+                char msg[200];
+                if (s_wall_img[s_sel] < 0) snprintf(msg, sizeof msg, "Wall %d: no image", s_sel);
+                else snprintf(msg, sizeof msg, "Wall %d: %s over %d wall(s)", s_sel,
+                              s_images[s_wall_img[s_sel]].name, s_wall_span[s_sel]);
+                pe_toast(msg);
+            }
+        }
+        f5_down = keys[SDL_SCANCODE_F5];
+    }
     dot_down = keys[SDL_SCANCODE_KP_PERIOD];
     div_down = keys[SDL_SCANCODE_KP_DIVIDE];
     mul_down = keys[SDL_SCANCODE_KP_MULTIPLY];
@@ -1603,6 +2269,10 @@ static int set_wall(int v) { s_fit.wall = v; s_fit_saved = 0; return 1; }
 static int get_obst(void) { return s_fit.obst; }
 static int set_obst(int v) { s_fit.obst = v; s_fit_saved = 0; return 1; }
 static void fit_save_action(void) { fits_save(); }
+static const char *const kShapes[] = {"Collision walls", "Picture box"};
+static const char *const kRoomShapes[] = {"As the F1 option", "Collision walls", "Picture box"};
+static int get_shape(void) { return s_fit.shape + 1; }
+static int set_shape(int v) { s_fit.shape = v < 1 ? -1 : v - 1; s_fit_saved = 0; return 1; }
 static void fit_reset_action(void) { fit_reset(); fit_toast(); }
 
 /* ================= input and hooks ================= */
@@ -1658,7 +2328,8 @@ static void read_keys(void) {
         s_edit = !s_edit;
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
-                     "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, 5 reset, 0 save");
+                     "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
+                     "room shape, F5 image, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
@@ -1753,6 +2424,7 @@ static int on_camera(void *ctx, void *user) {
             s_mirror = mirror;
             pe_mod_log(MOD_ID, "room camera is %s", mirror < 0 ? "mirrored" : "a plain rotation");
         }
+        if (room_shape() == 1 && s_tile_frame + 2 >= s_frame) build_box();
         build_camera();
         s_cy = s_edit ? 168.0f : 112.0f;
         g_GeomScroll.state.position.screenOffsetX = 160;
@@ -1782,7 +2454,7 @@ static int on_background(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     if (!can_run() || s_frame - s_drawn_frame > 2) return 0;
-    if (s_textures || s_dump_pending || s_edit) gather_tiles();
+    if (s_textures || s_dump_pending || s_edit || room_shape() == 1) gather_tiles();
     return 1;
 }
 
@@ -1817,6 +2489,10 @@ static int chasecam_init(void) {
                             &s_textures, NULL);
     pe_menu_register_toggle(0, "Solid walls", "Walls on the edges where the floor ends.",
                             &s_solid_walls, NULL);
+    pe_menu_register_choice(0, "Rooms' shape",
+                            "Every room without a choice of its own (Backspace): built from the "
+                            "picture, or walls on the walkable floor's edges.", &s_default_shape,
+                            kShapes, 2);
     pe_menu_register_int(0, "Wall height", "Height of the walls.", &s_wall_height, 200, 4000, 100);
     pe_menu_register_int(0, "Obstacle height",
                          "Height of walls around holes in the floor (seat rows, tables).",
@@ -1843,6 +2519,10 @@ static int chasecam_init(void) {
     pe_menu_register_live_int("Room fit", "Obstacle height",
                               "This room's seat rows and tables (Insert/Delete).", 0, 8000, 50,
                               get_obst, set_obst);
+    pe_menu_register_live_choice("Room fit", "Room shape",
+                                 "Picture box: built from the room's picture. Collision walls: on "
+                                 "the walkable floor's edges (Backspace).",
+                                 kRoomShapes, 3, get_shape, set_shape);
     pe_menu_register_action("Room fit", "Save", "Keep this room's fit (numpad 0).", fit_save_action);
     pe_menu_register_action("Room fit", "Reset", "Back to no offset, size 1 (numpad 5).",
                             fit_reset_action);
@@ -2033,6 +2713,20 @@ static void dump_room(void) {
     canvas_line(&pic, -s_dox + 320, -s_doy, -s_dox + 320, -s_doy + 224, 255, 255, 0);
     snprintf(path, sizeof path, "%s/picture.bmp", dir);
     canvas_save(&pic, path);
+    {
+        /* All of video memory as 15-bit colour (textures, palettes, screen buffers). */
+        Canvas vr;
+        if (canvas_new(&vr, 1024, 512, 0, 0, 0)) {
+            for (int y = 0; y < 512; ++y)
+                for (int x = 0; x < 1024; ++x) {
+                    u16 c = s_vram[y * 1024 + x];
+                    canvas_put(&vr, x, y, (u8)((c & 31) << 3), (u8)(((c >> 5) & 31) << 3), (u8)(((c >> 10) & 31) << 3));
+                }
+            snprintf(path, sizeof path, "%s/vram.bmp", dir);
+            canvas_save(&vr, path);
+            free(vr.rgb);
+        }
+    }
 
     /* ---- overlay: each surface outlined where the room camera sees it ---- */
     for (int i = 0; i < s_surf_count; ++i) {
@@ -2148,6 +2842,19 @@ static void dump_room(void) {
     fprintf(f, "room fit (camera %d): move %.2f %.2f size %.4f x %.4f wall %d obstacle %d%s\n",
             s_fit.group, s_fit.ox, s_fit.oy, s_fit.sx, s_fit.sy, s_fit.wall, s_fit.obst,
             s_fit_saved ? "" : " (not saved)");
+    for (int i = 0; i < s_image_count; ++i) {
+        const CustomImage *im = &s_images[i];
+        fprintf(f, "image %s: %s %dx%d chunks %d at x %d y %d palette %d,%d\n", im->name,
+                im->loaded ? "loaded" : im->failed ? "FAILED" : "not used", im->w, im->h, im->chunks,
+                im->vx[0], im->vy[0], im->cx, im->cy);
+    }
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+        if (s_wall_img[i] >= 0)
+            fprintf(f, "wall %d image %s span %d\n", i, s_images[s_wall_img[i]].name, s_wall_span[i]);
+    fprintf(f, "room shape: %s  box x %.0f..%.0f z %.0f..%.0f floor %.0f\n",
+            room_shape() ? (s_fit.shape < 0 ? "picture box (F1 option)" : "picture box") :
+            (s_fit.shape < 0 ? "collision walls (F1 option)" : "collision walls"), s_box[0], s_box[1], s_box[2], s_box[3],
+            s_floor_y);
     fprintf(f, "floor layer: move %.2f %.2f size %.4f x %.4f turn %.4f\n", s_floor_adj.ox,
             s_floor_adj.oy, s_floor_adj.sx, s_floor_adj.sy, s_floor_adj.rot);
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
@@ -2235,5 +2942,5 @@ static void dump_room(void) {
     pe_mod_log(MOD_ID, "dump written to %s", dir);
 }
 
-const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.5", NULL, chasecam_init,
+const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.6", NULL, chasecam_init,
                                   chasecam_shutdown};

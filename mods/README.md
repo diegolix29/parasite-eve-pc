@@ -95,7 +95,15 @@ with outlines where the walls are, and the stick moves Aya relative to this came
 FIELD_CAMERA (the view matrix is swapped around the actor draw pass and restored after it) and
 FIELD_BACKGROUND (the room's sprites are skipped). Battles keep the room camera.
 
-Walls stand on the floor's edges. Edges that close around a hole in the floor (seat rows,
+Room shape: F1 > Chase camera > Rooms' shape for every room, or a room's own choice
+(Backspace in the editor; Room fit > Room shape, where "As the F1 option" goes back). Picture box, the default: the room is rebuilt from its picture. Every point of
+the background is the room camera's ray through it, landing on the floor (the collision floor's
+usual height) or, beyond it, on a side wall of a box holding everything the picture shows, so the
+textures line up by construction and a hall seen from above stays a hall even when Aya may only
+walk its carpet. The collision floor still moves Aya and the camera stays inside the box.
+Collision walls: walls stand on the walkable floor's edges.
+
+In collision-walls rooms walls stand on the floor's edges. Edges that close around a hole in the floor (seat rows,
 tables) are obstacles and get their own lower height. The floor and walls are textured by
 projecting them through the room's camera onto its background tiles. F7 writes a debug dump
 (chasecam_dump beside the settings): the room picture, an overlay of every floor and wall piece
@@ -113,6 +121,14 @@ back; with the whole room selected it switches every wall, 5 resets the
 selection, 0 saves; Shift is faster. Fits are kept in chasecam_rooms.txt beside the settings
 (room lines, and "L" lines for single walls and the floor). An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
+
+Wall images: 256-colour BMPs (palette entry 0 transparent, at most 1024x256) in
+chasecam_textures/room_NNN or chasecam_textures/common beside the settings; make them with
+tools/make_texture.py. In a collision-walls room, select a wall in the editor and press F5 to
+cycle its image, Shift+F5 / Ctrl+F5 to spread it over one more / one fewer wall along its loop;
+numpad 4/6/8/2 and +/- then move and size it. The mod uploads the image into video memory the
+room leaves blank (halving it until it fits), checks it every frame and moves it if the game
+writes there. Saved as "W" lines in chasecam_rooms.txt. The F7 dump adds vram.bmp.
 
 ## Cheats (pe_cheats)
 
