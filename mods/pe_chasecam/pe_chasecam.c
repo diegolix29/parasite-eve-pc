@@ -139,6 +139,7 @@ static u16 s_surf_pieces[MAX_SURFACES]; /* textured pieces per surface, for the 
 static unsigned s_mesh_version;   /* bumped whenever build_mesh rebuilds s_surf */
 static float s_floor_y;           /* the collision floor's usual height (median) */
 static int s_mesh_shape = -1;
+static unsigned s_mesh_cam, s_mesh_frame; /* room camera the mesh was cut for (in_room_view) */
 static float s_coll[4];           /* the collision floor's bounds: x0, x1, z0, z1 */
 /* Picture box: floor at s_floor_y, side walls on these bounds, walls up to the room's height. */
 static float s_box[4];            /* x0, x1, z0, z1 */
@@ -387,6 +388,41 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 
 /* Surface.wall: 0 floor, 1 wall, 2 ceiling, SURF_CAP an obstacle's top (flat, sorted as a wall). */
 #define SURF_CAP 3
+
+/* Floor and ceiling parts the room camera can't see never get the picture's texture: they are
+ * cut only to COARSE_EDGE, not SPLIT_EDGE (big rooms such as room 32, the street, are mostly
+ * outside the picture: 16000 parts -> about 1/16). Tested against the room camera of this
+ * frame (build_mesh runs in phase 0, after Render_SetViewport); the mesh is rebuilt when that
+ * camera changes (s_mesh_cam). */
+#define COARSE_EDGE 1800.0f
+#define VIEW_LIMIT 1600.0f /* picture pixels from the centre: the fill area, scrolling and fit */
+static int in_room_view(const V3 *a, const V3 *b, const V3 *c) {
+    const GteMatrix *m = (const GteMatrix *)g_EntityRenderScratch;
+    const float H = (float)g_EntityRenderScratch[8];
+    const V3 *p[3] = {a, b, c};
+    float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+    int behind = 0;
+    for (int k = 0; k < 3; ++k) {
+        float v[3];
+        for (int r = 0; r < 3; ++r)
+            v[r] = (m->m[r][0] * p[k]->x + m->m[r][1] * p[k]->y + m->m[r][2] * p[k]->z) / 4096.0f +
+                   (float)m->t[r];
+        if (v[2] < 16.0f) { behind++; continue; }
+        float x = H * v[0] / v[2], y = H * v[1] / v[2];
+        x0 = fminf(x0, x); x1 = fmaxf(x1, x);
+        y0 = fminf(y0, y); y1 = fmaxf(y1, y);
+    }
+    if (behind == 3) return 0;
+    if (behind) return 1; /* crosses the camera's plane: may show */
+    return x1 > -VIEW_LIMIT && x0 < VIEW_LIMIT && y1 > -VIEW_LIMIT && y0 < VIEW_LIMIT;
+}
+
+static unsigned room_camera_key(void) {
+    unsigned h = 2166136261u;
+    for (int i = 0; i < 9; ++i) h = (h ^ g_EntityRenderScratch[i]) * 16777619u;
+    return h;
+}
+
 static void push_surface(const V3 *a, const V3 *b, const V3 *c, u8 shade, u8 wall, u16 src, int depth) {
     if (s_surf_count >= MAX_SURFACES) return;
     if (wall != 1 && depth < 99) {
@@ -394,7 +430,8 @@ static void push_surface(const V3 *a, const V3 *b, const V3 *c, u8 shade, u8 wal
         float bc = (c->x - b->x) * (c->x - b->x) + (c->z - b->z) * (c->z - b->z);
         float ca = (a->x - c->x) * (a->x - c->x) + (a->z - c->z) * (a->z - c->z);
         float longest = ab > bc ? (ab > ca ? ab : ca) : (bc > ca ? bc : ca);
-        if (longest > SPLIT_EDGE * SPLIT_EDGE && depth < 5) {
+        float edge = longest > COARSE_EDGE * COARSE_EDGE || in_room_view(a, b, c) ? SPLIT_EDGE : COARSE_EDGE;
+        if (longest > edge * edge && depth < 5) {
             V3 m_ab = {(a->x + b->x) / 2, (a->y + b->y) / 2, (a->z + b->z) / 2};
             V3 m_bc = {(b->x + c->x) / 2, (b->y + c->y) / 2, (b->z + c->z) / 2};
             V3 m_ca = {(c->x + a->x) / 2, (c->y + a->y) / 2, (c->z + a->z) / 2};
@@ -593,9 +630,12 @@ static void build_mesh(void) {
     if (s_mesh_key == db->triangles.pointer && s_mesh_tris == db->triangleCount &&
         s_mesh_wall_height == s_fit.wall && s_mesh_obstacle_height == s_fit.obst &&
         s_mesh_inside_loop == s_inside_loop && s_mesh_height_version == s_height_version &&
-        s_mesh_shape == room_shape())
+        s_mesh_shape == room_shape() &&
+        (s_mesh_cam == room_camera_key() || s_frame - s_mesh_frame < 30)) /* moving cameras: twice a second */
         return;
     s_mesh_shape = room_shape();
+    s_mesh_cam = room_camera_key();
+    s_mesh_frame = s_frame;
     s_mesh_version++;
     s_box_active = 0;
     s_mesh_inside_loop = s_inside_loop;
@@ -2961,8 +3001,14 @@ static int room_camera_mirrored(void) {
     return det < 0;
 }
 
+/* Rooms that keep the game's own camera whatever F8 says. */
+static int room_blocked(void) {
+    int room = pe_room_number();
+    return room == 36 || room == 351;
+}
+
 static int can_run(void) {
-    return s_enabled && pe_game_loaded() && g_PlayerEntity && g_CollisionDb;
+    return s_enabled && pe_game_loaded() && g_PlayerEntity && g_CollisionDb && !room_blocked();
 }
 
 /* ================= per-room fit ================= */

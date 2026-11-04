@@ -44,6 +44,7 @@
 33 1 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 34 1 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 348 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
+351 1 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 # L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y rotation height(-1 = the room's) rectangle(0/1)
 L 1 0 0 0.00 0.00 1.0000 1.0000 0.0000 770 0
 L 1 0 1 0.00 0.00 1.0000 1.0000 0.0000 760 0
@@ -597,9 +598,6 @@ L 28 0 -2 0.00 0.00 1.0000 1.0000 0.0000 440 0
 L 33 0 -1 -4.25 -7.00 0.8906 0.7759 0.0000 -1 0
 L 33 0 5 -6.00 0.00 1.1913 1.0000 0.0000 -1 0
 L 33 0 6 0.75 16.75 1.8929 1.4186 0.0820 0 0
-L 32 0 -1 -6.75 2.50 1.0000 1.0000 -0.0680 -1 0
-L 32 0 22 -20.50 40.00 1.8064 1.0222 0.0500 -1 0
-L 32 0 30 0.00 0.00 2.3634 1.0000 0.0000 -1 0
 L 33 1 -1 -10.25 -3.75 1.1780 0.8173 0.0000 -1 0
 L 33 1 2 0.00 -0.25 1.0000 1.0000 0.0000 -1 0
 L 33 1 6 0.00 0.50 1.0000 1.0000 0.0000 -1 0
@@ -639,6 +637,11 @@ L 36 0 4 0.00 0.00 1.0000 1.0000 0.0000 0 0
 L 36 0 5 0.00 0.00 1.0000 1.0000 0.0000 690 0
 L 36 0 6 0.00 0.00 1.0000 1.0000 0.0000 690 0
 L 36 0 7 0.00 0.00 1.0000 1.0000 0.0000 0 0
+L 32 0 -1 -6.75 2.50 1.0000 1.0000 -0.0680 -1 0
+L 32 0 -2 0.00 0.00 1.0000 1.0000 0.0000 4270 0
+L 32 0 22 -20.50 40.00 1.8064 1.0222 0.0500 -1 0
+L 32 0 30 0.00 0.00 2.3634 1.0000 0.0000 -1 0
+L 351 1 21 1.00 -1.00 1.0000 1.0000 0.0000 -1 0
 # W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)
 W 3 0 0 1 1_left_wall.bmp
 W 3 0 1 1 1_left_wall.bmp
@@ -753,17 +756,6 @@ W 29 0 -2 1 room_026_wall_5.bmp
 W 30 0 -2 1 room_026_wall_5.bmp
 W 33 0 5 1 room_033_wall_4.bmp
 W 33 0 6 1 room_026_wall_0.bmp
-W 32 0 7 1 room_032_wall_15.bmp
-W 32 0 19 1 room_032_wall_15.bmp
-W 32 0 20 1 room_026_floor.bmp
-W 32 0 21 1 room_032_wall_15.bmp
-W 32 0 23 1 room_032_wall_15.bmp
-W 32 0 24 1 room_032_wall_15.bmp
-W 32 0 25 1 room_032_wall_15.bmp
-W 32 0 28 1 room_032_wall_15.bmp
-W 32 0 29 1 room_032_wall_15.bmp
-W 32 0 30 1 room_032_wall_15.bmp
-W 32 0 31 1 room_032_wall_15.bmp
 W 33 1 1 1 room_033_wall_1.bmp
 W 33 1 4 1 room_033_wall_7.bmp
 W 33 1 5 1 room_026_wall_5.bmp
@@ -782,3 +774,14 @@ W 34 1 -1 1 room_033_floor.bmp
 W 34 1 -2 1 room_033_ceiling.bmp
 W 348 0 6 1 room_026_wall_0.bmp
 W 36 0 -1 1 room_012_wall_18.bmp
+W 32 0 7 1 room_032_wall_15.bmp
+W 32 0 19 1 room_032_wall_15.bmp
+W 32 0 20 1 room_026_floor.bmp
+W 32 0 21 1 room_032_wall_15.bmp
+W 32 0 23 1 room_032_wall_15.bmp
+W 32 0 24 1 room_032_wall_15.bmp
+W 32 0 25 1 room_032_wall_15.bmp
+W 32 0 28 1 room_032_wall_15.bmp
+W 32 0 29 1 room_032_wall_15.bmp
+W 32 0 30 1 room_032_wall_15.bmp
+W 32 0 31 1 room_032_wall_15.bmp
