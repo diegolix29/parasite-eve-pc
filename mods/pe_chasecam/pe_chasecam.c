@@ -1894,6 +1894,31 @@ static void reserve_loaded(const CustomImage *except) {
     }
 }
 
+/* Is image idx on a wall, the floor or the ceiling of this room now? */
+static int image_used(int idx) {
+    if (s_floor_img == idx || s_ceil_img == idx) return 1;
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
+        if (s_wall_img[i] == idx) return 1;
+    return 0;
+}
+
+/* Gives back the video memory of loaded images nothing shows (F5 loads each one it passes);
+ * the number freed. */
+static int free_unused_images(const CustomImage *except) {
+    int freed = 0;
+    for (int i = 0; i < s_image_count; ++i) {
+        CustomImage *o = &s_images[i];
+        if (o == except || !o->loaded || image_used(i)) continue;
+        image_forget_vram(o);
+        freed++;
+    }
+    if (freed) {
+        DrawSync(0);
+        reserve_loaded(except);
+    }
+    return freed;
+}
+
 /* Reads the BMP (once) and uploads it at the largest size the blank video memory takes. */
 static int image_load(CustomImage *im) {
     if (im->loaded) return 1;
@@ -1974,6 +1999,8 @@ static int image_load(CustomImage *im) {
                    im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy);
         return 1;
     }
+    /* Images F5 passed over still hold video memory: give it back and try again. */
+    if (free_unused_images(im)) return image_load(im);
     /* Video memory changes while a room loads: try again in a second. */
     if (!im->retry) pe_mod_log(MOD_ID, "image %s: no blank video memory for it, even at 1/8 size", im->name);
     im->retry = s_frame + 60;
@@ -2011,6 +2038,44 @@ static int image_check(CustomImage *im) {
     }
     im->checked = s_frame;
     return 1;
+}
+
+/* Shift+F5 (twice): deletes image idx's file from the mod's data folder and takes it off this
+ * room's walls, floor and ceiling. Other rooms' rooms.txt lines naming it just find nothing. */
+static void delete_image(int idx) {
+    if (idx < 0 || idx >= s_image_count) return;
+    CustomImage *im = &s_images[idx];
+    char name[96], msg[200];
+    snprintf(name, sizeof name, "%s", im->name);
+    if (!data_dir()[0] || !im->path[0]) {
+        pe_toast("Deleting images needs the dev build (the mod's data folder)");
+        return;
+    }
+    if (!SDL_RemovePath(im->path)) {
+        snprintf(msg, sizeof msg, "Could not delete %s: %s", name, SDL_GetError());
+        pe_toast(msg);
+        return;
+    }
+    pe_mod_log(MOD_ID, "image %s: deleted %s", name, im->path);
+    image_forget_vram(im);
+    free(im->pix);
+    free(im->up);
+    memmove(&s_images[idx], &s_images[idx + 1], (size_t)(s_image_count - idx - 1) * sizeof s_images[0]);
+    s_image_count--;
+    memset(&s_images[s_image_count], 0, sizeof s_images[0]);
+    for (int i = 0; i < MAX_WALLS; ++i) {
+        if (s_wall_img[i] == idx) { s_wall_img[i] = -1; s_wall_span[i] = 1; }
+        else if (s_wall_img[i] > idx) s_wall_img[i]--;
+    }
+    if (s_floor_img == idx) s_floor_img = -1;
+    else if (s_floor_img > idx) s_floor_img--;
+    if (s_ceil_img == idx) s_ceil_img = -1;
+    else if (s_ceil_img > idx) s_ceil_img--;
+    reserve_loaded(NULL);
+    s_img_version++;
+    s_fit_saved = 0;
+    snprintf(msg, sizeof msg, "Deleted %s", name);
+    pe_toast(msg);
 }
 
 /* Which wall each image covers, and how far along it each wall starts. */
@@ -2791,11 +2856,29 @@ static void edit_keys(const bool *keys) {
         back_down = keys[SDL_SCANCODE_BACKSPACE];
     }
     {
-        /* F5: next image on the selected wall or the floor (none, then each file); Shift+F5 /
-         * Ctrl+F5 spread a wall's over one more / one fewer wall along its loop. */
-        static int f5_down;
+        /* F5: next image on the selected wall, floor or ceiling (none, then each file).
+         * Shift+F5 twice: delete the selection's image file. Ctrl+Shift+F5 / Ctrl+F5 spread a
+         * wall's image over one more / one fewer wall along its loop. */
+        static int f5_down, del_armed = -1;
+        static unsigned del_frame;
         if (keys[SDL_SCANCODE_F5] && !f5_down) {
-            if (room_shape() != 0) {
+            int cur = s_sel == SEL_CEILING ? s_ceil_img : s_sel == -1 ? s_floor_img
+                    : s_sel >= 0 && s_sel < MAX_WALLS ? s_wall_img[s_sel] : -1;
+            if (shift && !ctrl && room_shape() == 0 && s_sel != -2) {
+                char msg[200];
+                if (cur < 0 || cur >= s_image_count) {
+                    pe_toast("No image here to delete (F5 picks one)");
+                    del_armed = -1;
+                } else if (del_armed == cur && s_frame - del_frame < 180) {
+                    del_armed = -1;
+                    delete_image(cur);
+                } else {
+                    del_armed = cur;
+                    del_frame = s_frame;
+                    snprintf(msg, sizeof msg, "Shift+F5 again to DELETE the file %s", s_images[cur].name);
+                    pe_toast(msg);
+                }
+            } else if (room_shape() != 0) {
                 pe_toast("Images go on collision walls: Backspace switches the room shape");
             } else if (s_sel == -2) {
                 pe_toast("Select the floor, the ceiling or a wall first (numpad .)");
@@ -2824,7 +2907,7 @@ static void edit_keys(const bool *keys) {
                               s_images[s_floor_img].name);
                 pe_toast(msg);
             } else {
-                if (shift) s_wall_span[s_sel]++;
+                if (shift && ctrl) s_wall_span[s_sel]++;
                 else if (ctrl) { if (s_wall_span[s_sel] > 1) s_wall_span[s_sel]--; }
                 else s_wall_img[s_sel] = s_wall_img[s_sel] + 1 >= s_image_count ? -1 : s_wall_img[s_sel] + 1;
                 s_img_version++;
@@ -3009,7 +3092,7 @@ static void read_keys(void) {
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
-                     "room shape, F5 image, F3 save wall texture, 5 reset, 0 save");
+                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall texture, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");

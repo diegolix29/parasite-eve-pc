@@ -656,4 +656,4 @@ W 319 0 3 1 room_319_wall_4_2.bmp
 W 319 0 8 1 room_319_wall_4_2.bmp
 W 12 1 37 1 room_012_wall_32.bmp
 W 12 0 4 1 room_012_wall_12.bmp
-W 12 0 6 1 0_corridor_photo.bmp
+W 12 0 6 1 2_rear_section_left_wall.bmp
