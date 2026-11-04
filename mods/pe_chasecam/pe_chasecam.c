@@ -16,6 +16,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <SDL3/SDL.h>
+#if defined(__has_include)
+#if __has_include(<webp/decode.h>)
+#include <webp/decode.h>
+#define PE_CHASECAM_WEBP 1
+#endif
+#endif
 
 #include "pe_game.h"
 #include "pe_mod_host.h"
@@ -3632,7 +3638,8 @@ const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.6", NULL, chasecam_
  * rectangle mode and gap fill included), flattened to the wall's shape: left to right along the
  * edge, top to floor. It goes to data/textures/common/room_NNN_wall_K.bmp as a 256-colour BMP
  * (entry 0 transparent where the picture has nothing), so F5 lists it in every room. Size: the
- * wall's longest edges on the picture, at most 1024 x 256. Dev build only (data_dir). */
+ * wall's longest edges on the picture, at most 1024 x 256; with the HD background pack on, the
+ * tiles' HD cells are read (4x, as drawn), else the native texels. Dev build only (data_dir). */
 
 typedef struct { u16 c; unsigned n; } CapColour;
 static int s_cap_axis;
@@ -3729,13 +3736,105 @@ static int cap_save_bmp8(const char *path, const u8 *idx, int w, int h, u8 pal[2
     return ok;
 }
 
-/* The picture's colour at a screen point: the tiles (pic, far ones painted first), else the
- * gap fill's tile there; 0 = nothing. */
-static u16 cap_sample(const u16 *pic, int ox, int oy, int w, int h, float fx, float fy) {
+/* ---- HD cells for the capture: each atlas file read once per capture ---- */
+#define HD_SCALE 4
+#define HD_CELL 68 /* 64 px image, 2 px gutters */
+typedef struct { uint64_t key; SDL_Surface *rgba; } CapAtlas; /* rgba NULL: no file */
+#define MAX_CAP_ATLASES 64
+static CapAtlas s_cap_atlas[MAX_CAP_ATLASES];
+static int s_cap_atlas_count;
+static const char *s_cap_pack;
+
+static SDL_Surface *cap_load_image(const char *file, int webp) {
+    if (!webp) {
+        SDL_PathInfo info;
+        if (!SDL_GetPathInfo(file, &info)) return NULL;
+        size_t n = strlen(file);
+        SDL_Surface *s = n > 4 && !SDL_strcasecmp(file + n - 4, ".png") ? SDL_LoadPNG(file) : SDL_LoadBMP(file);
+        if (!s) return NULL;
+        SDL_Surface *c = SDL_ConvertSurface(s, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(s);
+        return c;
+    }
+#ifdef PE_CHASECAM_WEBP
+    size_t bytes = 0;
+    void *data = SDL_LoadFile(file, &bytes);
+    if (!data) return NULL;
+    int w, h;
+    SDL_Surface *s = NULL;
+    if (WebPGetInfo(data, bytes, &w, &h) && w > 0 && h > 0 && w <= 4096 && h <= 16384) {
+        s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+        if (s && !WebPDecodeRGBAInto(data, bytes, s->pixels, (size_t)s->pitch * h, s->pitch)) {
+            SDL_DestroySurface(s);
+            s = NULL;
+        }
+    }
+    SDL_free(data);
+    return s;
+#else
+    return NULL;
+#endif
+}
+
+static SDL_Surface *cap_atlas(uint64_t key) {
+    for (int i = 0; i < s_cap_atlas_count; ++i)
+        if (s_cap_atlas[i].key == key) return s_cap_atlas[i].rgba;
+    if (s_cap_atlas_count >= MAX_CAP_ATLASES || !s_cap_pack || !*s_cap_pack) return NULL;
+    CapAtlas *a = &s_cap_atlas[s_cap_atlas_count++];
+    a->key = key;
+    a->rgba = NULL;
+    static const char *const ext[3] = {"webp", "png", "bmp"};
+    char file[1200];
+    for (int f = 0; f < 3 && !a->rgba; ++f) {
+        snprintf(file, sizeof file, "%s/%016llx.%s", s_cap_pack, (unsigned long long)key, ext[f]);
+        a->rgba = cap_load_image(file, f == 0);
+    }
+    if (a->rgba && (a->rgba->w < HD_CELL || a->rgba->w % HD_CELL)) {
+        SDL_DestroySurface(a->rgba);
+        a->rgba = NULL;
+    }
+    if (!a->rgba) pe_mod_log(MOD_ID, "capture: no HD atlas %016llx in %s", (unsigned long long)key, s_cap_pack);
+    return a->rgba;
+}
+
+static void cap_atlas_free(void) {
+    for (int i = 0; i < s_cap_atlas_count; ++i)
+        if (s_cap_atlas[i].rgba) SDL_DestroySurface(s_cap_atlas[i].rgba);
+    s_cap_atlas_count = 0;
+}
+
+/* Tile ti's colour at (fx, fy) inside it (0..16): its HD cell when it has one, else its native
+ * texel; transparency always from the native texel, as PsyZ draws it. 0 = transparent. */
+static u16 cap_tile_colour(int ti, float fx, float fy, int *used_hd) {
+    const Tile *t = &s_tiles[ti];
+    int i = (int)floorf(fx), j = (int)floorf(fy);
+    if (i < 0 || j < 0 || i > 15 || j > 15) return 0;
+    u16 native = tile_texel(t, i, j);
+    if (!native || !t->hd) return native;
+    SDL_Surface *a = cap_atlas(t->hd);
+    if (!a) return native;
+    int cols = a->w / HD_CELL;
+    int cx = (t->cell % cols) * HD_CELL + 2, cy = (t->cell / cols) * HD_CELL + 2;
+    int hx = (int)floorf(fx * HD_SCALE), hy = (int)floorf(fy * HD_SCALE);
+    hx = hx < 0 ? 0 : hx > 63 ? 63 : hx;
+    hy = hy < 0 ? 0 : hy > 63 ? 63 : hy;
+    if (cy + hy >= a->h) return native;
+    const u8 *p = (const u8 *)a->pixels + (size_t)(cy + hy) * a->pitch + (size_t)(cx + hx) * 4;
+    *used_hd = 1;
+    u16 c = (u16)((p[0] >> 3) | ((p[1] >> 3) << 5) | ((p[2] >> 3) << 10));
+    return c ? c : 0x8000; /* opaque black */
+}
+
+/* The picture's colour at a screen point: the top tile there (top[], 0xFFFF none), else the gap
+ * fill's tile; 0 = nothing. */
+static u16 cap_sample(const u16 *top, int ox, int oy, int w, int h, float fx, float fy, int *used_hd) {
     int x = (int)floorf(fx), y = (int)floorf(fy);
     if (x >= ox && y >= oy && x < ox + w && y < oy + h) {
-        u16 c = pic[(size_t)(y - oy) * w + (x - ox)];
-        if (c) return c;
+        u16 ti = top[(size_t)(y - oy) * w + (x - ox)];
+        if (ti != 0xFFFF) {
+            u16 c = cap_tile_colour(ti, fx - s_tiles[ti].x, fy - s_tiles[ti].y, used_hd);
+            if (c) return c;
+        }
     }
     if (fill_limit() <= 0) return 0;
     int gx = (int)floorf((float)(x - CELL_X0 - s_fill_ax) / 16), gy = (int)floorf((float)(y - CELL_Y0 - s_fill_ay) / 16);
@@ -3744,10 +3843,7 @@ static u16 cap_sample(const u16 *pic, int ox, int oy, int w, int h, float fx, fl
     if (s_fill_covered[c] || s_fill_dist[c] > fill_limit()) return 0;
     int ti = fill_tile(c);
     if (ti < 0) return 0;
-    const Tile *t = &s_tiles[ti];
-    int i = x - t->x, j = y - t->y;
-    if (i < 0 || j < 0 || i > 15 || j > 15) return 0;
-    return tile_texel(t, i, j);
+    return cap_tile_colour(ti, fx - s_tiles[ti].x, fy - s_tiles[ti].y, used_hd);
 }
 
 static void capture_wall(void) {
@@ -3762,32 +3858,35 @@ static void capture_wall(void) {
     DrawSync(0);
     StoreImage(&all, s_vram);
     DrawSync(0);
+    PeBackgroundInfo bg;
+    Render_GetBackgroundInfo(&bg);
+    s_cap_pack = bg.hd_enabled ? bg.hd_pack_path : NULL;
 
-    /* The picture, painted far first as the game does. */
-    int x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30);
+    /* Which tile is on top at each picture pixel (far ones painted first, as the game does). */
+    int x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30), any_hd = 0;
     for (int i = 0; i < s_tile_count; ++i) {
         x0 = s_tiles[i].x < x0 ? s_tiles[i].x : x0;
         y0 = s_tiles[i].y < y0 ? s_tiles[i].y : y0;
         x1 = s_tiles[i].x + 16 > x1 ? s_tiles[i].x + 16 : x1;
         y1 = s_tiles[i].y + 16 > y1 ? s_tiles[i].y + 16 : y1;
+        any_hd |= s_tiles[i].hd != 0;
     }
     int pw = x1 - x0, ph = y1 - y0;
     if (pw <= 0 || ph <= 0 || pw > 4096 || ph > 4096) return;
-    u16 *pic = calloc((size_t)pw * ph, sizeof *pic);
-    if (!pic) return;
+    u16 *top = malloc((size_t)pw * ph * sizeof *top);
+    if (!top) return;
+    memset(top, 0xFF, (size_t)pw * ph * sizeof *top);
     static u16 order[MAX_TILES];
     for (int i = 0; i < s_tile_count; ++i) order[i] = (u16)i;
     qsort(order, (size_t)s_tile_count, sizeof order[0], tile_cmp_far_first);
     for (int k = 0; k < s_tile_count; ++k) {
         const Tile *t = &s_tiles[order[k]];
         for (int j = 0; j < 16; ++j)
-            for (int i = 0; i < 16; ++i) {
-                u16 c = tile_texel(t, i, j);
-                if (c) pic[(size_t)(t->y - y0 + j) * pw + (t->x - x0 + i)] = c;
-            }
+            for (int i = 0; i < 16; ++i)
+                if (tile_texel(t, i, j)) top[(size_t)(t->y - y0 + j) * pw + (t->x - x0 + i)] = order[k];
     }
 
-    /* Image size: the wall's longest edges on the picture. */
+    /* Image size: the wall's longest edges on the picture, 4x with HD. */
     V3 c[4];
     wall_corners(wi, c);
     float cx[4], cy[4];
@@ -3795,8 +3894,9 @@ static void capture_wall(void) {
     for (int k = 0; k < 4; ++k) seen &= picture_xy_layer(&c[k], wi, &cx[k], &cy[k]);
     float fw = 256, fh = 128;
     if (seen) {
-        fw = fmaxf(hypotf(cx[1] - cx[0], cy[1] - cy[0]), hypotf(cx[2] - cx[3], cy[2] - cy[3]));
-        fh = fmaxf(hypotf(cx[3] - cx[0], cy[3] - cy[0]), hypotf(cx[2] - cx[1], cy[2] - cy[1]));
+        float scale = s_cap_pack && any_hd ? (float)HD_SCALE : 1.0f;
+        fw = scale * fmaxf(hypotf(cx[1] - cx[0], cy[1] - cy[0]), hypotf(cx[2] - cx[3], cy[2] - cy[3]));
+        fh = scale * fmaxf(hypotf(cx[3] - cx[0], cy[3] - cy[0]), hypotf(cx[2] - cx[1], cy[2] - cy[1]));
     }
     int W = (int)ceilf(fw), H = (int)ceilf(fh);
     W = W < 16 ? 16 : W > 1024 ? 1024 : W;
@@ -3804,8 +3904,8 @@ static void capture_wall(void) {
 
     u16 *px = calloc((size_t)W * H, sizeof *px);
     u8 *idx = calloc((size_t)W * H, 1);
-    if (!px || !idx) { free(pic); free(px); free(idx); return; }
-    int opaque = 0;
+    if (!px || !idx) { free(top); free(px); free(idx); cap_atlas_free(); return; }
+    int opaque = 0, used_hd = 0;
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
             float u = (x + 0.5f) / W, up = 1.0f - (y + 0.5f) / H; /* along the edge; 0 floor, 1 top */
@@ -3813,11 +3913,12 @@ static void capture_wall(void) {
                     w->a.z + (w->b.z - w->a.z) * u};
             float sx, sy;
             if (!picture_xy_layer(&p, wi, &sx, &sy)) continue;
-            u16 v = cap_sample(pic, x0, y0, pw, ph, sx, sy);
+            u16 v = cap_sample(top, x0, y0, pw, ph, sx, sy, &used_hd);
             px[(size_t)y * W + x] = v ? (u16)(v | 0x8000) : 0; /* keep opaque black apart from none */
             opaque += v != 0;
         }
-    free(pic);
+    free(top);
+    cap_atlas_free();
     if (!opaque) {
         free(px); free(idx);
         pe_toast("Nothing of the room picture on this wall: nothing saved");
@@ -3852,8 +3953,9 @@ static void capture_wall(void) {
         snprintf(im->name, sizeof im->name, "%s", name);
         snprintf(im->path, sizeof im->path, "%s", path);
     }
-    pe_mod_log(MOD_ID, "capture: wall %d of room %d -> %s (%dx%d, %d colours)", wi, pe_room_number(), path, W, H, colours);
+    pe_mod_log(MOD_ID, "capture: wall %d of room %d -> %s (%dx%d, %d colours, %s)", wi, pe_room_number(), path,
+               W, H, colours, used_hd ? "HD" : "native");
     char msg[200];
-    snprintf(msg, sizeof msg, "Saved common/%s (%dx%d): F5 picks it", name, W, H);
+    snprintf(msg, sizeof msg, "Saved common/%s (%dx%d, %s): F5 picks it", name, W, H, used_hd ? "HD" : "native");
     pe_toast(msg);
 }
