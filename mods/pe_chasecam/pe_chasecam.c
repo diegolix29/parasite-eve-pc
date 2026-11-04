@@ -63,6 +63,7 @@ static unsigned s_frame, s_drawn_frame;
 /* Mouse deltas and wheel, gathered by an event watch between frames. */
 static float s_mouse_dx, s_mouse_dy, s_wheel;
 static int s_f8_down, s_home_down, s_f7_down, s_f9_down, s_dump_pending;
+static int s_capture_pending; /* F3 in the editor: save the selected wall's texture */
 
 /* Per room and camera: how the room's picture sits on the rebuilt walls and floor. The picture
  * position of every surface point is moved by (ox, oy) and scaled by (sx, sy) about the screen
@@ -82,6 +83,7 @@ static int s_fit_saved = 1;   /* the current fit matches the file */
 static int s_edit;            /* F9: fit editor keys on the numpad */
 static unsigned s_edit_toast;
 static void dump_room(void);
+static void capture_wall(void);
 
 /* Room camera words saved around the actor pass. */
 static u32 s_saved_scratch[9];
@@ -2830,6 +2832,17 @@ static void edit_keys(const bool *keys) {
         }
         f5_down = keys[SDL_SCANCODE_F5];
     }
+    {
+        /* F3: save the selected wall's texture, as it looks now, as a shared image (see
+         * capture_wall). */
+        static int f3_down;
+        if (keys[SDL_SCANCODE_F3] && !f3_down) {
+            if (s_sel < 0 || s_sel >= s_wall_count) pe_toast("F3 saves a wall's texture: select a wall first (numpad .)");
+            else if (!data_dir()[0]) pe_toast("F3 needs the dev build (the mod's data folder)");
+            else s_capture_pending = 1;
+        }
+        f3_down = keys[SDL_SCANCODE_F3];
+    }
     dot_down = keys[SDL_SCANCODE_KP_PERIOD];
     div_down = keys[SDL_SCANCODE_KP_DIVIDE];
     mul_down = keys[SDL_SCANCODE_KP_MULTIPLY];
@@ -2990,7 +3003,7 @@ static void read_keys(void) {
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
-                     "room shape, F5 image, 5 reset, 0 save");
+                     "room shape, F5 image, F3 save wall texture, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
@@ -3097,6 +3110,10 @@ static int on_camera(void *ctx, void *user) {
             s_dump_pending = 0;
             dump_room();
         }
+        if (s_capture_pending && (s_tile_frame + 1 >= s_frame || ++s_capture_pending > 6)) {
+            s_capture_pending = 0;
+            capture_wall();
+        }
         s_swapped = 1;
         s_drawn_frame = s_frame;
     } else if (s_swapped) {
@@ -3115,7 +3132,7 @@ static int on_background(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     if (!can_run() || s_frame - s_drawn_frame > 2) return 0;
-    if (s_textures || s_dump_pending || s_edit || room_shape() == 1) gather_tiles();
+    if (s_textures || s_dump_pending || s_capture_pending || s_edit || room_shape() == 1) gather_tiles();
     return 1;
 }
 
@@ -3609,3 +3626,234 @@ static void dump_room(void) {
 
 const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.6", NULL, chasecam_init,
                                   chasecam_shutdown};
+
+/* ================= wall capture (F3 in the F9 editor) =================
+ * Saves the selected wall's texture as the room picture paints it now (through the wall's layer,
+ * rectangle mode and gap fill included), flattened to the wall's shape: left to right along the
+ * edge, top to floor. It goes to data/textures/common/room_NNN_wall_K.bmp as a 256-colour BMP
+ * (entry 0 transparent where the picture has nothing), so F5 lists it in every room. Size: the
+ * wall's longest edges on the picture, at most 1024 x 256. Dev build only (data_dir). */
+
+typedef struct { u16 c; unsigned n; } CapColour;
+static int s_cap_axis;
+static int cap_cmp(const void *a, const void *b) {
+    int sh = s_cap_axis * 5;
+    return (int)((((const CapColour *)a)->c >> sh) & 31) - (int)((((const CapColour *)b)->c >> sh) & 31);
+}
+
+/* Median cut of the used 15-bit colours to at most 255: map[colour] = palette index 1..255. */
+static int cap_palette(const u16 *px, int count, u8 *map, u8 pal[256][3]) {
+    static unsigned hist[32768];
+    static CapColour cols[32768];
+    memset(hist, 0, sizeof hist);
+    for (int i = 0; i < count; ++i)
+        if (px[i]) hist[px[i] & 0x7FFF]++;
+    int n = 0;
+    for (int c = 0; c < 32768; ++c)
+        if (hist[c]) { cols[n].c = (u16)c; cols[n].n = hist[c]; n++; }
+    if (!n) return 0;
+    int box_start[255], box_len[255], boxes = 1;
+    box_start[0] = 0;
+    box_len[0] = n;
+    while (boxes < 255) {
+        int best = -1, best_range = 0, best_axis = 0;
+        for (int b = 0; b < boxes; ++b) {
+            if (box_len[b] < 2) continue;
+            for (int ax = 0; ax < 3; ++ax) {
+                int lo = 31, hi = 0;
+                for (int i = box_start[b]; i < box_start[b] + box_len[b]; ++i) {
+                    int v = (cols[i].c >> (ax * 5)) & 31;
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                }
+                if (hi - lo > best_range) { best_range = hi - lo; best = b; best_axis = ax; }
+            }
+        }
+        if (best < 0) break;
+        s_cap_axis = best_axis;
+        qsort(cols + box_start[best], (size_t)box_len[best], sizeof cols[0], cap_cmp);
+        unsigned total = 0, half = 0;
+        for (int i = box_start[best]; i < box_start[best] + box_len[best]; ++i) total += cols[i].n;
+        int cut = 1;
+        for (int i = box_start[best]; i < box_start[best] + box_len[best] - 1; ++i) {
+            half += cols[i].n;
+            cut = i - box_start[best] + 1;
+            if (half * 2 >= total) break;
+        }
+        box_start[boxes] = box_start[best] + cut;
+        box_len[boxes] = box_len[best] - cut;
+        box_len[best] = cut;
+        boxes++;
+    }
+    for (int b = 0; b < boxes; ++b) {
+        double r = 0, g = 0, bl = 0, w = 0;
+        for (int i = box_start[b]; i < box_start[b] + box_len[b]; ++i) {
+            u16 c = cols[i].c;
+            r += (double)(c & 31) * cols[i].n;
+            g += (double)((c >> 5) & 31) * cols[i].n;
+            bl += (double)((c >> 10) & 31) * cols[i].n;
+            w += cols[i].n;
+            map[c] = (u8)(b + 1);
+        }
+        pal[b + 1][0] = (u8)lrint(r / w * 255.0 / 31.0);
+        pal[b + 1][1] = (u8)lrint(g / w * 255.0 / 31.0);
+        pal[b + 1][2] = (u8)lrint(bl / w * 255.0 / 31.0);
+    }
+    return boxes;
+}
+
+static int cap_save_bmp8(const char *path, const u8 *idx, int w, int h, u8 pal[256][3]) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return 0;
+    int row = (w + 3) & ~3;
+    unsigned off = 14 + 40 + 1024, size = off + (unsigned)row * h;
+    u8 hdr[54] = {'B', 'M'};
+    hdr[2] = size; hdr[3] = size >> 8; hdr[4] = size >> 16; hdr[5] = size >> 24;
+    hdr[10] = off; hdr[11] = off >> 8;
+    hdr[14] = 40;
+    hdr[18] = w; hdr[19] = w >> 8; hdr[22] = h; hdr[23] = h >> 8;
+    hdr[26] = 1; hdr[28] = 8;
+    hdr[47] = 1; /* 256 colours used */
+    fwrite(hdr, 1, 54, f);
+    for (int i = 0; i < 256; ++i) {
+        u8 q[4] = {pal[i][2], pal[i][1], pal[i][0], 0};
+        fwrite(q, 1, 4, f);
+    }
+    u8 line[1024 + 4] = {0};
+    for (int y = h - 1; y >= 0; --y) {
+        memcpy(line, idx + (size_t)y * w, (size_t)w);
+        fwrite(line, 1, (size_t)row, f);
+    }
+    int ok = !ferror(f);
+    fclose(f);
+    return ok;
+}
+
+/* The picture's colour at a screen point: the tiles (pic, far ones painted first), else the
+ * gap fill's tile there; 0 = nothing. */
+static u16 cap_sample(const u16 *pic, int ox, int oy, int w, int h, float fx, float fy) {
+    int x = (int)floorf(fx), y = (int)floorf(fy);
+    if (x >= ox && y >= oy && x < ox + w && y < oy + h) {
+        u16 c = pic[(size_t)(y - oy) * w + (x - ox)];
+        if (c) return c;
+    }
+    if (fill_limit() <= 0) return 0;
+    int gx = (int)floorf((float)(x - CELL_X0 - s_fill_ax) / 16), gy = (int)floorf((float)(y - CELL_Y0 - s_fill_ay) / 16);
+    if (gx < 0 || gy < 0 || gx >= CELLS_W || gy >= CELLS_H) return 0;
+    int c = gy * CELLS_W + gx;
+    if (s_fill_covered[c] || s_fill_dist[c] > fill_limit()) return 0;
+    int ti = fill_tile(c);
+    if (ti < 0) return 0;
+    const Tile *t = &s_tiles[ti];
+    int i = x - t->x, j = y - t->y;
+    if (i < 0 || j < 0 || i > 15 || j > 15) return 0;
+    return tile_texel(t, i, j);
+}
+
+static void capture_wall(void) {
+    int wi = s_sel;
+    if (wi < 0 || wi >= s_wall_count || wi >= MAX_WALLS || !data_dir()[0]) return;
+    if (s_tile_count <= 0) { pe_toast("No room picture this frame: try again"); return; }
+    const WallEdge *w = &s_walls_list[wi];
+    if (w->height <= 0) { pe_toast("This wall has no height"); return; }
+    build_pieces();
+    wall_pivots();
+    RECT all = {0, 0, 1024, 512};
+    DrawSync(0);
+    StoreImage(&all, s_vram);
+    DrawSync(0);
+
+    /* The picture, painted far first as the game does. */
+    int x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30);
+    for (int i = 0; i < s_tile_count; ++i) {
+        x0 = s_tiles[i].x < x0 ? s_tiles[i].x : x0;
+        y0 = s_tiles[i].y < y0 ? s_tiles[i].y : y0;
+        x1 = s_tiles[i].x + 16 > x1 ? s_tiles[i].x + 16 : x1;
+        y1 = s_tiles[i].y + 16 > y1 ? s_tiles[i].y + 16 : y1;
+    }
+    int pw = x1 - x0, ph = y1 - y0;
+    if (pw <= 0 || ph <= 0 || pw > 4096 || ph > 4096) return;
+    u16 *pic = calloc((size_t)pw * ph, sizeof *pic);
+    if (!pic) return;
+    static u16 order[MAX_TILES];
+    for (int i = 0; i < s_tile_count; ++i) order[i] = (u16)i;
+    qsort(order, (size_t)s_tile_count, sizeof order[0], tile_cmp_far_first);
+    for (int k = 0; k < s_tile_count; ++k) {
+        const Tile *t = &s_tiles[order[k]];
+        for (int j = 0; j < 16; ++j)
+            for (int i = 0; i < 16; ++i) {
+                u16 c = tile_texel(t, i, j);
+                if (c) pic[(size_t)(t->y - y0 + j) * pw + (t->x - x0 + i)] = c;
+            }
+    }
+
+    /* Image size: the wall's longest edges on the picture. */
+    V3 c[4];
+    wall_corners(wi, c);
+    float cx[4], cy[4];
+    int seen = 1;
+    for (int k = 0; k < 4; ++k) seen &= picture_xy_layer(&c[k], wi, &cx[k], &cy[k]);
+    float fw = 256, fh = 128;
+    if (seen) {
+        fw = fmaxf(hypotf(cx[1] - cx[0], cy[1] - cy[0]), hypotf(cx[2] - cx[3], cy[2] - cy[3]));
+        fh = fmaxf(hypotf(cx[3] - cx[0], cy[3] - cy[0]), hypotf(cx[2] - cx[1], cy[2] - cy[1]));
+    }
+    int W = (int)ceilf(fw), H = (int)ceilf(fh);
+    W = W < 16 ? 16 : W > 1024 ? 1024 : W;
+    H = H < 8 ? 8 : H > 256 ? 256 : H;
+
+    u16 *px = calloc((size_t)W * H, sizeof *px);
+    u8 *idx = calloc((size_t)W * H, 1);
+    if (!px || !idx) { free(pic); free(px); free(idx); return; }
+    int opaque = 0;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            float u = (x + 0.5f) / W, up = 1.0f - (y + 0.5f) / H; /* along the edge; 0 floor, 1 top */
+            V3 p = {w->a.x + (w->b.x - w->a.x) * u, w->a.y + (w->b.y - w->a.y) * u - up * w->height,
+                    w->a.z + (w->b.z - w->a.z) * u};
+            float sx, sy;
+            if (!picture_xy_layer(&p, wi, &sx, &sy)) continue;
+            u16 v = cap_sample(pic, x0, y0, pw, ph, sx, sy);
+            px[(size_t)y * W + x] = v ? (u16)(v | 0x8000) : 0; /* keep opaque black apart from none */
+            opaque += v != 0;
+        }
+    free(pic);
+    if (!opaque) {
+        free(px); free(idx);
+        pe_toast("Nothing of the room picture on this wall: nothing saved");
+        return;
+    }
+    static u8 map[32768];
+    u8 pal[256][3];
+    memset(pal, 0, sizeof pal);
+    int colours = cap_palette(px, W * H, map, pal);
+    for (int i = 0; i < W * H; ++i) idx[i] = px[i] ? map[px[i] & 0x7FFF] : 0;
+    free(px);
+
+    char dir[700], name[96], path[900];
+    snprintf(dir, sizeof dir, "%s/textures", data_dir());
+    SDL_CreateDirectory(dir);
+    textures_dir(dir, sizeof dir, "common");
+    SDL_CreateDirectory(dir);
+    SDL_PathInfo info;
+    snprintf(name, sizeof name, "room_%03d_wall_%d.bmp", pe_room_number(), wi);
+    for (int k = 2; k < 100; ++k) {
+        snprintf(path, sizeof path, "%s/%s", dir, name);
+        if (!SDL_GetPathInfo(path, &info)) break;
+        snprintf(name, sizeof name, "room_%03d_wall_%d_%d.bmp", pe_room_number(), wi, k);
+    }
+    int ok = cap_save_bmp8(path, idx, W, H, pal);
+    free(idx);
+    if (!ok) { pe_toast("Could not write the wall texture (see pe_mods.log)"); pe_mod_log(MOD_ID, "capture: cannot write %s", path); return; }
+    /* Into this room's F5 list now (other rooms list it on entry). */
+    if (s_image_count < MAX_IMAGES) {
+        CustomImage *im = &s_images[s_image_count++];
+        memset(im, 0, sizeof *im);
+        snprintf(im->name, sizeof im->name, "%s", name);
+        snprintf(im->path, sizeof im->path, "%s", path);
+    }
+    pe_mod_log(MOD_ID, "capture: wall %d of room %d -> %s (%dx%d, %d colours)", wi, pe_room_number(), path, W, H, colours);
+    char msg[200];
+    snprintf(msg, sizeof msg, "Saved common/%s (%dx%d): F5 picks it", name, W, H);
+    pe_toast(msg);
+}
