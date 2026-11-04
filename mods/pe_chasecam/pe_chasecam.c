@@ -203,8 +203,17 @@ typedef struct {
     uint64_t hd_key;
     int hd_on;                /* in PsyZ's atlas this frame */
     unsigned hd_frame;
+    int hd_failed;            /* PsyZ's atlas had no room: video memory only, until the next room */
+    /* HD only (image_ready): with HD on, the picture comes from the HD cells alone, cut from the
+     * file at 4 px per texel, and every texel in video memory is the one shared proxy block
+     * (proxy_ensure): no upload, so any number of images costs no video memory. */
+    int hd_only;              /* hd holds the HD-only atlas */
+    u8 *hd_empty;             /* HD only: per cell, 1 = the file has nothing there */
+    int mode;                 /* this frame: 0 not drawn, 1 uploaded, 2 HD only */
+    int tw, th;               /* the texel grid drawn: the upload's, or (HD only) the file / 4 */
 } CustomImage;
 static CustomImage s_images[MAX_IMAGES];
+static int s_proxy_x = -1, s_proxy_y; /* HD-only images' shared texels in video memory (proxy_ensure) */
 static int s_image_count, s_images_room = -999, s_images_group = -1;
 static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 none) on a first wall */
 static int s_floor_img = -1;             /* image index (-1 none) on the floor */
@@ -1806,6 +1815,7 @@ static void images_enter_room(int room, int group) {
         free(s_images[i].pix);
         free(s_images[i].up);
         free(s_images[i].hd);
+        free(s_images[i].hd_empty);
     }
     memset(s_images, 0, sizeof s_images);
     s_image_count = 0;
@@ -1910,6 +1920,7 @@ static void reserve_loaded(const CustomImage *except) {
         for (int k = 0; k < o->chunks; ++k) reserve(o->vx[k], o->vy[k], 64, o->h, 1);
         reserve(o->cx, o->cy, 256, 1, 1);
     }
+    if (s_proxy_x >= 0) reserve(s_proxy_x, s_proxy_y, 16, 16, 1);
 }
 
 /* Is image idx on a wall, the floor or the ceiling of this room now? */
@@ -1945,20 +1956,38 @@ static int free_unused_images(const CustomImage *except) {
 
 static u8 five_to_eight(int c) { return (u8)((c << 3) | (c >> 2)); }
 
-static void image_hd_build(CustomImage *im) {
+#define PROXY_RGB15 0x4210 /* the proxy texels' colour (mid grey); the reference plane matches it */
+
+/* only = 0: cells for the upload (when it is smaller than the file), its texels as references.
+ * only = 1: HD only, from the file at 4 px per texel, every reference the proxy colour. */
+static void image_hd_build(CustomImage *im, int only) {
     free(im->hd);
+    free(im->hd_empty);
     im->hd = NULL;
+    im->hd_empty = NULL;
+    im->hd_only = 0;
     im->hd_on = 0;
     im->hd_frame = 0;
-    if (im->shift <= 0 || !im->pix) return; /* the upload is the whole file: nothing to add */
-    int gw = (im->w + 15) / 16, gh = (im->h + 15) / 16, cells = gw * gh;
+    if (!im->pix) return;
+    int tw, th;
+    if (only) {
+        tw = (im->w0 + 3) / 4;
+        th = (im->h0 + 3) / 4;
+    } else {
+        if (im->shift <= 0) return; /* the upload is the whole file: nothing to add */
+        tw = im->w;
+        th = im->h;
+    }
+    int gw = (tw + 15) / 16, gh = (th + 15) / 16, cells = gw * gh;
     if (cells <= 0 || cells > IMG_HD_MAX_CELLS) return;
     int cols = cells < 16 ? cells : 16, rows = (cells + cols - 1) / cols;
     int W = cols * 68, H = rows * 136, half = rows * 68;
     u8 *a = calloc((size_t)W * H, 4);
-    if (!a) return;
-    int sw = im->w * 4, sh = im->h * 4;       /* the HD picture's size: 4 px per texel */
-    float step = (float)(1 << im->shift) / 4; /* file pixels per HD pixel */
+    u8 *empty = only ? malloc((size_t)cells) : NULL;
+    if (!a || (only && !empty)) { free(a); free(empty); return; }
+    if (empty) memset(empty, 1, (size_t)cells);
+    int sw = tw * 4, sh = th * 4;                          /* the HD picture's size: 4 px per texel */
+    float step = only ? 1.0f : (float)(1 << im->shift) / 4; /* file pixels per HD pixel */
     for (int cell = 0; cell < cells; ++cell) {
         int gx = cell % gw, gy = cell / gw, ox = (cell % cols) * 68, oy = (cell / cols) * 68;
         for (int py = 0; py < 68; ++py) {
@@ -1966,18 +1995,32 @@ static void image_hd_build(CustomImage *im) {
             int hy = gy * 64 + py - 2;
             hy = hy < 0 ? 0 : hy >= sh ? sh - 1 : hy;
             int tv = hy / 4, fy = (int)(hy * step);
-            fy = fy >= im->h0 ? im->h0 - 1 : fy;
             for (int px = 0; px < 68; ++px) {
                 int hx = gx * 64 + px - 2;
                 hx = hx < 0 ? 0 : hx >= sw ? sw - 1 : hx;
                 int tu = hx / 4, fx = (int)(hx * step);
-                fx = fx >= im->w0 ? im->w0 - 1 : fx;
-                u8 ni = im->pix[(size_t)(tv << im->shift) * im->w0 + (tu << im->shift)]; /* as uploaded */
-                if (!ni) continue;
-                u8 fi = im->pix[(size_t)fy * im->w0 + fx];
-                if (!fi) fi = ni;
                 u8 *m = a + ((size_t)(oy + py) * W + ox + px) * 4;
                 u8 *r = a + ((size_t)(half + oy + py) * W + ox + px) * 4;
+                if (only) {
+                    /* The proxy is opaque everywhere: where the file has nothing, the colour
+                     * PsyZ spreads from the neighbouring pixels shows. */
+                    u8 fi = fx < im->w0 && fy < im->h0 ? im->pix[(size_t)fy * im->w0 + fx] : 0;
+                    r[0] = r[1] = r[2] = five_to_eight(PROXY_RGB15 & 31);
+                    r[3] = 255;
+                    if (!fi) continue;
+                    m[0] = im->rgb[fi][0];
+                    m[1] = im->rgb[fi][1];
+                    m[2] = im->rgb[fi][2];
+                    m[3] = 255;
+                    if (px >= 2 && px < 66 && py >= 2 && py < 66) empty[cell] = 0;
+                    continue;
+                }
+                fx = fx >= im->w0 ? im->w0 - 1 : fx;
+                int fy1 = fy >= im->h0 ? im->h0 - 1 : fy;
+                u8 ni = im->pix[(size_t)(tv << im->shift) * im->w0 + (tu << im->shift)]; /* as uploaded */
+                if (!ni) continue;
+                u8 fi = im->pix[(size_t)fy1 * im->w0 + fx];
+                if (!fi) fi = ni;
                 u16 c = im->clut[ni];
                 r[0] = five_to_eight(c & 31);
                 r[1] = five_to_eight((c >> 5) & 31);
@@ -1992,9 +2035,11 @@ static void image_hd_build(CustomImage *im) {
     }
     uint64_t key = UINT64_C(1469598103934665603);
     char id[160];
-    snprintf(id, sizeof id, "pe_chasecam image %s %dx%d", im->name, im->w, im->h);
+    snprintf(id, sizeof id, "pe_chasecam image %s %dx%d %s", im->name, tw, th, only ? "hd only" : "upload");
     for (const char *s = id; *s; ++s) key = (key ^ (u8)*s) * UINT64_C(1099511628211);
     im->hd = a;
+    im->hd_empty = empty;
+    im->hd_only = only;
     im->hd_w = W;
     im->hd_h = H;
     im->hd_gw = gw;
@@ -2010,48 +2055,109 @@ static int image_hd(CustomImage *im) {
         int r = Psyz_GpuLoadSpriteAtlasPixels(im->hd_key, im->hd, im->hd_w, im->hd_h, im->hd_w * 4);
         im->hd_on = r == 1;
         if (r < 0) {
-            pe_mod_log(MOD_ID, "image %s: PsyZ's HD atlas has no room for its %d cells, native only",
+            pe_mod_log(MOD_ID, "image %s: PsyZ's HD atlas has no room for its %d cells, video memory only",
                        im->name, (im->hd_w / 68) * (im->hd_h / 136));
             free(im->hd);
+            free(im->hd_empty);
             im->hd = NULL;
+            im->hd_empty = NULL;
+            im->hd_only = 0;
+            im->hd_failed = 1;
         }
     }
     return im->hd_on;
+}
+
+/* ---- the proxy: 16x16 15-bit texels of PROXY_RGB15 in blank video memory, shared by every
+ * HD-only image (each piece selects its own HD cell over it). Checked once a frame; if the game
+ * writes there it moves. ---- */
+static unsigned s_proxy_frame, s_proxy_retry;
+static int s_proxy_ok;
+
+static int proxy_ensure(void) {
+    if (s_proxy_frame == s_frame && s_proxy_frame) return s_proxy_ok;
+    s_proxy_frame = s_frame;
+    s_proxy_ok = 0;
+    const unsigned char *known;
+    const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
+    if (!vram) return 0;
+    if (s_proxy_x >= 0) {
+        int ok = 1;
+        for (int y = 0; y < 16 && ok; ++y)
+            for (int x = 0; x < 16 && ok; ++x) {
+                int at = (s_proxy_y + y) * 1024 + s_proxy_x + x;
+                ok = known[at] && vram[at] == PROXY_RGB15;
+            }
+        if (ok) return s_proxy_ok = 1;
+        pe_mod_log(MOD_ID, "HD-only images: the proxy's video memory was taken, moving it");
+        reserve(s_proxy_x, s_proxy_y, 16, 16, 0);
+        s_proxy_x = -1;
+    }
+    if (s_proxy_retry && (int)(s_frame - s_proxy_retry) < 0) return 0;
+    for (int half = 1; half >= 0; --half)
+        for (int y = half * 256; y + 16 <= half * 256 + 256; y += 16)
+            for (int x = 1008; x >= 0; x -= 16) {
+                int ok = 1;
+                for (int j = 0; j < 16 && ok; ++j)
+                    for (int i = 0; i < 16 && ok; ++i) ok = vram_blank(vram, known, x + i, y + j);
+                if (!ok) continue;
+                static u16 buf[16 * 16];
+                for (int i = 0; i < 16 * 16; ++i) buf[i] = PROXY_RGB15;
+                RECT r = {(short)x, (short)y, 16, 16};
+                LoadImage(&r, buf);
+                DrawSync(0);
+                reserve(x, y, 16, 16, 1);
+                s_proxy_x = x;
+                s_proxy_y = y;
+                s_proxy_retry = 0;
+                pe_mod_log(MOD_ID, "HD-only images: proxy at x %d y %d", x, y);
+                return s_proxy_ok = 1;
+            }
+    if (!s_proxy_retry) pe_mod_log(MOD_ID, "HD-only images: no blank 16x16 of video memory for the proxy");
+    s_proxy_retry = s_frame + 60;
+    return 0;
+}
+
+/* Reads the BMP once: indices, palette. */
+static int image_read(CustomImage *im) {
+    if (im->pix) return 1;
+    if (im->failed) return 0;
+    SDL_Surface *surf = im->file ? SDL_LoadBMP_IO(SDL_IOFromConstMem(im->file->data, im->file->size), true)
+                                 : SDL_LoadBMP(im->path);
+    SDL_Palette *pal = surf ? SDL_GetSurfacePalette(surf) : NULL;
+    if (!surf || surf->format != SDL_PIXELFORMAT_INDEX8 || !pal) {
+        pe_mod_log(MOD_ID, "image %s: not a 256-colour BMP (%s)", im->name, surf ? "wrong format" : SDL_GetError());
+        if (surf) SDL_DestroySurface(surf);
+        im->failed = 1;
+        return 0;
+    }
+    im->w0 = surf->w;
+    im->h0 = surf->h;
+    im->pix = malloc((size_t)im->w0 * im->h0);
+    if (!im->pix) { SDL_DestroySurface(surf); im->failed = 1; return 0; }
+    for (int y = 0; y < im->h0; ++y)
+        memcpy(im->pix + (size_t)y * im->w0, (const u8 *)surf->pixels + (size_t)y * surf->pitch, (size_t)im->w0);
+    for (int i = 0; i < 256; ++i) {
+        u16 c = 0;
+        if (i < pal->ncolors && i != 0) {
+            const SDL_Color *k = &pal->colors[i];
+            c = (u16)((k->r >> 3) | ((k->g >> 3) << 5) | ((k->b >> 3) << 10));
+            if (!c) c = 0x8000; /* opaque black */
+            im->rgb[i][0] = k->r;
+            im->rgb[i][1] = k->g;
+            im->rgb[i][2] = k->b;
+        }
+        im->clut[i] = c;
+    }
+    SDL_DestroySurface(surf);
+    return 1;
 }
 
 /* Reads the BMP (once) and uploads it at the largest size the blank video memory takes. */
 static int image_load(CustomImage *im) {
     if (im->loaded) return 1;
     if (im->failed || (im->retry && (int)(s_frame - im->retry) < 0)) return 0;
-    if (!im->pix) {
-        SDL_Surface *surf = im->file ? SDL_LoadBMP_IO(SDL_IOFromConstMem(im->file->data, im->file->size), true)
-                                     : SDL_LoadBMP(im->path);
-        SDL_Palette *pal = surf ? SDL_GetSurfacePalette(surf) : NULL;
-        if (!surf || surf->format != SDL_PIXELFORMAT_INDEX8 || !pal) {
-            pe_mod_log(MOD_ID, "image %s: not a 256-colour BMP (%s)", im->name, surf ? "wrong format" : SDL_GetError());
-            if (surf) SDL_DestroySurface(surf);
-            im->failed = 1;
-            return 0;
-        }
-        im->w0 = surf->w;
-        im->h0 = surf->h;
-        im->pix = malloc((size_t)im->w0 * im->h0);
-        for (int y = 0; y < im->h0; ++y)
-            memcpy(im->pix + (size_t)y * im->w0, (const u8 *)surf->pixels + (size_t)y * surf->pitch, (size_t)im->w0);
-        for (int i = 0; i < 256; ++i) {
-            u16 c = 0;
-            if (i < pal->ncolors && i != 0) {
-                const SDL_Color *k = &pal->colors[i];
-                c = (u16)((k->r >> 3) | ((k->g >> 3) << 5) | ((k->b >> 3) << 10));
-                if (!c) c = 0x8000; /* opaque black */
-                im->rgb[i][0] = k->r;
-                im->rgb[i][1] = k->g;
-                im->rgb[i][2] = k->b;
-            }
-            im->clut[i] = c;
-        }
-        SDL_DestroySurface(surf);
-    }
+    if (!image_read(im)) return 0;
     const unsigned char *known;
     const unsigned short *vram = Psyz_GpuGetVramCopy(&known);
     if (!vram) { im->failed = 1; return 0; }
@@ -2099,7 +2205,7 @@ static int image_load(CustomImage *im) {
         im->loaded = 1;
         im->checked = s_frame;
         im->shift = shift;
-        image_hd_build(im);
+        image_hd_build(im, 0);
         pe_mod_log(MOD_ID, "image %s: %dx%d (1/%d size) in video memory at x %d y %d, palette %d,%d%s",
                    im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy,
                    im->hd ? ", HD cells from the full file" : "");
@@ -2167,6 +2273,7 @@ static void delete_image(int idx) {
     free(im->pix);
     free(im->up);
     free(im->hd);
+    free(im->hd_empty);
     memmove(&s_images[idx], &s_images[idx + 1], (size_t)(s_image_count - idx - 1) * sizeof s_images[0]);
     s_image_count--;
     memset(&s_images[s_image_count], 0, sizeof s_images[0]);
@@ -2221,8 +2328,8 @@ static void wall_image_uv(int j, const V3 *p, const CustomImage *im, float *u, f
     float up = w->height > 0 ? (base_y - p->y) / w->height : 0;
     float su = 0.5f + (sacross - 0.5f - a->ox / 100.0f) / a->sx;
     float sv = 0.5f + ((1.0f - up) - 0.5f - a->oy / 100.0f) / a->sy;
-    *u = su * im->w;
-    *v = sv * im->h;
+    *u = su * im->tw;
+    *v = sv * im->th;
 }
 
 typedef struct { float u, v; V3 p; } IV; /* image-space clip vertex */
@@ -2271,18 +2378,16 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     link_prim(&p->tag, depth);
 }
 
-/* One clipped polygon of image chunk c (image texels; u0 = the chunk's first column) as triangles;
- * hd: its HD tile or NULL. */
-static void image_tris(const CustomImage *im, const IV *y, int m, int c, float u0, const Tile *hd, int on_floor) {
-    u16 tpage = (u16)(((im->vx[c] >> 6) & 0xF) | (((im->vy[c] >> 8) & 1) << 4) | (1 << 7));
-    u16 clut = (u16)((im->cy << 6) | ((im->cx >> 4) & 0x3F));
-    float voff = (float)(im->vy[c] & 255);
+/* One clipped polygon (image texels) as triangles: texel (u, v) is drawn from (u - uoff, v + voff)
+ * of texture page tpage; hd: the HD cell of its 16x16 tile, or NULL. */
+static void image_tris(const IV *y, int m, u16 tpage, u16 clut, float uoff, float voff, const Tile *hd,
+                       int on_floor) {
     for (int t = 1; t + 1 < m; ++t) {
         const IV *tri[3] = {&y[0], &y[t], &y[t + 1]};
         TV in[3], poly[4];
         for (int k = 0; k < 3; ++k) {
             to_view(&tri[k]->p, in[k].v);
-            in[k].u = tri[k]->u - u0;
+            in[k].u = tri[k]->u - uoff;
             in[k].w = tri[k]->v + voff;
         }
         if (in[0].v[2] < NEAR_Z && in[1].v[2] < NEAR_Z && in[2].v[2] < NEAR_Z) continue;
@@ -2298,20 +2403,83 @@ static void image_tris(const CustomImage *im, const IV *y, int m, int c, float u
     }
 }
 
+/* Image im ready to draw this frame (sets im->mode, tw, th)? With HD on (and the internal
+ * resolution above 1x, where PsyZ draws HD at all) it is HD only: no video memory but the shared
+ * proxy. Otherwise, or when PsyZ's HD atlas is full, it is uploaded as before. */
+unsigned Psyz_VideoGetInternalResolution(void);
+static int image_ready(CustomImage *im) {
+    im->mode = 0;
+    if (!image_read(im)) return 0;
+    if (!im->hd_failed && s_hd_registered && Psyz_GpuGetSpriteAtlasesEnabled() &&
+        Psyz_VideoGetInternalResolution() > 1 && proxy_ensure()) {
+        if (!im->hd || !im->hd_only) image_hd_build(im, 1);
+        if (im->hd && im->hd_only && image_hd(im)) {
+            if (im->loaded) image_forget_vram(im); /* uploaded earlier: give it back */
+            im->tw = (im->w0 + 3) / 4;
+            im->th = (im->h0 + 3) / 4;
+            return im->mode = 2;
+        }
+    }
+    if (!image_load(im) || !image_check(im)) return 0;
+    if (im->hd_only) image_hd_build(im, 0); /* the HD-only cells don't fit the upload */
+    im->tw = im->w;
+    im->th = im->h;
+    return im->mode = 1;
+}
+
 /* A polygon in image texels (u may run past the image: it is cut to it), cut to the image's rows
  * and to its 128-texel columns, and with HD cells to its 16x16-texel tiles (one cell each); it
- * sorts just over the floor's or the walls' own textures. */
+ * sorts just over the floor's or the walls' own textures. Needs image_ready first. */
 static void draw_image_poly(CustomImage *im, IV *a, int n, int on_floor) {
     IV b[16];
     n = clip_iv(a, n, b, 1, 0, 1); if (n < 3) return;
-    n = clip_iv(b, n, a, 1, (float)im->h, 0); if (n < 3) return;
+    n = clip_iv(b, n, a, 1, (float)im->th, 0); if (n < 3) return;
+    if (im->mode == 2) {
+        /* HD only: every tile is drawn over the proxy's texels, with its own HD cell. */
+        IV x[16], y[16];
+        int m = clip_iv(a, n, x, 0, 0, 1); if (m < 3) return;
+        m = clip_iv(x, m, y, 0, (float)im->tw, 0); if (m < 3) return;
+        u16 tpage = (u16)(((s_proxy_x >> 6) & 0xF) | (((s_proxy_y >> 8) & 1) << 4) | (2 << 7));
+        int pu = s_proxy_x & 63, pv = s_proxy_y & 255;
+        float umin = 1e9f, umax = -1e9f, vmin = 1e9f, vmax = -1e9f;
+        for (int k = 0; k < m; ++k) {
+            umin = fminf(umin, y[k].u); umax = fmaxf(umax, y[k].u);
+            vmin = fminf(vmin, y[k].v); vmax = fmaxf(vmax, y[k].v);
+        }
+        int gh = (im->th + 15) / 16;
+        for (int ty = (int)floorf(vmin / 16); ty * 16 < vmax && ty < gh; ++ty) {
+            if (ty < 0) continue;
+            IV r1[16], r2[16];
+            int q = clip_iv(y, m, r1, 1, (float)(ty * 16), 1); if (q < 3) continue;
+            q = clip_iv(r1, q, r2, 1, (float)(ty * 16 + 16), 0); if (q < 3) continue;
+            for (int tx = (int)floorf(umin / 16); tx * 16 < umax && tx < im->hd_gw; ++tx) {
+                if (tx < 0) continue;
+                int cell = ty * im->hd_gw + tx;
+                if (im->hd_empty && im->hd_empty[cell]) continue;
+                IV s1[16], s2[16];
+                int p = clip_iv(r2, q, s1, 0, (float)(tx * 16), 1); if (p < 3) continue;
+                p = clip_iv(s1, p, s2, 0, (float)(tx * 16 + 16), 0); if (p < 3) continue;
+                Tile t;
+                memset(&t, 0, sizeof t);
+                t.hd = im->hd_key;
+                t.cell = (u16)cell;
+                t.u = (u8)pu;
+                t.v = (u8)pv;
+                image_tris(s2, p, tpage, 0, (float)(tx * 16 - pu), (float)(pv - ty * 16), &t, on_floor);
+            }
+        }
+        return;
+    }
     int hd = image_hd(im);
     for (int c = 0; c < im->chunks; ++c) {
         float u0 = (float)(c * IMG_CHUNK), u1 = fminf((float)((c + 1) * IMG_CHUNK), (float)im->w);
         IV x[16], y[16];
         int m = clip_iv(a, n, x, 0, u0, 1); if (m < 3) continue;
         m = clip_iv(x, m, y, 0, u1, 0); if (m < 3) continue;
-        if (!hd) { image_tris(im, y, m, c, u0, NULL, on_floor); continue; }
+        u16 tpage = (u16)(((im->vx[c] >> 6) & 0xF) | (((im->vy[c] >> 8) & 1) << 4) | (1 << 7));
+        u16 clut = (u16)((im->cy << 6) | ((im->cx >> 4) & 0x3F));
+        float voff = (float)(im->vy[c] & 255);
+        if (!hd) { image_tris(y, m, tpage, clut, u0, voff, NULL, on_floor); continue; }
         float umin = 1e9f, umax = -1e9f, vmin = 1e9f, vmax = -1e9f;
         for (int k = 0; k < m; ++k) {
             umin = fminf(umin, y[k].u); umax = fmaxf(umax, y[k].u);
@@ -2331,7 +2499,7 @@ static void draw_image_poly(CustomImage *im, IV *a, int n, int on_floor) {
                 t.cell = (u16)(ty * im->hd_gw + tx);
                 t.u = (u8)(tx * 16 - (int)u0);
                 t.v = (u8)((im->vy[c] & 255) + ty * 16);
-                image_tris(im, s2, p, c, u0, &t, on_floor);
+                image_tris(s2, p, tpage, clut, u0, voff, &t, on_floor);
             }
         }
     }
@@ -2342,7 +2510,7 @@ static void draw_wall_image(const Surface *s) {
     int first = s_wall_cover[s->src];
     if (first < 0 || s_wall_img[first] < 0 || s_wall_img[first] >= s_image_count) return;
     CustomImage *im = &s_images[s_wall_img[first]];
-    if (!image_load(im) || !image_check(im)) return;
+    if (!image_ready(im)) return;
     IV a[12];
     for (int k = 0; k < 3; ++k) {
         a[k].p = s->v[k];
@@ -2367,7 +2535,7 @@ static void flat_image_st(const V3 *p, const Adjust *a, float *s, float *t) {
 static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on_floor) {
     if (img < 0 || img >= s_image_count) return;
     CustomImage *im = &s_images[img];
-    if (!image_load(im) || !image_check(im)) return;
+    if (!image_ready(im)) return;
     float st[3][2], s0 = 1e9f, s1 = -1e9f, t0 = 1e9f, t1 = -1e9f;
     for (int k = 0; k < 3; ++k) {
         flat_image_st(&s->v[k], adj, &st[k][0], &st[k][1]);
@@ -2381,12 +2549,12 @@ static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on
             IV a[12], b[12];
             for (int k = 0; k < 3; ++k) {
                 a[k].p = s->v[k];
-                a[k].u = (st[k][0] - (float)i) * (float)im->w;
-                a[k].v = (st[k][1] - (float)j) * (float)im->h;
+                a[k].u = (st[k][0] - (float)i) * (float)im->tw;
+                a[k].v = (st[k][1] - (float)j) * (float)im->th;
             }
             /* This repeat's columns; draw_image_poly cuts the rows. */
             int n = clip_iv(a, 3, b, 0, 0, 1); if (n < 3) continue;
-            n = clip_iv(b, n, a, 0, (float)im->w, 0); if (n < 3) continue;
+            n = clip_iv(b, n, a, 0, (float)im->tw, 0); if (n < 3) continue;
             draw_image_poly(im, a, n, on_floor);
         }
 }
@@ -3747,7 +3915,8 @@ static void dump_room(void) {
     for (int i = 0; i < s_image_count; ++i) {
         const CustomImage *im = &s_images[i];
         fprintf(f, "image %s: %s %dx%d chunks %d at x %d y %d palette %d,%d\n", im->name,
-                im->loaded ? "loaded" : im->failed ? "FAILED" : "not used", im->w, im->h, im->chunks,
+                im->mode == 2 ? "HD only (no video memory)" : im->loaded ? "loaded" : im->failed ? "FAILED" : "not used",
+                im->w, im->h, im->chunks,
                 im->vx[0], im->vy[0], im->cx, im->cy);
     }
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
