@@ -366,6 +366,8 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 
 /* ================= room mesh ================= */
 
+/* Surface.wall: 0 floor, 1 wall, 2 ceiling, SURF_CAP an obstacle's top (flat, sorted as a wall). */
+#define SURF_CAP 3
 static void push_surface(const V3 *a, const V3 *b, const V3 *c, u8 shade, u8 wall, u16 src, int depth) {
     if (s_surf_count >= MAX_SURFACES) return;
     if (wall != 1 && depth < 99) {
@@ -685,6 +687,19 @@ static void build_mesh(void) {
         for (int i = 0; i < s_loop_count; ++i)
             if (!s_loops[i].outer) push_platform(i, s_ceil_y, 2);
     }
+    /* Caps (Surface.wall SURF_CAP): a flat top on every obstacle (seat rows, tables, a piano) at
+     * its tallest wall's top, so the picture's view from above lands on it instead of showing
+     * hollow walls. Not on the platform Aya stands on (its walls have no height). */
+    for (int i = 0; i < s_loop_count; ++i) {
+        const WallLoop *l = &s_loops[i];
+        if (l->outer || l->count < 3) continue;
+        float top = 1e9f;
+        for (int k = 0; k < l->count; ++k) {
+            const WallEdge *w = &s_walls_list[l->first + k];
+            if (w->height > 0) top = fminf(top, fminf(w->a.y, w->b.y) - w->height);
+        }
+        if (top < 1e8f) push_platform(i, top, SURF_CAP);
+    }
     int outer = 0;
     for (int i = 0; i < s_loop_count; ++i) outer += s_loops[i].outer;
     pe_mod_log(MOD_ID, "room %d: %u triangles (%s), %d wall edges in %d loops (%d outer, %d "
@@ -969,7 +984,7 @@ static void project_surface(const Surface *s) {
             apply_adjust(&base[k].sx, &base[k].sy, &s_wall_adj[s->src], s_wall_pivot[s->src][0],
                          s_wall_pivot[s->src][1]);
         else if (s->wall != 1)
-            apply_adjust(&base[k].sx, &base[k].sy, s->wall ? &s_ceil_adj : &s_floor_adj, 160.0f, 112.0f);
+            apply_adjust(&base[k].sx, &base[k].sy, s->wall == 2 ? &s_ceil_adj : &s_floor_adj, 160.0f, 112.0f);
         base[k].q = q;
         base[k].wx = poly[k][3] * q;
         base[k].wy = poly[k][4] * q;
@@ -1611,7 +1626,7 @@ static void draw_surface(const Surface *s) {
     int r, g, b, depth;
     if (s->wall) {
         r = s->shade ? 58 : 52; g = s->shade ? 64 : 58; b = s->shade ? 76 : 70;
-        depth = wall_depth(maxz);
+        depth = wall_depth(maxz) - (s->wall == SURF_CAP ? 4 : 0);
     } else {
         r = s->shade ? 92 : 78; g = s->shade ? 98 : 84; b = s->shade ? 112 : 98;
         depth = floor_back_depth(maxz);
@@ -1688,7 +1703,7 @@ static void draw_piece(const Piece *pc) {
     const Tile *t = &s_tiles[pc->tile];
     /* Nearer background layers (masks) draw over farther ones, all over the flat colour. */
     int layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 8);
-    int depth = clamp_depth((pc->wall ? wall_depth(maxz) : floor_depth(maxz)) - layer);
+    int depth = clamp_depth((pc->wall ? wall_depth(maxz) - (pc->wall == SURF_CAP ? 4 : 0) : floor_depth(maxz)) - layer);
     TriJob job = {TRI_TILE, t, 0, 0, 0, 0, 0, depth};
     emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
     if (n == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
@@ -3232,7 +3247,8 @@ static void edit_keys(const bool *keys) {
          * capture_wall). */
         static int f3_down;
         if (keys[SDL_SCANCODE_F3] && !f3_down) {
-            if (s_sel < 0 || s_sel >= s_wall_count) pe_toast("F3 saves a wall's texture: select a wall first (numpad .)");
+            if ((s_sel < 0 && s_sel != -1 && s_sel != SEL_CEILING) || s_sel >= s_wall_count)
+                pe_toast("F3 saves a wall's, the floor's or the ceiling's texture: select one first (numpad .)");
             else if (!data_dir()[0]) pe_toast("F3 needs the dev build (the mod's data folder)");
             else s_capture_pending = 1;
         }
@@ -3398,7 +3414,7 @@ static void read_keys(void) {
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
-                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall texture, 5 reset, 0 save");
+                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
@@ -4238,12 +4254,37 @@ static u16 cap_sample(const u16 *top, int ox, int oy, int w, int h, float fx, fl
     return cap_tile_colour(ti, fx - s_tiles[ti].x, fy - s_tiles[ti].y, used_hd);
 }
 
+/* The world point of floor / ceiling image place (s, t) (0..1 = one copy): flat_image_st inverted. */
+static V3 flat_world(float s, float t, const Adjust *a, float y) {
+    float bw = s_coll[1] - s_coll[0], bd = s_coll[3] - s_coll[2];
+    float rx = (s - 0.5f) * (fabsf(a->sx) > 1e-3f ? a->sx : 1e-3f) + a->ox / 100.0f;
+    float rz = (t - 0.5f) * (fabsf(a->sy) > 1e-3f ? a->sy : 1e-3f) + a->oy / 100.0f;
+    float c = cosf(a->rot), sn = sinf(a->rot);
+    float fx = rx * c - rz * sn, fz = rx * sn + rz * c;
+    V3 p = {s_coll[0] + (fx + 0.5f) * (bw > 1 ? bw : 1), y, s_coll[2] + (fz + 0.5f) * (bd > 1 ? bd : 1)};
+    return p;
+}
+
+/* The room camera's height (y is down). */
+static float room_camera_y(void) {
+    const GteMatrix *m = (const GteMatrix *)s_pic_scratch;
+    return -((float)m->m[0][1] * (float)m->t[0] + (float)m->m[1][1] * (float)m->t[1] +
+             (float)m->m[2][1] * (float)m->t[2]) / 4096.0f;
+}
+
+/* F3: the selected wall, floor or ceiling as it looks now, saved as an image F5 can put back.
+ * Floor and ceiling images cover the collision floor's bounds through their layer (as F5 draws
+ * them), so a capture lines up with the picture it was taken from. */
 static void capture_wall(void) {
     int wi = s_sel;
-    if (wi < 0 || wi >= s_wall_count || wi >= MAX_WALLS || !data_dir()[0]) return;
+    int flat = wi == -1 ? -1 : wi == SEL_CEILING ? LAYER_CEILING : 0; /* 0 a wall, else its layer */
+    if (!data_dir()[0]) return;
+    if (!flat && (wi < 0 || wi >= s_wall_count || wi >= MAX_WALLS)) return;
     if (s_tile_count <= 0) { pe_toast("No room picture this frame: try again"); return; }
-    const WallEdge *w = &s_walls_list[wi];
-    if (w->height <= 0) { pe_toast("This wall has no height"); return; }
+    const WallEdge *w = flat ? NULL : &s_walls_list[wi];
+    if (w && w->height <= 0) { pe_toast("This wall has no height"); return; }
+    const Adjust *fadj = flat == LAYER_CEILING ? &s_ceil_adj : &s_floor_adj;
+    const char *what = flat == -1 ? "floor" : flat ? "ceiling" : "wall";
     build_pieces();
     wall_pivots();
     RECT all = {0, 0, 1024, 512};
@@ -4253,6 +4294,10 @@ static void capture_wall(void) {
     PeBackgroundInfo bg;
     Render_GetBackgroundInfo(&bg);
     s_cap_pack = bg.hd_enabled ? bg.hd_pack_path : NULL;
+    if (flat == LAYER_CEILING && room_camera_y() <= s_ceil_y) {
+        pe_toast("The room camera is above the ceiling: the picture doesn't show it");
+        return;
+    }
 
     /* Which tile is on top at each picture pixel (far ones painted first, as the game does). */
     int x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30), any_hd = 0;
@@ -4278,13 +4323,22 @@ static void capture_wall(void) {
                 if (tile_texel(t, i, j)) top[(size_t)(t->y - y0 + j) * pw + (t->x - x0 + i)] = order[k];
     }
 
-    /* Image size: the wall's longest edges on the picture, 4x with HD. */
+    /* Image size: the wall's (or the floor area's) longest edges on the picture, 4x with HD. */
     V3 c[4];
-    wall_corners(wi, c);
+    if (flat) {
+        float y = flat == -1 ? s_floor_y : s_ceil_y;
+        c[0] = flat_world(0, 0, fadj, y);
+        c[1] = flat_world(1, 0, fadj, y);
+        c[2] = flat_world(1, 1, fadj, y);
+        c[3] = flat_world(0, 1, fadj, y);
+    } else {
+        wall_corners(wi, c);
+    }
+    int layer = flat ? flat : wi;
     float cx[4], cy[4];
     int seen = 1;
-    for (int k = 0; k < 4; ++k) seen &= picture_xy_layer(&c[k], wi, &cx[k], &cy[k]);
-    float fw = 256, fh = 128;
+    for (int k = 0; k < 4; ++k) seen &= picture_xy_layer(&c[k], layer, &cx[k], &cy[k]);
+    float fw = 256, fh = flat ? 256 : 128;
     if (seen) {
         float scale = s_cap_pack && any_hd ? (float)HD_SCALE : 1.0f;
         fw = scale * fmaxf(hypotf(cx[1] - cx[0], cy[1] - cy[0]), hypotf(cx[2] - cx[3], cy[2] - cy[3]));
@@ -4293,6 +4347,7 @@ static void capture_wall(void) {
     /* Video memory holds at most 1024 x 256 texels; an HD capture keeps up to 4x that, and F5
      * uploads a quarter-size copy with HD cells cut from the whole file (image_hd_build). */
     int hd_size = s_cap_pack && any_hd, maxw = hd_size ? 4096 : 1024, maxh = hd_size ? 1024 : 256;
+    if (flat) maxw = maxh = hd_size ? 2048 : 512; /* square-ish: F5 shrinks it to fit (1/2 .. 1/8) */
     int W = (int)ceilf(fw), H = (int)ceilf(fh);
     if (W > maxw || H > maxh) { /* too big: shrink both, keeping the wall's shape */
         float f = fminf((float)maxw / W, (float)maxh / H);
@@ -4305,23 +4360,68 @@ static void capture_wall(void) {
     u16 *px = calloc((size_t)W * H, sizeof *px);
     u8 *idx = calloc((size_t)W * H, 1);
     if (!px || !idx) { free(top); free(px); free(idx); cap_atlas_free(); return; }
+    /* Floor: its height at each pixel, from the floor triangles drawn into the image (the highest
+     * where they overlap); outside the walkable floor stays empty. Ceiling: flat everywhere. */
+    float *ys = NULL;
+    if (flat == -1) {
+        ys = malloc((size_t)W * H * sizeof *ys);
+        if (!ys) { free(top); free(px); free(idx); cap_atlas_free(); return; }
+        for (int i = 0; i < W * H; ++i) ys[i] = 1e9f;
+        for (int i = 0; i < s_floor_surf_count; ++i) {
+            const Surface *f = &s_surf[i];
+            float tx[3], ty[3];
+            for (int k = 0; k < 3; ++k) {
+                float ss, tt;
+                flat_image_st(&f->v[k], fadj, &ss, &tt);
+                tx[k] = ss * W;
+                ty[k] = tt * H;
+            }
+            float den = (ty[1] - ty[2]) * (tx[0] - tx[2]) + (tx[2] - tx[1]) * (ty[0] - ty[2]);
+            if (fabsf(den) < 1e-6f) continue;
+            int bx0 = (int)floorf(fminf(tx[0], fminf(tx[1], tx[2]))), bx1 = (int)ceilf(fmaxf(tx[0], fmaxf(tx[1], tx[2])));
+            int by0 = (int)floorf(fminf(ty[0], fminf(ty[1], ty[2]))), by1 = (int)ceilf(fmaxf(ty[0], fmaxf(ty[1], ty[2])));
+            bx0 = bx0 < 0 ? 0 : bx0; by0 = by0 < 0 ? 0 : by0;
+            bx1 = bx1 > W ? W : bx1; by1 = by1 > H ? H : by1;
+            for (int y = by0; y < by1; ++y)
+                for (int x = bx0; x < bx1; ++x) {
+                    float qx = x + 0.5f, qy = y + 0.5f;
+                    float l0 = ((ty[1] - ty[2]) * (qx - tx[2]) + (tx[2] - tx[1]) * (qy - ty[2])) / den;
+                    float l1 = ((ty[2] - ty[0]) * (qx - tx[2]) + (tx[0] - tx[2]) * (qy - ty[2])) / den;
+                    float l2 = 1.0f - l0 - l1;
+                    if (l0 < -1e-4f || l1 < -1e-4f || l2 < -1e-4f) continue;
+                    float fy = l0 * f->v[0].y + l1 * f->v[1].y + l2 * f->v[2].y;
+                    if (fy < ys[(size_t)y * W + x]) ys[(size_t)y * W + x] = fy;
+                }
+        }
+    }
     int opaque = 0, used_hd = 0;
     for (int y = 0; y < H; ++y)
         for (int x = 0; x < W; ++x) {
-            float u = (x + 0.5f) / W, up = 1.0f - (y + 0.5f) / H; /* along the edge; 0 floor, 1 top */
-            V3 p = {w->a.x + (w->b.x - w->a.x) * u, w->a.y + (w->b.y - w->a.y) * u - up * w->height,
-                    w->a.z + (w->b.z - w->a.z) * u};
+            V3 p;
+            if (flat) {
+                float fy = flat == -1 ? ys[(size_t)y * W + x] : s_ceil_y;
+                if (fy > 1e8f) continue;
+                p = flat_world((x + 0.5f) / W, (y + 0.5f) / H, fadj, fy);
+            } else {
+                float u = (x + 0.5f) / W, up = 1.0f - (y + 0.5f) / H; /* along the edge; 0 floor, 1 top */
+                V3 q = {w->a.x + (w->b.x - w->a.x) * u, w->a.y + (w->b.y - w->a.y) * u - up * w->height,
+                        w->a.z + (w->b.z - w->a.z) * u};
+                p = q;
+            }
             float sx, sy;
-            if (!picture_xy_layer(&p, wi, &sx, &sy)) continue;
+            if (!picture_xy_layer(&p, layer, &sx, &sy)) continue;
             u16 v = cap_sample(top, x0, y0, pw, ph, sx, sy, &used_hd);
             px[(size_t)y * W + x] = v ? (u16)(v | 0x8000) : 0; /* keep opaque black apart from none */
             opaque += v != 0;
         }
     free(top);
+    free(ys);
     cap_atlas_free();
     if (!opaque) {
         free(px); free(idx);
-        pe_toast("Nothing of the room picture on this wall: nothing saved");
+        char none[120];
+        snprintf(none, sizeof none, "Nothing of the room picture on this %s: nothing saved", what);
+        pe_toast(none);
         return;
     }
     static u8 map[32768];
@@ -4337,15 +4437,18 @@ static void capture_wall(void) {
     textures_dir(dir, sizeof dir, "common");
     SDL_CreateDirectory(dir);
     SDL_PathInfo info;
-    snprintf(name, sizeof name, "room_%03d_wall_%d.bmp", pe_room_number(), wi);
+    char stem[48];
+    if (flat) snprintf(stem, sizeof stem, "room_%03d_%s", pe_room_number(), what);
+    else snprintf(stem, sizeof stem, "room_%03d_wall_%d", pe_room_number(), wi);
+    snprintf(name, sizeof name, "%s.bmp", stem);
     for (int k = 2; k < 100; ++k) {
         snprintf(path, sizeof path, "%s/%s", dir, name);
         if (!SDL_GetPathInfo(path, &info)) break;
-        snprintf(name, sizeof name, "room_%03d_wall_%d_%d.bmp", pe_room_number(), wi, k);
+        snprintf(name, sizeof name, "%s_%d.bmp", stem, k);
     }
     int ok = cap_save_bmp8(path, idx, W, H, pal);
     free(idx);
-    if (!ok) { pe_toast("Could not write the wall texture (see pe_mods.log)"); pe_mod_log(MOD_ID, "capture: cannot write %s", path); return; }
+    if (!ok) { pe_toast("Could not write the texture (see pe_mods.log)"); pe_mod_log(MOD_ID, "capture: cannot write %s", path); return; }
     /* Into this room's F5 list now (other rooms list it on entry). */
     if (s_image_count < MAX_IMAGES) {
         CustomImage *im = &s_images[s_image_count++];
@@ -4353,8 +4456,8 @@ static void capture_wall(void) {
         snprintf(im->name, sizeof im->name, "%s", name);
         snprintf(im->path, sizeof im->path, "%s", path);
     }
-    pe_mod_log(MOD_ID, "capture: wall %d of room %d -> %s (%dx%d, %d colours, %s)", wi, pe_room_number(), path,
-               W, H, colours, used_hd ? "HD" : "native");
+    pe_mod_log(MOD_ID, "capture: %s %d of room %d -> %s (%dx%d, %d colours, %s)", what, flat ? flat : wi,
+               pe_room_number(), path, W, H, colours, used_hd ? "HD" : "native");
     char msg[200];
     snprintf(msg, sizeof msg, "Saved common/%s (%dx%d, %s): F5 picks it", name, W, H, used_hd ? "HD" : "native");
     pe_toast(msg);
