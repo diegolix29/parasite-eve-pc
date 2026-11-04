@@ -100,6 +100,12 @@ static s16 s_saved_offset_x, s_saved_offset_y;
 static u32 s_pic_scratch[9];
 static s16 s_pic_offset_x, s_pic_offset_y;
 static int s_swapped;
+/* The chase camera as the actor pass last used it, for the battle range dome (drawn later in the
+ * frame, after the room camera is back), and the room camera saved around that draw. */
+static u32 s_chase_scratch[9];
+static u32 s_dome_saved_scratch[9];
+static s16 s_dome_saved_x, s_dome_saved_y;
+static int s_dome_swapped;
 static float s_mirror = 1.0f;    /* -1 when the room's camera is a mirror (det < 0) */
 
 /* The movement code's base angles while the chase camera owns them. */
@@ -116,7 +122,9 @@ typedef struct { int first, count, outer; float area, minx, maxx, minz, maxz; } 
 static WallLoop s_loops[MAX_LOOPS];
 static int s_loop_count;
 
-#define MAX_SURFACES 16000
+/* Piece.surf is u16: stay under 65536. Big rooms (room 32, the street) use over 16000 for the
+ * floor alone; when the table fills, the walls pushed after the floor are lost. */
+#define MAX_SURFACES 60000
 #define MAX_WALLS 4096
 #define SPLIT_EDGE 450.0f
 #define WALL_STEP 400.0f
@@ -728,6 +736,9 @@ static void build_mesh(void) {
                pe_room_number(), db->triangleCount, sloped ? "sloped" : "flat", s_wall_count,
                s_loop_count, outer, s_loop_count - outer, s_floor_surf_count,
                s_surf_count - s_floor_surf_count, minx, maxx, minz, maxz);
+    if (s_surf_count >= MAX_SURFACES)
+        pe_mod_log(MOD_ID, "room %d: surface table full (%d): some walls/ceiling are missing",
+                   pe_room_number(), MAX_SURFACES);
 }
 
 /* ================= background tiles ================= */
@@ -3647,6 +3658,29 @@ static int on_frame(void *ctx, void *user) {
 static int on_camera(void *ctx, void *user) {
     (void)user;
     const PeHookFieldCamera *cam = ctx;
+    if (cam->phase == 2) {
+        /* Battle range dome: draw it around Aya from the camera the actors used. */
+        s_dome_swapped = 0;
+        if (!can_run() || s_frame - s_drawn_frame > 1) return 0;
+        memcpy(s_dome_saved_scratch, g_EntityRenderScratch, sizeof s_dome_saved_scratch);
+        s_dome_saved_x = (s16)g_GeomScroll.state.position.screenOffsetX;
+        s_dome_saved_y = (s16)g_GeomScroll.state.position.screenOffsetY;
+        memcpy(g_EntityRenderScratch, s_chase_scratch, sizeof s_chase_scratch);
+        g_GeomScroll.state.position.screenOffsetX = 160;
+        g_GeomScroll.state.position.screenOffsetY = (u16)lrintf(s_cy);
+        SetGeomScreen((long)s_chase_scratch[8]);
+        s_dome_swapped = 1;
+        return 0;
+    }
+    if (cam->phase == 3) {
+        if (!s_dome_swapped) return 0;
+        memcpy(g_EntityRenderScratch, s_dome_saved_scratch, sizeof s_dome_saved_scratch);
+        g_GeomScroll.state.position.screenOffsetX = (u16)s_dome_saved_x;
+        g_GeomScroll.state.position.screenOffsetY = (u16)s_dome_saved_y;
+        SetGeomScreen((long)s_dome_saved_scratch[8]);
+        s_dome_swapped = 0;
+        return 0;
+    }
     if (cam->phase == 0) {
         s_swapped = 0;
         if (!can_run()) return 0;
@@ -3666,6 +3700,7 @@ static int on_camera(void *ctx, void *user) {
         }
         if (room_shape() == 1 && s_tile_frame + 2 >= s_frame) build_box();
         build_camera();
+        memcpy(s_chase_scratch, g_EntityRenderScratch, sizeof s_chase_scratch);
         s_cy = s_edit ? 168.0f : 112.0f;
         g_GeomScroll.state.position.screenOffsetX = 160;
         g_GeomScroll.state.position.screenOffsetY = (u16)lrintf(s_cy);

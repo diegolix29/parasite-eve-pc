@@ -69,7 +69,8 @@ typedef enum PeHookId {
                           * set to 1 after loading a save into the runtime (as the card load does) to
                           * end them (a movie stops as a skipped one does) and leave the way Continue does */
     PE_HOOK_FIELD_CAMERA, /* PeHookFieldCamera: Entity_FrameUpdate, around the actor draw pass;
-                           * phase 0 after the room camera is set, phase 1 after the actors drew */
+                           * phase 0 after the room camera is set, phase 1 after the actors drew;
+                           * phases 2/3 around the battle range dome (Render_AnimationFrame) */
     PE_HOOK_FIELD_BACKGROUND, /* NULL: Render_BuildMeshList entry; nonzero skips the room's
                                * background sprites this frame */
     PE_HOOK_COUNT
@@ -86,7 +87,9 @@ typedef struct PeHookHpLoss {
 
 /* Phase 0: the room camera (g_EntityRenderScratch) and screen offset are set for this frame and
  * the actors are about to draw; a handler may swap the camera. Phase 1: the actors and their
- * effects drew; a handler that swapped the camera puts the room's back. */
+ * effects drew; a handler that swapped the camera puts the room's back. Phases 2 and 3 do the
+ * same around the battle range dome, drawn in world space after the actor pass: a handler that
+ * drew the actors from its own camera swaps it in at 2 and puts the room's back at 3. */
 typedef struct PeHookFieldCamera {
     int phase;
 } PeHookFieldCamera;

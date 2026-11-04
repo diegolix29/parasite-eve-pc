@@ -16,6 +16,7 @@
 #include "pe1/render_packets.h"
 #include "pe1/render_prim.h"
 #include "pe1/script_state.h"
+#include "pe_hooks.h"
 
 /* Shared state of the original HUD module. */
 s32 g_BattleStatusPanelSlot;
@@ -1209,6 +1210,7 @@ void Render_AnimationFrame(void) {
     position.y = Pe1Fixed_Integer(&g_PlayerEntity->pos_y);
     position.z = Pe1Fixed_Integer(&g_PlayerEntity->pos_z);
     if (frame == 0) Asset_Find08Alt(0x457, 0, position.x, position.y, position.z);
+    PE_HOOK(PE_HOOK_FIELD_CAMERA, (&(PeHookFieldCamera){2}));
     Render_SetGteScreenOffset();
     if (g_OtBufferTable[draw_index] && g_RenderAnimBufferBase[draw_index]) {
         g_DrawPacketOffset += Render_DrawWireframeModel(g_GameState.room_geometry_table,
@@ -1218,6 +1220,7 @@ void Render_AnimationFrame(void) {
             RENDER_ANIM_BUFFER_BYTES - g_DrawPacketOffset);
     }
     Render_ResetGteScreenOffset();
+    PE_HOOK(PE_HOOK_FIELD_CAMERA, (&(PeHookFieldCamera){3}));
     g_BattleAttackAnimFrame = (s32)(frame + 1);
 }
 
