@@ -194,15 +194,6 @@ typedef struct {
     u16 *up;                  /* what was uploaded: chunk k's rows at k * 64 * h */
     unsigned checked;         /* the frame image_check last compared it */
     unsigned retry;           /* no room in video memory: the frame to look again, or 0 */
-    int shift;                /* uploaded at 1 / 2^shift of the file's size */
-    u8 rgb[256][3];           /* the file's palette in full colour (for the HD cells) */
-    /* HD: when the file is bigger than what video memory holds, every 16x16 texels of the upload
-     * get a 64x64 cell cut from the file (image_hd_build), drawn by PsyZ like the HD pack's. */
-    u8 *hd;                   /* the atlas, RGBA32, material then reference plane; NULL none */
-    int hd_w, hd_h, hd_gw;    /* its size; 16-texel tiles per row of the upload */
-    uint64_t hd_key;
-    int hd_on;                /* in PsyZ's atlas this frame */
-    unsigned hd_frame;
 } CustomImage;
 static CustomImage s_images[MAX_IMAGES];
 static int s_image_count, s_images_room = -999, s_images_group = -1;
@@ -1560,7 +1551,7 @@ static TV tv_mid(const TV *a, const TV *b) {
 typedef struct { int kind; const Tile *t; u16 tpage, clut; int r, g, b, depth; } TriJob;
 enum { TRI_FLAT, TRI_TILE, TRI_IMAGE };
 static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int depth);
-static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth, const Tile *hd);
+static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth);
 
 /* Draws a triangle, cut in four (a few times over) while it is too big to draw whole. */
 static void emit_split(const TV *a, const TV *b, const TV *c, const TriJob *job, int level) {
@@ -1576,7 +1567,7 @@ static void emit_split(const TV *a, const TV *b, const TV *c, const TriJob *job,
     }
     if (job->kind == TRI_FLAT) emit_tri(a->v, b->v, c->v, job->r, job->g, job->b, job->depth);
     else if (job->kind == TRI_TILE) emit_tex(a, b, c, job->t, job->depth);
-    else emit_img(a, b, c, job->tpage, job->clut, job->depth, job->t);
+    else emit_img(a, b, c, job->tpage, job->clut, job->depth);
 }
 
 /* A surface in flat colour: the floor where the room camera shows nothing, and walls. */
@@ -1797,7 +1788,6 @@ static void images_enter_room(int room, int group) {
         image_forget_vram(&s_images[i]);
         free(s_images[i].pix);
         free(s_images[i].up);
-        free(s_images[i].hd);
     }
     memset(s_images, 0, sizeof s_images);
     s_image_count = 0;
@@ -1929,88 +1919,6 @@ static int free_unused_images(const CustomImage *except) {
     return freed;
 }
 
-/* ---- HD wall images: PsyZ's HD cells (as the background pack's: 68x68, a 64x64 picture of 16x16
- * texels in 2 px gutters) cut from the full-size file when video memory only holds a smaller copy.
- * The reference plane holds each texel's native colour: PsyZ shows the HD pixel only where it
- * matches what video memory has, and the native texel still decides what is transparent. ---- */
-#define IMG_HD_MAX_CELLS (16 * 120) /* one PsyZ atlas: 16 cells wide, at most 16384 px tall */
-
-static u8 five_to_eight(int c) { return (u8)((c << 3) | (c >> 2)); }
-
-static void image_hd_build(CustomImage *im) {
-    free(im->hd);
-    im->hd = NULL;
-    im->hd_on = 0;
-    im->hd_frame = 0;
-    if (im->shift <= 0 || !im->pix) return; /* the upload is the whole file: nothing to add */
-    int gw = (im->w + 15) / 16, gh = (im->h + 15) / 16, cells = gw * gh;
-    if (cells <= 0 || cells > IMG_HD_MAX_CELLS) return;
-    int cols = cells < 16 ? cells : 16, rows = (cells + cols - 1) / cols;
-    int W = cols * 68, H = rows * 136, half = rows * 68;
-    u8 *a = calloc((size_t)W * H, 4);
-    if (!a) return;
-    int sw = im->w * 4, sh = im->h * 4;       /* the HD picture's size: 4 px per texel */
-    float step = (float)(1 << im->shift) / 4; /* file pixels per HD pixel */
-    for (int cell = 0; cell < cells; ++cell) {
-        int gx = cell % gw, gy = cell / gw, ox = (cell % cols) * 68, oy = (cell / cols) * 68;
-        for (int py = 0; py < 68; ++py) {
-            /* Gutters take the neighbouring tiles' pixels, so filtering has no seams. */
-            int hy = gy * 64 + py - 2;
-            hy = hy < 0 ? 0 : hy >= sh ? sh - 1 : hy;
-            int tv = hy / 4, fy = (int)(hy * step);
-            fy = fy >= im->h0 ? im->h0 - 1 : fy;
-            for (int px = 0; px < 68; ++px) {
-                int hx = gx * 64 + px - 2;
-                hx = hx < 0 ? 0 : hx >= sw ? sw - 1 : hx;
-                int tu = hx / 4, fx = (int)(hx * step);
-                fx = fx >= im->w0 ? im->w0 - 1 : fx;
-                u8 ni = im->pix[(size_t)(tv << im->shift) * im->w0 + (tu << im->shift)]; /* as uploaded */
-                if (!ni) continue;
-                u8 fi = im->pix[(size_t)fy * im->w0 + fx];
-                if (!fi) fi = ni;
-                u8 *m = a + ((size_t)(oy + py) * W + ox + px) * 4;
-                u8 *r = a + ((size_t)(half + oy + py) * W + ox + px) * 4;
-                u16 c = im->clut[ni];
-                r[0] = five_to_eight(c & 31);
-                r[1] = five_to_eight((c >> 5) & 31);
-                r[2] = five_to_eight((c >> 10) & 31);
-                r[3] = 255;
-                m[0] = im->rgb[fi][0];
-                m[1] = im->rgb[fi][1];
-                m[2] = im->rgb[fi][2];
-                m[3] = 255;
-            }
-        }
-    }
-    uint64_t key = UINT64_C(1469598103934665603);
-    char id[160];
-    snprintf(id, sizeof id, "pe_chasecam image %s %dx%d", im->name, im->w, im->h);
-    for (const char *s = id; *s; ++s) key = (key ^ (u8)*s) * UINT64_C(1099511628211);
-    im->hd = a;
-    im->hd_w = W;
-    im->hd_h = H;
-    im->hd_gw = gw;
-    im->hd_key = key ? key : 1;
-}
-
-/* Is image im's HD atlas in PsyZ for this frame? Every room change empties PsyZ's atlas, so it is
- * given again (a no-op while PsyZ still has the key). */
-static int image_hd(CustomImage *im) {
-    if (!im->hd || !s_hd_registered || !Psyz_GpuGetSpriteAtlasesEnabled()) return 0;
-    if (im->hd_frame != s_frame) {
-        im->hd_frame = s_frame;
-        int r = Psyz_GpuLoadSpriteAtlasPixels(im->hd_key, im->hd, im->hd_w, im->hd_h, im->hd_w * 4);
-        im->hd_on = r == 1;
-        if (r < 0) {
-            pe_mod_log(MOD_ID, "image %s: PsyZ's HD atlas has no room for its %d cells, native only",
-                       im->name, (im->hd_w / 68) * (im->hd_h / 136));
-            free(im->hd);
-            im->hd = NULL;
-        }
-    }
-    return im->hd_on;
-}
-
 /* Reads the BMP (once) and uploads it at the largest size the blank video memory takes. */
 static int image_load(CustomImage *im) {
     if (im->loaded) return 1;
@@ -2036,9 +1944,6 @@ static int image_load(CustomImage *im) {
                 const SDL_Color *k = &pal->colors[i];
                 c = (u16)((k->r >> 3) | ((k->g >> 3) << 5) | ((k->b >> 3) << 10));
                 if (!c) c = 0x8000; /* opaque black */
-                im->rgb[i][0] = k->r;
-                im->rgb[i][1] = k->g;
-                im->rgb[i][2] = k->b;
             }
             im->clut[i] = c;
         }
@@ -2090,11 +1995,8 @@ static int image_load(CustomImage *im) {
         DrawSync(0);
         im->loaded = 1;
         im->checked = s_frame;
-        im->shift = shift;
-        image_hd_build(im);
-        pe_mod_log(MOD_ID, "image %s: %dx%d (1/%d size) in video memory at x %d y %d, palette %d,%d%s",
-                   im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy,
-                   im->hd ? ", HD cells from the full file" : "");
+        pe_mod_log(MOD_ID, "image %s: %dx%d (1/%d size) in video memory at x %d y %d, palette %d,%d",
+                   im->name, w, h, 1 << shift, im->vx[0], im->vy[0], im->cx, im->cy);
         return 1;
     }
     /* Images F5 passed over still hold video memory: give it back and try again. */
@@ -2158,7 +2060,6 @@ static void delete_image(int idx) {
     image_forget_vram(im);
     free(im->pix);
     free(im->up);
-    free(im->hd);
     memmove(&s_images[idx], &s_images[idx + 1], (size_t)(s_image_count - idx - 1) * sizeof s_images[0]);
     s_image_count--;
     memset(&s_images[s_image_count], 0, sizeof s_images[0]);
@@ -2236,8 +2137,7 @@ static int clip_iv(const IV *in, int n, IV *out, int axis, float lim, int keep_g
     return m;
 }
 
-/* hd: the HD cell of the image tile this triangle lies in (key, cell, tile texel origin), or NULL. */
-static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth, const Tile *hd) {
+static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut, int depth) {
     if (s_tex_used >= MAX_TEX_PRIMS) return;
     PrimFT3 *p = &s_tex_prims[g_ActiveDrawSlot][s_tex_used];
     if (!project(a->v, &p->x0, &p->y0) || !project(b->v, &p->x1, &p->y1) || !project(c->v, &p->x2, &p->y2))
@@ -2251,7 +2151,7 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     s_tex_used++;
     float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
     p->tag.length = 12;
-    hd_select(p, hd);
+    hd_select(p, NULL);
     p->code = 0x24;
     p->r = p->g = p->b = (u8)(128 * k);
     p->u0 = (u8)lrintf(a->u); p->v0 = (u8)lrintf(a->w);
@@ -2263,68 +2163,38 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     link_prim(&p->tag, depth);
 }
 
-/* One clipped polygon of image chunk c (image texels; u0 = the chunk's first column) as triangles;
- * hd: its HD tile or NULL. */
-static void image_tris(const CustomImage *im, const IV *y, int m, int c, float u0, const Tile *hd, int on_floor) {
-    u16 tpage = (u16)(((im->vx[c] >> 6) & 0xF) | (((im->vy[c] >> 8) & 1) << 4) | (1 << 7));
-    u16 clut = (u16)((im->cy << 6) | ((im->cx >> 4) & 0x3F));
-    float voff = (float)(im->vy[c] & 255);
-    for (int t = 1; t + 1 < m; ++t) {
-        const IV *tri[3] = {&y[0], &y[t], &y[t + 1]};
-        TV in[3], poly[4];
-        for (int k = 0; k < 3; ++k) {
-            to_view(&tri[k]->p, in[k].v);
-            in[k].u = tri[k]->u - u0;
-            in[k].w = tri[k]->v + voff;
-        }
-        if (in[0].v[2] < NEAR_Z && in[1].v[2] < NEAR_Z && in[2].v[2] < NEAR_Z) continue;
-        if (in[0].v[2] > FAR_Z && in[1].v[2] > FAR_Z && in[2].v[2] > FAR_Z) continue;
-        int q = near_clip(in, 3, poly);
-        if (q < 3) continue;
-        float maxz = 0;
-        for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
-        int depth = clamp_depth((on_floor ? floor_depth(maxz) : wall_depth(maxz)) - 20);
-        TriJob job = {TRI_IMAGE, hd, tpage, clut, 0, 0, 0, depth};
-        emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
-        if (q == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
-    }
-}
-
 /* A polygon in image texels (u may run past the image: it is cut to it), cut to the image's rows
- * and to its 128-texel columns, and with HD cells to its 16x16-texel tiles (one cell each); it
- * sorts just over the floor's or the walls' own textures. */
+ * and to its 128-texel columns; it sorts just over the floor's or the walls' own textures. */
 static void draw_image_poly(CustomImage *im, IV *a, int n, int on_floor) {
-    IV b[16];
+    IV b[12];
     n = clip_iv(a, n, b, 1, 0, 1); if (n < 3) return;
     n = clip_iv(b, n, a, 1, (float)im->h, 0); if (n < 3) return;
-    int hd = image_hd(im);
     for (int c = 0; c < im->chunks; ++c) {
         float u0 = (float)(c * IMG_CHUNK), u1 = fminf((float)((c + 1) * IMG_CHUNK), (float)im->w);
-        IV x[16], y[16];
+        IV x[12], y[12];
         int m = clip_iv(a, n, x, 0, u0, 1); if (m < 3) continue;
         m = clip_iv(x, m, y, 0, u1, 0); if (m < 3) continue;
-        if (!hd) { image_tris(im, y, m, c, u0, NULL, on_floor); continue; }
-        float umin = 1e9f, umax = -1e9f, vmin = 1e9f, vmax = -1e9f;
-        for (int k = 0; k < m; ++k) {
-            umin = fminf(umin, y[k].u); umax = fmaxf(umax, y[k].u);
-            vmin = fminf(vmin, y[k].v); vmax = fmaxf(vmax, y[k].v);
-        }
-        for (int ty = (int)floorf(vmin / 16); ty * 16 < vmax; ++ty) {
-            IV r1[16], r2[16];
-            int q = clip_iv(y, m, r1, 1, (float)(ty * 16), 1); if (q < 3) continue;
-            q = clip_iv(r1, q, r2, 1, (float)(ty * 16 + 16), 0); if (q < 3) continue;
-            for (int tx = (int)floorf(umin / 16); tx * 16 < umax; ++tx) {
-                IV s1[16], s2[16];
-                int p = clip_iv(r2, q, s1, 0, (float)(tx * 16), 1); if (p < 3) continue;
-                p = clip_iv(s1, p, s2, 0, (float)(tx * 16 + 16), 0); if (p < 3) continue;
-                Tile t;
-                memset(&t, 0, sizeof t);
-                t.hd = im->hd_key;
-                t.cell = (u16)(ty * im->hd_gw + tx);
-                t.u = (u8)(tx * 16 - (int)u0);
-                t.v = (u8)((im->vy[c] & 255) + ty * 16);
-                image_tris(im, s2, p, c, u0, &t, on_floor);
+        u16 tpage = (u16)(((im->vx[c] >> 6) & 0xF) | (((im->vy[c] >> 8) & 1) << 4) | (1 << 7));
+        u16 clut = (u16)((im->cy << 6) | ((im->cx >> 4) & 0x3F));
+        float voff = (float)(im->vy[c] & 255);
+        for (int t = 1; t + 1 < m; ++t) {
+            const IV *tri[3] = {&y[0], &y[t], &y[t + 1]};
+            TV in[3], poly[4];
+            for (int k = 0; k < 3; ++k) {
+                to_view(&tri[k]->p, in[k].v);
+                in[k].u = tri[k]->u - u0;
+                in[k].w = tri[k]->v + voff;
             }
+            if (in[0].v[2] < NEAR_Z && in[1].v[2] < NEAR_Z && in[2].v[2] < NEAR_Z) continue;
+            if (in[0].v[2] > FAR_Z && in[1].v[2] > FAR_Z && in[2].v[2] > FAR_Z) continue;
+            int q = near_clip(in, 3, poly);
+            if (q < 3) continue;
+            float maxz = 0;
+            for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
+            int depth = clamp_depth((on_floor ? floor_depth(maxz) : wall_depth(maxz)) - 20);
+            TriJob job = {TRI_IMAGE, NULL, tpage, clut, 0, 0, 0, depth};
+            emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
+            if (q == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
         }
     }
 }
@@ -3852,8 +3722,7 @@ const PeMod pe_mod_pe_chasecam = {MOD_ID, "Chase camera", "0.6", NULL, chasecam_
  * edge, top to floor. It goes to data/textures/common/room_NNN_wall_K.bmp as a 256-colour BMP
  * (entry 0 transparent where the picture has nothing), so F5 lists it in every room. Size: the
  * wall's longest edges on the picture, at most 1024 x 256; with the HD background pack on, the
- * tiles' HD cells are read (4x, as drawn, at most 4096 x 1024), else the native texels. Dev build
- * only (data_dir). */
+ * tiles' HD cells are read (4x, as drawn), else the native texels. Dev build only (data_dir). */
 
 typedef struct { u16 c; unsigned n; } CapColour;
 static int s_cap_axis;
@@ -3940,8 +3809,7 @@ static int cap_save_bmp8(const char *path, const u8 *idx, int w, int h, u8 pal[2
         u8 q[4] = {pal[i][2], pal[i][1], pal[i][0], 0};
         fwrite(q, 1, 4, f);
     }
-    static u8 line[4096 + 4];
-    memset(line, 0, sizeof line);
+    u8 line[1024 + 4] = {0};
     for (int y = h - 1; y >= 0; --y) {
         memcpy(line, idx + (size_t)y * w, (size_t)w);
         fwrite(line, 1, (size_t)row, f);
@@ -4113,17 +3981,9 @@ static void capture_wall(void) {
         fw = scale * fmaxf(hypotf(cx[1] - cx[0], cy[1] - cy[0]), hypotf(cx[2] - cx[3], cy[2] - cy[3]));
         fh = scale * fmaxf(hypotf(cx[3] - cx[0], cy[3] - cy[0]), hypotf(cx[2] - cx[1], cy[2] - cy[1]));
     }
-    /* Video memory holds at most 1024 x 256 texels; an HD capture keeps up to 4x that, and F5
-     * uploads a quarter-size copy with HD cells cut from the whole file (image_hd_build). */
-    int hd_size = s_cap_pack && any_hd, maxw = hd_size ? 4096 : 1024, maxh = hd_size ? 1024 : 256;
     int W = (int)ceilf(fw), H = (int)ceilf(fh);
-    if (W > maxw || H > maxh) { /* too big: shrink both, keeping the wall's shape */
-        float f = fminf((float)maxw / W, (float)maxh / H);
-        W = (int)(W * f);
-        H = (int)(H * f);
-    }
-    W = W < 16 ? 16 : W > maxw ? maxw : W;
-    H = H < 8 ? 8 : H > maxh ? maxh : H;
+    W = W < 16 ? 16 : W > 1024 ? 1024 : W;
+    H = H < 8 ? 8 : H > 256 ? 256 : H;
 
     u16 *px = calloc((size_t)W * H, sizeof *px);
     u8 *idx = calloc((size_t)W * H, 1);
