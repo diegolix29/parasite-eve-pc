@@ -121,8 +121,11 @@ and height. PageUp/PageDown set the selected wall's own height (the room's wall 
 room is selected), Insert/Delete the obstacle height. End switches the selected wall to a
 rectangle (its texture from its bounding box on the picture, spread evenly over the wall) and
 back; with the whole room selected it switches every wall, 5 resets the
-selection, 0 saves; Shift is faster. Fits are kept in the mod's room data (below): room lines,
-and "L" lines for single walls and the floor. An obstacle Aya stands inside (a
+selection, 0 saves; Shift is faster. Numpad . also stops on each obstacle's top (just before
+its nearest wall, outlined in orange): the numpad keys move, size and turn its texture about its
+centre, PageUp/PageDown set the obstacle's own height (its walls and top), F5 cycles its image.
+Fits are kept in the mod's room data (below): room lines, and "L" lines for single walls, the
+floor, the ceiling and obstacle tops (layer -100-N for loop N). An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
 
 Wall images: 256-colour BMPs (palette entry 0 transparent, at most 1024x256) in the room

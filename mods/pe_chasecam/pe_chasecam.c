@@ -166,6 +166,16 @@ static unsigned s_adj_version;
 static int s_sel = -2; /* editor selection: -3 the ceiling, -2 the whole room, -1 the floor, >= 0 a wall edge */
 #define SEL_CEILING -3
 #define LAYER_CEILING -2 /* the ceiling's layer and image in rooms.txt (-1 the floor) */
+/* Obstacle tops (caps): the editor selects the cap of obstacle loop i as SEL_CAP0 - i, and
+ * rooms.txt keeps its layer (L) and image (W) under the same number. Its layer moves, sizes and
+ * turns its part of the picture about the cap's centre, on top of the floor's layer; its h is
+ * the obstacle's own height (every wall of the loop without a height of its own). */
+#define SEL_CAP0 -100
+static Adjust s_cap_adj[MAX_LOOPS];
+static float s_cap_y[MAX_LOOPS];       /* the cap's height (y), 1e9 when the loop has none */
+static float s_cap_pivot[MAX_LOOPS][2]; /* its centre on the picture */
+static int sel_cap(void) { return s_sel <= SEL_CAP0 ? SEL_CAP0 - s_sel : -1; }
+static void cap_adjust(int i, float *x, float *y);
 static float s_cy = 112.0f; /* chase view centre: lower while the editor splits the screen */
 
 /* ---- custom wall images (data/textures/room_NNN and /common: 256-colour BMPs, entry 0
@@ -218,6 +228,7 @@ static int s_image_count, s_images_room = -999, s_images_group = -1;
 static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 none) on a first wall */
 static int s_floor_img = -1;             /* image index (-1 none) on the floor */
 static int s_ceil_img = -1;              /* image index (-1 none) on the ceiling */
+static int s_cap_img[MAX_LOOPS];         /* image index (-1 none) on each obstacle's top */
 static int s_wall_cover[MAX_WALLS];      /* the first wall of the image covering this one, or -1 */
 static float s_wall_cum[MAX_WALLS];      /* along the covering image: length before this wall */
 static float s_cover_len[MAX_WALLS];     /* the covering image's total length (on its first wall) */
@@ -501,7 +512,7 @@ static void build_loops(void) {
 
 /* A flat face over obstacle loop `index` at height y: its outline cut into triangles (ear
  * clipping). wall 0: the floor Aya stands on there; 2: the ceiling over it. */
-static void push_platform(int index, float y, u8 wall) {
+static void push_platform(int index, float y, u8 wall, u16 src) {
     const WallLoop *l = &s_loops[index];
     if (l->count < 3 || l->count > 256) return;
     float px[256], pz[256];
@@ -532,7 +543,7 @@ static void push_platform(int index, float y, u8 wall) {
             }
             if (inside) continue;
             V3 va = {px[a], y, pz[a]}, vb = {px[b], y, pz[b]}, vc = {px[c], y, pz[c]};
-            push_surface(&va, &vb, &vc, 1, wall, 0xFFFF, 0);
+            push_surface(&va, &vb, &vc, 1, wall, src, 0);
             for (int j = i; j < n - 1; ++j) idx[j] = idx[j + 1];
             n--;
             cut = 1;
@@ -541,7 +552,7 @@ static void push_platform(int index, float y, u8 wall) {
     }
     if (n == 3) {
         V3 va = {px[idx[0]], y, pz[idx[0]]}, vb = {px[idx[1]], y, pz[idx[1]]}, vc = {px[idx[2]], y, pz[idx[2]]};
-        push_surface(&va, &vb, &vc, 1, wall, 0xFFFF, 0);
+        push_surface(&va, &vb, &vc, 1, wall, src, 0);
     }
 }
 
@@ -638,10 +649,16 @@ static void build_mesh(void) {
         }
     }
     build_loops();
+    for (int i = 0; i < s_loop_count; ++i) {
+        /* An obstacle's own height (set on its cap), under its walls' own heights. */
+        const WallLoop *l = &s_loops[i];
+        if (l->outer || i == s_inside_loop || s_cap_adj[i].h < 0 || s_cap_adj[i].sx == 0) continue;
+        for (int k = 0; k < l->count; ++k) s_walls_list[l->first + k].height = s_cap_adj[i].h;
+    }
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (s_wall_adj[i].h >= 0) s_walls_list[i].height = s_wall_adj[i].h;
     if (s_inside_loop >= 0 && s_inside_loop < s_loop_count && !s_loops[s_inside_loop].outer)
-        push_platform(s_inside_loop, s_inside_y, 0);
+        push_platform(s_inside_loop, s_inside_y, 0, 0xFFFF);
     s_floor_surf_count = s_surf_count;
     {
         /* Median floor height, for the picture box. */
@@ -685,20 +702,24 @@ static void build_mesh(void) {
             push_surface(&a, &b, &c, f->shade, 2, f->src, 0);
         }
         for (int i = 0; i < s_loop_count; ++i)
-            if (!s_loops[i].outer) push_platform(i, s_ceil_y, 2);
+            if (!s_loops[i].outer) push_platform(i, s_ceil_y, 2, 0xFFFF);
     }
     /* Caps (Surface.wall SURF_CAP): a flat top on every obstacle (seat rows, tables, a piano) at
      * its tallest wall's top, so the picture's view from above lands on it instead of showing
-     * hollow walls. Not on the platform Aya stands on (its walls have no height). */
+     * hollow walls. Not on the platform Aya stands on (its walls have no height). src: the loop. */
     for (int i = 0; i < s_loop_count; ++i) {
         const WallLoop *l = &s_loops[i];
+        s_cap_y[i] = 1e9f;
         if (l->outer || l->count < 3) continue;
         float top = 1e9f;
         for (int k = 0; k < l->count; ++k) {
             const WallEdge *w = &s_walls_list[l->first + k];
             if (w->height > 0) top = fminf(top, fminf(w->a.y, w->b.y) - w->height);
         }
-        if (top < 1e8f) push_platform(i, top, SURF_CAP);
+        if (top < 1e8f) {
+            s_cap_y[i] = top;
+            push_platform(i, top, SURF_CAP, (u16)i);
+        }
     }
     int outer = 0;
     for (int i = 0; i < s_loop_count; ++i) outer += s_loops[i].outer;
@@ -983,6 +1004,8 @@ static void project_surface(const Surface *s) {
         if (s->wall == 1 && s->src < MAX_WALLS)
             apply_adjust(&base[k].sx, &base[k].sy, &s_wall_adj[s->src], s_wall_pivot[s->src][0],
                          s_wall_pivot[s->src][1]);
+        else if (s->wall == SURF_CAP)
+            cap_adjust(s->src, &base[k].sx, &base[k].sy);
         else if (s->wall != 1)
             apply_adjust(&base[k].sx, &base[k].sy, s->wall == 2 ? &s_ceil_adj : &s_floor_adj, 160.0f, 112.0f);
         base[k].q = q;
@@ -1168,7 +1191,8 @@ static int picture_xy(const V3 *p, float *x, float *y) {
     return 1;
 }
 
-/* The same with the point's layer adjustment (wall edge `wall`, -1 the floor, -2 the ceiling). */
+/* The same with the point's layer adjustment (wall edge `wall`, -1 the floor, -2 the ceiling,
+ * SEL_CAP0 - i the cap of obstacle loop i). */
 static int picture_xy_layer(const V3 *p, int wall, float *x, float *y) {
     if (wall >= 0 && wall < MAX_WALLS && s_wall_adj[wall].rect > 0.5f) {
         const float *r = s_wall_rect[wall];
@@ -1179,6 +1203,8 @@ static int picture_xy_layer(const V3 *p, int wall, float *x, float *y) {
     if (!picture_xy(p, x, y)) return 0;
     if (wall >= 0 && wall < MAX_WALLS)
         apply_adjust(x, y, &s_wall_adj[wall], s_wall_pivot[wall][0], s_wall_pivot[wall][1]);
+    else if (wall <= SEL_CAP0)
+        cap_adjust(SEL_CAP0 - wall, x, y);
     else
         apply_adjust(x, y, wall == LAYER_CEILING ? &s_ceil_adj : &s_floor_adj, 160.0f, 112.0f);
     return 1;
@@ -1225,6 +1251,23 @@ static void wall_pivots(void) {
             s_wall_pivot[i][1] = 112.0f;
         }
     }
+    /* Caps turn and size about their centre on the picture (after the floor's layer). */
+    for (int i = 0; i < s_loop_count; ++i) {
+        const WallLoop *l = &s_loops[i];
+        V3 mid = {(l->minx + l->maxx) * 0.5f, s_cap_y[i] < 1e8f ? s_cap_y[i] : s_floor_y,
+                  (l->minz + l->maxz) * 0.5f};
+        float x = 160.0f, y = 112.0f;
+        if (picture_xy(&mid, &x, &y)) apply_adjust(&x, &y, &s_floor_adj, 160.0f, 112.0f);
+        s_cap_pivot[i][0] = x;
+        s_cap_pivot[i][1] = y;
+    }
+}
+
+/* A picture point of the cap of loop i through its layers: the floor's, then its own. */
+static void cap_adjust(int i, float *x, float *y) {
+    apply_adjust(x, y, &s_floor_adj, 160.0f, 112.0f);
+    if (i >= 0 && i < MAX_LOOPS && s_cap_adj[i].sx != 0)
+        apply_adjust(x, y, &s_cap_adj[i], s_cap_pivot[i][0], s_cap_pivot[i][1]);
 }
 
 /* The game draws farther entries first (higher ordering-table entry, then the later tile), so
@@ -1875,9 +1918,17 @@ static void images_enter_room(int room, int group) {
     /* This room's assignments. */
     for (int i = 0; i < MAX_WALLS; ++i) { s_wall_img[i] = -1; s_wall_span[i] = 1; }
     s_floor_img = s_ceil_img = -1;
+    for (int i = 0; i < MAX_LOOPS; ++i) s_cap_img[i] = -1;
     for (int i = 0; i < s_wall_image_count; ++i) {
         const WallImage *w = &s_wall_images[i];
-        if (w->room != room || w->group != group || w->wall < LAYER_CEILING || w->wall >= MAX_WALLS) continue;
+        if (w->room != room || w->group != group || w->wall >= MAX_WALLS) continue;
+        if (w->wall <= SEL_CAP0) {
+            int loop = SEL_CAP0 - w->wall;
+            for (int j = 0; j < s_image_count && loop < MAX_LOOPS; ++j)
+                if (!strcmp(s_images[j].name, w->name)) s_cap_img[loop] = j;
+            continue;
+        }
+        if (w->wall < LAYER_CEILING) continue;
         for (int j = 0; j < s_image_count; ++j)
             if (!strcmp(s_images[j].name, w->name) && w->wall == -1) {
                 s_floor_img = j;
@@ -1941,6 +1992,8 @@ static void reserve_loaded(const CustomImage *except) {
 /* Is image idx on a wall, the floor or the ceiling of this room now? */
 static int image_used(int idx) {
     if (s_floor_img == idx || s_ceil_img == idx) return 1;
+    for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
+        if (s_cap_img[i] == idx) return 1;
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (s_wall_img[i] == idx) return 1;
     return 0;
@@ -2300,6 +2353,10 @@ static void delete_image(int idx) {
     else if (s_floor_img > idx) s_floor_img--;
     if (s_ceil_img == idx) s_ceil_img = -1;
     else if (s_ceil_img > idx) s_ceil_img--;
+    for (int i = 0; i < MAX_LOOPS; ++i) {
+        if (s_cap_img[i] == idx) s_cap_img[i] = -1;
+        else if (s_cap_img[i] > idx) s_cap_img[i]--;
+    }
     reserve_loaded(NULL);
     s_img_version++;
     s_fit_saved = 0;
@@ -2534,12 +2591,13 @@ static void draw_wall_image(const Surface *s) {
     draw_image_poly(im, a, 3, 0);
 }
 
-/* Floor or ceiling image place of a point, in images (0..1 = one copy): over the collision
- * floor's bounds, through the layer's move (in % of the image), size and turn. */
-static void flat_image_st(const V3 *p, const Adjust *a, float *s, float *t) {
-    float bw = s_coll[1] - s_coll[0], bd = s_coll[3] - s_coll[2];
-    float fx = (p->x - s_coll[0]) / (bw > 1 ? bw : 1) - 0.5f;
-    float fz = (p->z - s_coll[2]) / (bd > 1 ? bd : 1) - 0.5f;
+/* Floor, ceiling or cap image place of a point, in images (0..1 = one copy): over bounds b (x0,
+ * x1, z0, z1: the collision floor's, or the obstacle's), through the layer's move (in % of the
+ * image), size and turn. */
+static void flat_image_st(const V3 *p, const Adjust *a, const float *b, float *s, float *t) {
+    float bw = b[1] - b[0], bd = b[3] - b[2];
+    float fx = (p->x - b[0]) / (bw > 1 ? bw : 1) - 0.5f;
+    float fz = (p->z - b[2]) / (bd > 1 ? bd : 1) - 0.5f;
     float c = cosf(a->rot), sn = sinf(a->rot);
     float rx = fx * c + fz * sn, rz = -fx * sn + fz * c;
     *s = 0.5f + (rx - a->ox / 100.0f) / (fabsf(a->sx) > 1e-3f ? a->sx : 1e-3f);
@@ -2549,11 +2607,16 @@ static void flat_image_st(const V3 *p, const Adjust *a, float *s, float *t) {
 /* One floor or ceiling triangle with image img, cut into the image's repeats. */
 static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on_floor) {
     if (img < 0 || img >= s_image_count) return;
+    float bounds[4] = {s_coll[0], s_coll[1], s_coll[2], s_coll[3]};
+    if (s->wall == SURF_CAP && s->src < s_loop_count) {
+        const WallLoop *l = &s_loops[s->src];
+        bounds[0] = l->minx; bounds[1] = l->maxx; bounds[2] = l->minz; bounds[3] = l->maxz;
+    }
     CustomImage *im = &s_images[img];
     if (!image_ready(im)) return;
     float st[3][2], s0 = 1e9f, s1 = -1e9f, t0 = 1e9f, t1 = -1e9f;
     for (int k = 0; k < 3; ++k) {
-        flat_image_st(&s->v[k], adj, &st[k][0], &st[k][1]);
+        flat_image_st(&s->v[k], adj, bounds, &st[k][0], &st[k][1]);
         s0 = fminf(s0, st[k][0]); s1 = fmaxf(s1, st[k][0]);
         t0 = fminf(t0, st[k][1]); t1 = fmaxf(t1, st[k][1]);
     }
@@ -2713,6 +2776,10 @@ static void draw_panel(void) {
     } else if (s_sel == SEL_CEILING) {
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall == 2) panel_outline(s_surf[i].v, 3, LAYER_CEILING, 255, 120, 255);
+    } else if (sel_cap() >= 0) {
+        for (int i = s_floor_surf_count; i < s_surf_count; ++i)
+            if (s_surf[i].wall == SURF_CAP && s_surf[i].src == sel_cap())
+                panel_outline(s_surf[i].v, 3, s_sel, 255, 160, 0);
     } else {
         for (int i = 0; i < s_wall_count; ++i) {
             if (s_walls_list[i].height <= 0) continue;
@@ -2753,6 +2820,12 @@ static void draw_room(void) {
     if (room_shape() == 0 && s_ceil_img >= 0 && s_solid_walls && ceil_ok)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall == 2) draw_flat_image(&s_surf[i], s_ceil_img, &s_ceil_adj, 0);
+    if (room_shape() == 0 && s_solid_walls)
+        for (int i = s_floor_surf_count; i < s_surf_count; ++i) {
+            const Surface *s = &s_surf[i];
+            if (s->wall == SURF_CAP && s->src < MAX_LOOPS && s_cap_img[s->src] >= 0)
+                draw_flat_image(s, s_cap_img[s->src], &s_cap_adj[s->src], 0);
+        }
     if (s_edit) {
         draw_panel();
         if (s_sel >= 0 && s_sel < s_wall_count) {
@@ -2761,6 +2834,16 @@ static void draw_room(void) {
             s_line_depth = 16; /* the selected wall shows through everything below the panel */
             for (int k = 0; k < 4; ++k) draw_line(&c[k], &c[(k + 1) % 4], 255, 230, 0);
             draw_line(&c[0], &c[2], 255, 230, 0);
+            s_line_depth = 0;
+        } else if (sel_cap() >= 0 && sel_cap() < s_loop_count && s_cap_y[sel_cap()] < 1e8f) {
+            /* The selected obstacle's top outline. */
+            const WallLoop *l = &s_loops[sel_cap()];
+            s_line_depth = 16;
+            for (int k = 0; k < l->count; ++k) {
+                const WallEdge *w = &s_walls_list[l->first + k];
+                V3 a = {w->a.x, s_cap_y[sel_cap()], w->a.z}, b = {w->b.x, s_cap_y[sel_cap()], w->b.z};
+                draw_line(&a, &b, 255, 160, 0);
+            }
             s_line_depth = 0;
         }
     }
@@ -2954,6 +3037,9 @@ static void fits_save(void) {
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (!adjust_is_identity(&s_wall_adj[i]) && s_layer_fit_count < MAX_LAYER_FITS)
             s_layer_fits[s_layer_fit_count++] = (LayerFit){s_fit.room, s_fit.group, i, s_wall_adj[i]};
+    for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
+        if (s_cap_adj[i].sx != 0 && !adjust_is_identity(&s_cap_adj[i]) && s_layer_fit_count < MAX_LAYER_FITS)
+            s_layer_fits[s_layer_fit_count++] = (LayerFit){s_fit.room, s_fit.group, SEL_CAP0 - i, s_cap_adj[i]};
     /* And its wall images. */
     if (s_images_room == s_fit.room && s_images_group == s_fit.group) {
         kept = 0;
@@ -2986,6 +3072,15 @@ static void fits_save(void) {
             w->span = 1;
             snprintf(w->name, sizeof w->name, "%s", s_images[s_ceil_img].name);
         }
+        for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
+            if (s_cap_img[i] >= 0 && s_cap_img[i] < s_image_count && s_wall_image_count < MAX_WALL_IMAGES) {
+                WallImage *w = &s_wall_images[s_wall_image_count++];
+                w->room = s_fit.room;
+                w->group = s_fit.group;
+                w->wall = SEL_CAP0 - i;
+                w->span = 1;
+                snprintf(w->name, sizeof w->name, "%s", s_images[s_cap_img[i]].name);
+            }
     }
     fit_path(path, sizeof path);
     FILE *f = path[0] ? fopen(path, "w") : NULL;
@@ -2999,14 +3094,14 @@ static void fits_save(void) {
         fprintf(f, "%d %d %.2f %.2f %.4f %.4f %d %d %d %d\n", s_fits[i].room, s_fits[i].group,
                 s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
                 s_fits[i].obst, s_fits[i].shape, s_fits[i].open);
-    fprintf(f, "# L room group layer(-1 floor, -2 ceiling, else wall edge) offset_x offset_y scale_x scale_y "
+    fprintf(f, "# L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y "
                "rotation height(-1 = the room's) rectangle(0/1)\n");
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d\n", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
     }
-    fprintf(f, "# W room group wall(-1 floor, -2 ceiling) span image (a file in textures/room_NNN or textures/common)\n");
+    fprintf(f, "# W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)\n");
     for (int i = 0; i < s_wall_image_count; ++i) {
         const WallImage *w = &s_wall_images[i];
         fprintf(f, "W %d %d %d %d %s\n", w->room, w->group, w->wall, w->span, w->name);
@@ -3030,11 +3125,13 @@ static void fit_select(void) {
     s_fit_saved = 1;
     s_floor_adj = s_ceil_adj = k_identity;
     for (int i = 0; i < MAX_WALLS; ++i) s_wall_adj[i] = k_identity;
+    for (int i = 0; i < MAX_LOOPS; ++i) s_cap_adj[i] = k_identity;
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
         if (l->room != room || l->group != group) continue;
         if (l->layer == -1) s_floor_adj = l->a;
         else if (l->layer == LAYER_CEILING) s_ceil_adj = l->a;
+        else if (l->layer <= SEL_CAP0 && SEL_CAP0 - l->layer < MAX_LOOPS) s_cap_adj[SEL_CAP0 - l->layer] = l->a;
         else if (l->layer >= 0 && l->layer < MAX_WALLS) s_wall_adj[l->layer] = l->a;
     }
     s_sel = -2;
@@ -3062,12 +3159,29 @@ static const char *sel_name(char *buf, size_t size) {
     if (s_sel == -2) snprintf(buf, size, "Whole room");
     else if (s_sel == -1) snprintf(buf, size, "Floor");
     else if (s_sel == SEL_CEILING) snprintf(buf, size, s_fit.open ? "Ceiling (off: End turns it on)" : "Ceiling");
+    else if (sel_cap() >= 0) snprintf(buf, size, "Obstacle top %d", sel_cap());
     else {
         const WallEdge *w = &s_walls_list[s_sel];
         int outer = w->loop >= 0 && w->loop < s_loop_count && s_loops[w->loop].outer;
         snprintf(buf, size, "Wall %d/%d (%s)", s_sel, s_wall_count, outer ? "outer" : "obstacle");
     }
     return buf;
+}
+
+/* The selection's layer (not the whole room). */
+static Adjust *sel_adjust(void) {
+    if (s_sel == -1) return &s_floor_adj;
+    if (s_sel == SEL_CEILING) return &s_ceil_adj;
+    if (sel_cap() >= 0) return &s_cap_adj[sel_cap()];
+    return &s_wall_adj[s_sel];
+}
+
+/* Obstacle loop i's height now: its tallest wall. */
+static float loop_height(int i) {
+    const WallLoop *l = &s_loops[i];
+    float h = 0;
+    for (int k = 0; k < l->count; ++k) h = fmaxf(h, s_walls_list[l->first + k].height);
+    return h;
 }
 
 static void sel_toast(void) {
@@ -3077,7 +3191,7 @@ static void sel_toast(void) {
         fit_toast();
         return;
     }
-    const Adjust *a = s_sel == -1 ? &s_floor_adj : s_sel == SEL_CEILING ? &s_ceil_adj : &s_wall_adj[s_sel];
+    const Adjust *a = sel_adjust();
     char height[40] = "";
     if (s_sel >= 0)
         snprintf(height, sizeof height, "  height %.0f%s%s", s_walls_list[s_sel].height,
@@ -3085,39 +3199,50 @@ static void sel_toast(void) {
     else if (s_sel == SEL_CEILING)
         snprintf(height, sizeof height, "  height %.0f%s", s_floor_top - s_ceil_y,
                  a->h >= 0 ? "" : " (tallest wall)");
+    else if (sel_cap() >= 0)
+        snprintf(height, sizeof height, "  height %.0f%s", loop_height(sel_cap()),
+                 a->h >= 0 ? "" : " (room's obstacles)");
     snprintf(msg, sizeof msg, "%s  move %.1f, %.1f  size %.3f x %.3f  turn %.1f deg%s%s", name,
              a->ox, a->oy, a->sx, a->sy, a->rot * 180.0f / PI_F, height,
              s_fit_saved ? "" : "  (not saved)");
     pe_toast(msg);
 }
 
-/* The floor, the ceiling, then walls by distance from Aya: numpad . steps to the next one out
- * (Shift: back in). */
-static float s_wall_dist[MAX_WALLS];
-static int cmp_wall_dist(const void *a, const void *b) {
-    float da = s_wall_dist[*(const int *)a], db = s_wall_dist[*(const int *)b];
+/* The floor, the ceiling, then walls and obstacle tops by distance from Aya (an obstacle's top
+ * just before its nearest wall): numpad . steps to the next one out (Shift: back in). */
+typedef struct { int sel; float dist; } SelOrder;
+static int cmp_sel_dist(const void *a, const void *b) {
+    float da = ((const SelOrder *)a)->dist, db = ((const SelOrder *)b)->dist;
     return da < db ? -1 : da > db;
 }
 
 static void select_next_wall(int back) {
-    static int order[MAX_WALLS + 2];
-    int n = 0;
+    static SelOrder list[MAX_WALLS + MAX_LOOPS];
+    static int order[MAX_WALLS + MAX_LOOPS + 2];
+    static float cap_dist[MAX_LOOPS];
+    int m = 0;
     const FieldActor *aya = g_PlayerEntity;
     float x = (float)(aya->pos_x >> 16), z = (float)(aya->pos_z >> 16);
+    for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i) cap_dist[i] = 1e30f;
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
         const WallEdge *w = &s_walls_list[i];
         if (w->height <= 0) continue;
         float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
         float t = len2 > 0 ? clampf(((x - w->a.x) * ex + (z - w->a.z) * ez) / len2, 0, 1) : 0;
         float dx = w->a.x + ex * t - x, dz = w->a.z + ez * t - z;
-        s_wall_dist[i] = dx * dx + dz * dz;
-        order[n++] = i;
+        float dist = dx * dx + dz * dz;
+        list[m++] = (SelOrder){i, dist};
+        if (w->loop >= 0 && w->loop < s_loop_count && w->loop < MAX_LOOPS)
+            cap_dist[w->loop] = fminf(cap_dist[w->loop], dist);
     }
-    qsort(order, (size_t)n, sizeof order[0], cmp_wall_dist);
-    memmove(order + 2, order, sizeof order[0] * (size_t)n);
-    order[0] = -1;
-    order[1] = SEL_CEILING;
-    n += 2;
+    for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
+        if (!s_loops[i].outer && s_cap_y[i] < 1e8f && cap_dist[i] < 1e29f)
+            list[m++] = (SelOrder){SEL_CAP0 - i, cap_dist[i] - 0.5f};
+    qsort(list, (size_t)m, sizeof list[0], cmp_sel_dist);
+    int n = 0;
+    order[n++] = -1;
+    order[n++] = SEL_CEILING;
+    for (int i = 0; i < m; ++i) order[n++] = list[i].sel;
     int at = -1;
     for (int i = 0; i < n; ++i)
         if (order[i] == s_sel) at = i;
@@ -3125,8 +3250,8 @@ static void select_next_wall(int back) {
     s_sel = order[(at + (back ? n - 1 : 1)) % n];
 }
 
-/* F9 editor, numpad. Selection: . the floor, the ceiling, then the next wall out from Aya (Shift:
- * back), / the floor, * the whole
+/* F9 editor, numpad. Selection: . the floor, the ceiling, then the next wall or obstacle top out
+ * from Aya (Shift: back), / the floor, * the whole
  * room. The selection: 4/6/8/2 move, +/- size. Wall or floor: 7/9 turn, 1/3 width, Ctrl+1/3
  * height. Whole room: 7/9 width, 1/3 height. Always: PageUp/PageDown wall height,
  * Insert/Delete obstacle height, 5 reset the selection, 0 save; Shift is faster. */
@@ -3160,7 +3285,8 @@ static void edit_keys(const bool *keys) {
             for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) s_wall_adj[i].rect = all ? 0.0f : 1.0f;
             pe_toast(all ? "All walls: perspective" : "All walls: rectangles");
         }
-        if (s_sel != -1) {
+        if (sel_cap() >= 0) pe_toast("Obstacle top: PageUp/PageDown height, F5 image, numpad moves its texture");
+        else if (s_sel != -1) {
             s_adj_version++;
             s_fit_saved = 0;
             if (s_sel >= 0) sel_toast();
@@ -3184,6 +3310,7 @@ static void edit_keys(const bool *keys) {
         static unsigned del_frame;
         if (keys[SDL_SCANCODE_F5] && !f5_down) {
             int cur = s_sel == SEL_CEILING ? s_ceil_img : s_sel == -1 ? s_floor_img
+                    : sel_cap() >= 0 ? s_cap_img[sel_cap()]
                     : s_sel >= 0 && s_sel < MAX_WALLS ? s_wall_img[s_sel] : -1;
             if (shift && !ctrl && room_shape() == 0 && s_sel != -2) {
                 char msg[200];
@@ -3202,9 +3329,21 @@ static void edit_keys(const bool *keys) {
             } else if (room_shape() != 0) {
                 pe_toast("Images go on collision walls: Backspace switches the room shape");
             } else if (s_sel == -2) {
-                pe_toast("Select the floor, the ceiling or a wall first (numpad .)");
+                pe_toast("Select the floor, the ceiling, a wall or an obstacle top first (numpad .)");
             } else if (!s_image_count) {
                 pe_toast("No images: put 256-colour BMPs in the mod's data/textures/common");
+            } else if (sel_cap() >= 0) {
+                int *img = &s_cap_img[sel_cap()];
+                if (!shift && !ctrl) {
+                    *img = *img + 1 >= s_image_count ? -1 : *img + 1;
+                    s_img_version++;
+                    s_fit_saved = 0;
+                }
+                char msg[200];
+                if (*img < 0) snprintf(msg, sizeof msg, "Obstacle top %d: no image", sel_cap());
+                else snprintf(msg, sizeof msg, "Obstacle top %d: %s (- / + repeats it, 7/9 turns)",
+                              sel_cap(), s_images[*img].name);
+                pe_toast(msg);
             } else if (s_sel == SEL_CEILING) {
                 if (!shift && !ctrl) {
                     s_ceil_img = s_ceil_img + 1 >= s_image_count ? -1 : s_ceil_img + 1;
@@ -3257,7 +3396,7 @@ static void edit_keys(const bool *keys) {
     dot_down = keys[SDL_SCANCODE_KP_PERIOD];
     div_down = keys[SDL_SCANCODE_KP_DIVIDE];
     mul_down = keys[SDL_SCANCODE_KP_MULTIPLY];
-    if (s_sel >= s_wall_count) s_sel = -2;
+    if (s_sel >= s_wall_count || (sel_cap() >= 0 && sel_cap() >= s_loop_count)) s_sel = -2;
     if (moved_sel) sel_toast();
 
     RoomFit before = s_fit;
@@ -3278,7 +3417,7 @@ static void edit_keys(const bool *keys) {
             s_fit.sx = s_fit.sy = 1;
         }
     } else {
-        Adjust *a = s_sel == -1 ? &s_floor_adj : s_sel == SEL_CEILING ? &s_ceil_adj : &s_wall_adj[s_sel];
+        Adjust *a = sel_adjust();
         Adjust old = *a;
         if (keys[SDL_SCANCODE_KP_4]) a->ox -= step;
         if (keys[SDL_SCANCODE_KP_6]) a->ox += step;
@@ -3304,6 +3443,22 @@ static void edit_keys(const bool *keys) {
         float h = s_floor_top - s_ceil_y;
         h += keys[SDL_SCANCODE_PAGEUP] ? hstep : -hstep;
         s_ceil_adj.h = clampf(h, 0, 8000);
+        s_height_version++;
+        s_adj_version++;
+        changed = 1;
+    } else if (sel_cap() >= 0 && (keys[SDL_SCANCODE_PAGEUP] || keys[SDL_SCANCODE_PAGEDOWN])) {
+        /* The obstacle's own height (its walls and top), starting from its tallest wall now. Its
+         * walls' own heights go: the obstacle becomes a flat-topped block at this height (a wall
+         * can still get its own height again afterwards). */
+        Adjust *a = &s_cap_adj[sel_cap()];
+        const WallLoop *l = &s_loops[sel_cap()];
+        float h = a->h >= 0 ? a->h : loop_height(sel_cap());
+        for (int k = 0; k < l->count && l->first + k < MAX_WALLS; ++k) {
+            if (s_wall_adj[l->first + k].h >= 0) h = loop_height(sel_cap()); /* start from what shows */
+            s_wall_adj[l->first + k].h = -1;
+        }
+        h += keys[SDL_SCANCODE_PAGEUP] ? hstep : -hstep;
+        a->h = clampf(h, 10, 8000);
         s_height_version++;
         s_adj_version++;
         changed = 1;
@@ -4372,7 +4527,7 @@ static void capture_wall(void) {
             float tx[3], ty[3];
             for (int k = 0; k < 3; ++k) {
                 float ss, tt;
-                flat_image_st(&f->v[k], fadj, &ss, &tt);
+                flat_image_st(&f->v[k], fadj, s_coll, &ss, &tt);
                 tx[k] = ss * W;
                 ty[k] = tt * H;
             }
