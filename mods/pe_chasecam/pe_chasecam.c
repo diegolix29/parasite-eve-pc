@@ -753,6 +753,7 @@ static void gather_tiles(void) {
 /* Tiles the picture never shows: opaque tiles drawn over them cover every texel (see
  * hide_covered_tiles). They get no pieces, so a hidden layer can't show through at the edges. */
 static u8 s_tile_hidden[MAX_TILES];
+static u16 s_tile_solid[MAX_TILES]; /* its opaque texels, 0..256 (hide_covered_tiles) */
 
 static void bin_tiles(void) {
     static int counts[CELLS_W * CELLS_H];
@@ -992,6 +993,10 @@ static s16 s_fill_src[CELLS_W * CELLS_H];    /* that tile */
 static int s_fill_from[CELLS_W * CELLS_H];   /* and its cell */
 static s16 s_fill_tile[CELLS_W * CELLS_H];   /* the cell's filled tile once made, -1 not yet */
 static int s_fill_count;
+/* A tile with fewer opaque texels than this is mostly holes (the game shows black through them):
+ * it neither covers its cell nor is copied, so the fill repeats solid picture under it (fill
+ * tiles come after the frame's in s_tiles, so they are drawn beneath it). */
+#define FILL_SOLID 160
 
 static void build_fill_map(void) {
     static int votes[16][16];
@@ -1009,7 +1014,7 @@ static void build_fill_map(void) {
     s_fill_count = 0;
     int head = 0, tail = 0;
     for (int i = 0; i < s_tile_count; ++i) {
-        if (s_tile_hidden[i]) continue;
+        if (s_tile_hidden[i] || s_tile_solid[i] < FILL_SOLID) continue;
         const Tile *t = &s_tiles[i];
         int gx0 = (int)floorf((float)(t->x - CELL_X0 - s_fill_ax) / 16), gx1 = gx0 + ((t->x & 15) != s_fill_ax);
         int gy0 = (int)floorf((float)(t->y - CELL_Y0 - s_fill_ay) / 16), gy1 = gy0 + ((t->y & 15) != s_fill_ay);
@@ -1213,6 +1218,7 @@ static void hide_covered_tiles(const u16 *vram) {
     static u8 opaque[CELLS_W * 16 * CELLS_H * 16];
     static u16 order[MAX_TILES];
     memset(s_tile_hidden, 0, sizeof s_tile_hidden);
+    for (int i = 0; i < s_tile_count; ++i) s_tile_solid[i] = 256;
     if (!vram || s_tile_count <= 0) return;
     int x0 = 1 << 30, x1 = -(1 << 30), y0 = 1 << 30, y1 = -(1 << 30);
     for (int i = 0; i < s_tile_count; ++i) {
@@ -1236,6 +1242,7 @@ static void hide_covered_tiles(const u16 *vram) {
                 solid_n += solid[j][i];
                 if (solid[j][i] && !row0[j * pitch + i]) visible++;
             }
+        s_tile_solid[order[n]] = (u16)solid_n;
         /* A few texels through the specks of the art over it would only add pieces whose
          * edges show through the top layer: those go too (the flat colour fills the specks). */
         if (visible == 0 || (visible < HIDE_BELOW && visible < solid_n)) {
@@ -1247,6 +1254,7 @@ static void hide_covered_tiles(const u16 *vram) {
             for (int i = 0; i < 16; ++i)
                 if (solid[j][i]) row0[j * pitch + i] = 1;
     }
+
 }
 
 static int piece_cmp_tile(const void *a, const void *b) {
