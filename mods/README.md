@@ -129,6 +129,11 @@ marks the selected wall (magenta; again to unmark), N clears the marks, B makes 
 the marked walls (the gaps between them bridged by straight edges, at the tallest marked wall's
 height) and selects it. A made top works like an obstacle top (height, texture, F5 image);
 Ctrl+B deletes the selected one. They are kept as "C room group wall wall ..." lines.
+G held + numpad 4/6/8/2 moves the selected wall itself (8 away from the chase camera, 2 toward
+it, 4/6 left/right; Ctrl faster), to widen a room that feels cramped: the walls next to it
+stretch to stay joined, a floor strip fills the gap, and the wall keeps the picture of where it
+really is. Only the drawing moves: collision stays. 5 resets it; L lines keep the move as two
+extra numbers.
 Fits are kept in the mod's room data (below): room lines, and "L" lines for single walls, the
 floor, the ceiling and obstacle tops (layer -100-N for loop N). An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
