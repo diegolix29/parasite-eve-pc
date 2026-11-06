@@ -117,10 +117,25 @@ typedef struct { float x, y, z; } V3;
 typedef struct { V3 v[3]; u8 shade, wall; u16 src; } Surface; /* src: floor triangle / wall edge */
 typedef struct { V3 a, b; float height; int loop; } WallEdge;
 /* A closed run of wall edges: the floor's outline (outer) or a hole in it (an obstacle). */
-typedef struct { int first, count, outer; float area, minx, maxx, minz, maxz; } WallLoop;
+/* made: a top made in the editor from marked walls (MadeTop), not one of the room's loops. */
+typedef struct { int first, count, outer; float area, minx, maxx, minz, maxz; int made; } WallLoop;
 #define MAX_LOOPS 512
 static WallLoop s_loops[MAX_LOOPS];
 static int s_loop_count;
+/* Made tops (F9 editor: M marks walls, B makes the top): a flat top over the marked walls'
+ * outline, closed by straight edges across the gaps, for objects whose collision joins the
+ * room's outer wall (no loop of their own, so no automatic top). Each one is an extra obstacle
+ * loop after the room's own, s_loops[s_real_loop_count + j] for this room's j-th, so heights,
+ * layers and images work as on any obstacle top; its edges sit in s_walls_list after
+ * s_wall_count (never drawn as walls). rooms.txt: "C room group wall wall ...". */
+#define MAX_MADE_WALLS 64
+typedef struct { int room, group, n; int walls[MAX_MADE_WALLS]; } MadeTop;
+#define MAX_MADE_TOPS 1024
+static MadeTop s_made[MAX_MADE_TOPS];
+static int s_made_count;
+static int s_real_loop_count;
+static int s_marks[MAX_MADE_WALLS], s_mark_count; /* walls marked for the next made top */
+static int s_sel_pending;                          /* a selection to take once the mesh has it, 0 none */
 
 /* Piece.surf is u16: stay under 65536. Big rooms (room 32, the street) use over 16000 for the
  * floor alone; when the table fills, the walls pushed after the floor are lost. */
@@ -601,6 +616,53 @@ static void push_platform(int index, float y, u8 wall, u16 src) {
     }
 }
 
+/* This room's made tops as loops after the room's own (see MadeTop). The top sits at the
+ * tallest marked wall's height (its own height when set; the obstacle height for walls with
+ * none). A top whose walls are gone keeps its slot, empty, so the numbers after it hold. */
+static void build_made_loops(void) {
+    s_real_loop_count = s_loop_count;
+    int at = s_wall_count;
+    for (int m = 0; m < s_made_count && s_loop_count < MAX_LOOPS; ++m) {
+        const MadeTop *t = &s_made[m];
+        if (t->room != s_fit.room || t->group != s_fit.group) continue;
+        int li = s_loop_count;
+        V3 pts[2 * MAX_MADE_WALLS + 2];
+        int n = 0;
+        float top = 0;
+        for (int k = 0; k < t->n; ++k) {
+            int w = t->walls[k];
+            if (w < 0 || w >= s_wall_count) continue;
+            const WallEdge *e = &s_walls_list[w];
+            if (n == 0 || !same_point(&pts[n - 1], &e->a)) pts[n++] = e->a;
+            pts[n++] = e->b;
+            top = fmaxf(top, e->height);
+        }
+        if (n >= 2 && same_point(&pts[n - 1], &pts[0])) n--;
+        WallLoop loop = {at, 0, 0, 0, 1e9f, -1e9f, 1e9f, -1e9f, 1};
+        if (n >= 3 && at + n <= MAX_WALLS) {
+            if (s_cap_adj[li].h >= 0) top = s_cap_adj[li].h;
+            if (top <= 0) top = (float)s_fit.obst;
+            if (top <= 0) top = 10.0f;
+            for (int k = 0; k < n; ++k) {
+                WallEdge *e = &s_walls_list[at + k];
+                e->a = pts[k];
+                e->b = pts[(k + 1) % n];
+                e->height = top;
+                e->loop = li;
+                loop.area += e->a.x * e->b.z - e->b.x * e->a.z;
+                if (e->a.x < loop.minx) loop.minx = e->a.x;
+                if (e->a.x > loop.maxx) loop.maxx = e->a.x;
+                if (e->a.z < loop.minz) loop.minz = e->a.z;
+                if (e->a.z > loop.maxz) loop.maxz = e->a.z;
+            }
+            loop.count = n;
+            at += n;
+        }
+        loop.area *= 0.5f;
+        s_loops[s_loop_count++] = loop;
+    }
+}
+
 /* Which obstacle loop Aya stands inside, if any (the innermost, smallest one). */
 static void find_inside_loop(void) {
     const FieldActor *aya = g_PlayerEntity;
@@ -608,7 +670,7 @@ static void find_inside_loop(void) {
     int best = -1;
     for (int i = 0; i < s_loop_count; ++i) {
         const WallLoop *l = &s_loops[i];
-        if (l->outer || l->count < 3) continue;
+        if (l->outer || l->made || l->count < 3) continue;
         if (x < l->minx || x > l->maxx || z < l->minz || z > l->maxz) continue;
         if (!inside_loop(l, x, z)) continue;
         if (best < 0 || fabsf(l->area) < fabsf(s_loops[best].area)) best = i;
@@ -705,6 +767,7 @@ static void build_mesh(void) {
     }
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i)
         if (s_wall_adj[i].h >= 0) s_walls_list[i].height = s_wall_adj[i].h;
+    build_made_loops();
     if (s_inside_loop >= 0 && s_inside_loop < s_loop_count && !s_loops[s_inside_loop].outer)
         push_platform(s_inside_loop, s_inside_y, 0, 0xFFFF);
     s_floor_surf_count = s_surf_count;
@@ -750,7 +813,7 @@ static void build_mesh(void) {
             push_surface(&a, &b, &c, f->shade, 2, f->src, 0);
         }
         for (int i = 0; i < s_loop_count; ++i)
-            if (!s_loops[i].outer) push_platform(i, s_ceil_y, 2, 0xFFFF);
+            if (!s_loops[i].outer && !s_loops[i].made) push_platform(i, s_ceil_y, 2, 0xFFFF);
     }
     /* Caps (Surface.wall SURF_CAP): a flat top on every obstacle (seat rows, tables, a piano) at
      * its tallest wall's top, so the picture's view from above lands on it instead of showing
@@ -2839,6 +2902,12 @@ static void draw_panel(void) {
             panel_outline(c, 4, i, 0, 200, 255);
         }
     }
+    for (int m = 0; m < s_mark_count; ++m)
+        if (s_marks[m] < s_wall_count) {
+            V3 c[4];
+            wall_corners(s_marks[m], c);
+            panel_outline(c, 4, s_marks[m], 255, 60, 255);
+        }
 }
 
 /* The ceiling shows only while the chase camera is under it: from above it would hide the room. */
@@ -2879,6 +2948,15 @@ static void draw_room(void) {
         }
     if (s_edit) {
         draw_panel();
+        s_line_depth = 16;
+        for (int m = 0; m < s_mark_count; ++m)
+            if (s_marks[m] < s_wall_count) {
+                V3 c[4];
+                wall_corners(s_marks[m], c);
+                for (int k = 0; k < 4; ++k) draw_line(&c[k], &c[(k + 1) % 4], 255, 60, 255);
+                draw_line(&c[1], &c[3], 255, 60, 255);
+            }
+        s_line_depth = 0;
         if (s_sel >= 0 && s_sel < s_wall_count) {
             V3 c[4];
             wall_corners(s_sel, c);
@@ -3026,6 +3104,7 @@ static void fits_load(void) {
     s_fit_count = 0;
     s_layer_fit_count = 0;
     s_wall_image_count = 0;
+    s_made_count = 0;
     char *buf = data_read("rooms.txt", NULL);
     if (!buf) return;
     for (char *line = buf, *next; line; line = next) {
@@ -3041,6 +3120,22 @@ static void fits_load(void) {
                 sscanf(line + 1, "%d %d %d %d %95[^\r\n]", &wi.room, &wi.group, &wi.wall, &wi.span,
                        wi.name) == 5)
                 s_wall_images[s_wall_image_count++] = wi;
+            continue;
+        }
+        if (line[0] == 'C') {
+            MadeTop t = {0};
+            char *p = line + 1, *end;
+            t.room = (int)strtol(p, &end, 10);
+            if (end == p) continue;
+            p = end;
+            t.group = (int)strtol(p, &end, 10);
+            if (end == p) continue;
+            for (p = end; t.n < MAX_MADE_WALLS; p = end) {
+                long w = strtol(p, &end, 10);
+                if (end == p) break;
+                t.walls[t.n++] = (int)w;
+            }
+            if (t.n >= 2 && s_made_count < MAX_MADE_TOPS) s_made[s_made_count++] = t;
             continue;
         }
         if (line[0] == 'L') {
@@ -3163,6 +3258,14 @@ static void fits_save(void) {
         const WallImage *w = &s_wall_images[i];
         fprintf(f, "W %d %d %d %d %s\n", w->room, w->group, w->wall, w->span, w->name);
     }
+    fprintf(f, "# C room group wall wall ... (a made top over these wall edges; the room's N-th C line "
+               "is obstacle loop (the room's loops) + N for its L and W lines)\n");
+    for (int i = 0; i < s_made_count; ++i) {
+        const MadeTop *t = &s_made[i];
+        fprintf(f, "C %d %d", t->room, t->group);
+        for (int k = 0; k < t->n; ++k) fprintf(f, " %d", t->walls[k]);
+        fprintf(f, "\n");
+    }
     fclose(f);
     s_fit_saved = 1;
     char msg[96];
@@ -3192,6 +3295,8 @@ static void fit_select(void) {
         else if (l->layer >= 0 && l->layer < MAX_WALLS) s_wall_adj[l->layer] = l->a;
     }
     s_sel = -2;
+    s_mark_count = 0;
+    s_sel_pending = 0;
     s_adj_version++;
     s_height_version++;
 }
@@ -3216,6 +3321,8 @@ static const char *sel_name(char *buf, size_t size) {
     if (s_sel == -2) snprintf(buf, size, "Whole room");
     else if (s_sel == -1) snprintf(buf, size, "Floor");
     else if (s_sel == SEL_CEILING) snprintf(buf, size, s_fit.open ? "Ceiling (off: End turns it on)" : "Ceiling");
+    else if (sel_cap() >= 0 && sel_cap() < s_loop_count && s_loops[sel_cap()].made)
+        snprintf(buf, size, "Made top %d", sel_cap() - s_real_loop_count);
     else if (sel_cap() >= 0) snprintf(buf, size, "Obstacle top %d", sel_cap());
     else {
         const WallEdge *w = &s_walls_list[s_sel];
@@ -3292,6 +3399,17 @@ static void select_next_wall(int back) {
         if (w->loop >= 0 && w->loop < s_loop_count && w->loop < MAX_LOOPS)
             cap_dist[w->loop] = fminf(cap_dist[w->loop], dist);
     }
+    for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i) {
+        const WallLoop *l = &s_loops[i];
+        if (!l->made) continue;
+        for (int k = 0; k < l->count && l->first + k < MAX_WALLS; ++k) {
+            const WallEdge *w = &s_walls_list[l->first + k];
+            float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
+            float t = len2 > 0 ? clampf(((x - w->a.x) * ex + (z - w->a.z) * ez) / len2, 0, 1) : 0;
+            float dx = w->a.x + ex * t - x, dz = w->a.z + ez * t - z;
+            cap_dist[i] = fminf(cap_dist[i], dx * dx + dz * dz);
+        }
+    }
     for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
         if (!s_loops[i].outer && s_cap_y[i] < 1e8f && cap_dist[i] < 1e29f)
             list[m++] = (SelOrder){SEL_CAP0 - i, cap_dist[i] - 0.5f};
@@ -3305,6 +3423,105 @@ static void select_next_wall(int back) {
         if (order[i] == s_sel) at = i;
     if (at < 0) at = back ? 0 : n - 1;
     s_sel = order[(at + (back ? n - 1 : 1)) % n];
+}
+
+static int cmp_int(const void *a, const void *b) {
+    int ia = *(const int *)a, ib = *(const int *)b;
+    return ia < ib ? -1 : ia > ib;
+}
+
+/* Made tops: M marks / unmarks the selected wall, N clears the marks, B makes a top over the
+ * marked walls (the gaps between them bridged by straight edges) and selects it; Ctrl+B
+ * deletes the selected made top. */
+static void made_top_keys(const bool *keys, int ctrl) {
+    static int m_down, n_down, b_down;
+    char msg[200];
+    if (keys[SDL_SCANCODE_M] && !m_down) {
+        if (s_sel < 0 || s_sel >= s_wall_count) {
+            pe_toast("M marks a wall: select one first (numpad .)");
+        } else {
+            int at = -1;
+            for (int i = 0; i < s_mark_count; ++i)
+                if (s_marks[i] == s_sel) at = i;
+            if (at >= 0) {
+                s_marks[at] = s_marks[--s_mark_count];
+                snprintf(msg, sizeof msg, "Wall %d unmarked (%d marked)", s_sel, s_mark_count);
+            } else if (s_mark_count >= MAX_MADE_WALLS) {
+                snprintf(msg, sizeof msg, "%d walls marked already: B makes the top", s_mark_count);
+            } else {
+                s_marks[s_mark_count++] = s_sel;
+                snprintf(msg, sizeof msg, "Wall %d marked (%d marked): B makes a top over them, N clears",
+                         s_sel, s_mark_count);
+            }
+            pe_toast(msg);
+        }
+    }
+    if (keys[SDL_SCANCODE_N] && !n_down) {
+        s_mark_count = 0;
+        pe_toast("Marks cleared");
+    }
+    if (keys[SDL_SCANCODE_B] && !b_down) {
+        int cap = sel_cap();
+        int made = cap >= 0 && cap < s_loop_count && s_loops[cap].made;
+        if (ctrl) {
+            if (!made) {
+                pe_toast("Ctrl+B deletes a made top: select it first (numpad .)");
+            } else {
+                int j = cap - s_real_loop_count, seen = 0;
+                for (int m = 0; m < s_made_count; ++m) {
+                    const MadeTop *t = &s_made[m];
+                    if (t->room != s_fit.room || t->group != s_fit.group) continue;
+                    if (seen++ != j) continue;
+                    memmove(&s_made[m], &s_made[m + 1], sizeof s_made[0] * (size_t)(s_made_count - m - 1));
+                    s_made_count--;
+                    break;
+                }
+                /* The tops after it move down one loop number: their layers and images too. */
+                for (int i = cap; i + 1 < MAX_LOOPS; ++i) {
+                    s_cap_adj[i] = s_cap_adj[i + 1];
+                    s_cap_img[i] = s_cap_img[i + 1];
+                }
+                s_cap_adj[MAX_LOOPS - 1] = k_identity;
+                s_cap_img[MAX_LOOPS - 1] = -1;
+                s_sel = -2;
+                s_height_version++;
+                s_adj_version++;
+                s_img_version++;
+                s_fit_saved = 0;
+                snprintf(msg, sizeof msg, "Made top %d deleted", j);
+                pe_toast(msg);
+            }
+        } else if (s_mark_count < 2) {
+            pe_toast("B makes a top over 2 or more marked walls: select a wall (numpad .) and press M on each");
+        } else if (s_made_count >= MAX_MADE_TOPS || s_loop_count >= MAX_LOOPS) {
+            pe_toast("No room for another made top");
+        } else {
+            MadeTop t = {s_fit.room, s_fit.group, s_mark_count, {0}};
+            memcpy(t.walls, s_marks, sizeof s_marks[0] * (size_t)s_mark_count);
+            qsort(t.walls, (size_t)t.n, sizeof t.walls[0], cmp_int);
+            int j = 0;
+            for (int m = 0; m < s_made_count; ++m)
+                j += s_made[m].room == s_fit.room && s_made[m].group == s_fit.group;
+            int li = s_real_loop_count + j;
+            if (li < MAX_LOOPS) {
+                s_cap_adj[li] = k_identity;
+                s_cap_img[li] = -1;
+            }
+            s_made[s_made_count++] = t;
+            s_mark_count = 0;
+            s_sel_pending = SEL_CAP0 - li;
+            s_height_version++;
+            s_adj_version++;
+            s_img_version++;
+            s_fit_saved = 0;
+            snprintf(msg, sizeof msg, "Made top %d over %d walls: PageUp/PageDown height, F5 image, "
+                     "numpad moves its texture, Ctrl+B deletes", j, t.n);
+            pe_toast(msg);
+        }
+    }
+    m_down = keys[SDL_SCANCODE_M];
+    n_down = keys[SDL_SCANCODE_N];
+    b_down = keys[SDL_SCANCODE_B];
 }
 
 /* F9 editor, numpad. Selection: . the floor, the ceiling, then the next wall or obstacle top out
@@ -3450,6 +3667,12 @@ static void edit_keys(const bool *keys) {
         }
         f3_down = keys[SDL_SCANCODE_F3];
     }
+    made_top_keys(keys, ctrl);
+    if (s_sel_pending && SEL_CAP0 - s_sel_pending < s_loop_count) {
+        s_sel = s_sel_pending;
+        s_sel_pending = 0;
+        moved_sel = 1;
+    }
     dot_down = keys[SDL_SCANCODE_KP_PERIOD];
     div_down = keys[SDL_SCANCODE_KP_DIVIDE];
     mul_down = keys[SDL_SCANCODE_KP_MULTIPLY];
@@ -3510,7 +3733,7 @@ static void edit_keys(const bool *keys) {
         Adjust *a = &s_cap_adj[sel_cap()];
         const WallLoop *l = &s_loops[sel_cap()];
         float h = a->h >= 0 ? a->h : loop_height(sel_cap());
-        for (int k = 0; k < l->count && l->first + k < MAX_WALLS; ++k) {
+        for (int k = 0; k < l->count && l->first + k < MAX_WALLS && !l->made; ++k) {
             if (s_wall_adj[l->first + k].h >= 0) h = loop_height(sel_cap()); /* start from what shows */
             s_wall_adj[l->first + k].h = -1;
         }
@@ -3626,7 +3849,8 @@ static void read_keys(void) {
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
-                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, 5 reset, 0 save");
+                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
+                     "M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
@@ -4224,7 +4448,7 @@ static void dump_room(void) {
     for (int i = 0; i < s_loop_count; ++i) {
         const WallLoop *l = &s_loops[i];
         fprintf(f, "  loop %3d %-8s edges %3d area %10.0f  x %.0f..%.0f z %.0f..%.0f  height %d\n",
-                i, l->outer ? "outer" : "obstacle", l->count, l->area, l->minx, l->maxx, l->minz,
+                i, l->made ? "made top" : l->outer ? "outer" : "obstacle", l->count, l->area, l->minx, l->maxx, l->minz,
                 l->maxz, l->outer ? s_fit.wall : s_fit.obst);
     }
 

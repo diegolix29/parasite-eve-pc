@@ -55,6 +55,7 @@
 69 1 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 89 0 0.00 0.00 1.0000 1.0000 1420 500 -1 0
 92 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
+93 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 # L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y rotation height(-1 = the room's) rectangle(0/1)
 L 5 0 0 0.00 0.00 1.0000 1.0000 0.0000 60 0
 L 5 0 2 0.00 0.00 1.0000 1.0000 0.0000 20 0
@@ -726,6 +727,11 @@ L 92 0 45 0.00 0.00 1.0000 1.0000 0.0000 100 0
 L 92 0 46 0.00 0.00 1.0000 1.0000 0.0000 30 0
 L 92 0 47 0.00 0.00 1.0000 1.0000 0.0000 60 0
 L 92 0 48 3.25 0.00 1.0000 1.0000 0.0000 1110 0
+L 93 0 -2 0.00 73.25 1.0000 1.0000 0.0000 1150 0
+L 93 0 -101 0.00 0.00 1.0000 1.0000 0.0000 300 0
+L 93 0 -102 0.00 0.00 1.0000 1.0000 0.0000 1560 0
+L 93 0 -103 0.00 0.00 1.0000 1.0000 0.0000 1560 0
+L 93 0 -104 0.00 0.00 1.0000 1.0000 0.0000 10 0
 # W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)
 W 3 0 0 1 1_left_wall.bmp
 W 3 0 1 1 1_left_wall.bmp
@@ -902,3 +908,5 @@ W 92 0 31 1 room_012_wall_27.bmp
 W 92 0 32 1 room_012_wall_27.bmp
 W 92 0 49 1 room_012_wall_27.bmp
 W 92 0 -2 1 room_071_floor.bmp
+W 93 0 -2 1 day_sky.bmp
+# C room group wall wall ... (a made top over these wall edges; the room's N-th C line is obstacle loop (the room's loops) + N for its L and W lines)

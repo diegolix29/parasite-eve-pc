@@ -124,6 +124,11 @@ back; with the whole room selected it switches every wall, 5 resets the
 selection, 0 saves; Shift is faster. Numpad . also stops on each obstacle's top (just before
 its nearest wall, outlined in orange): the numpad keys move, size and turn its texture about its
 centre, PageUp/PageDown set the obstacle's own height (its walls and top), F5 cycles its image.
+Objects whose collision joins the room's outer wall have no loop of their own and so no top: M
+marks the selected wall (magenta; again to unmark), N clears the marks, B makes a flat top over
+the marked walls (the gaps between them bridged by straight edges, at the tallest marked wall's
+height) and selects it. A made top works like an obstacle top (height, texture, F5 image);
+Ctrl+B deletes the selected one. They are kept as "C room group wall wall ..." lines.
 Fits are kept in the mod's room data (below): room lines, and "L" lines for single walls, the
 floor, the ceiling and obstacle tops (layer -100-N for loop N). An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
