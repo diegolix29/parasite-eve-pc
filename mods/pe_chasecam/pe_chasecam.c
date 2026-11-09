@@ -175,10 +175,11 @@ static float s_inside_y;
 /* mx, mz: a wall's move in world units (G held + numpad 4/6/8/2): it is drawn there, its
  * neighbours stretch to meet it and a floor strip fills the gap; collision stays where it was,
  * and the wall keeps the picture of where it really is. */
-typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz; } Adjust;
-static const Adjust k_identity = {0, 0, 1, 1, 0, -1, 0, 0, 0};
-static Adjust s_wall_adj[MAX_WALLS], s_floor_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0};
-static Adjust s_ceil_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0}; /* the ceiling's; h: its height (-1 the room's walls) */
+/* flip: the F5 image on it mirrored, 1 left-right (F), 2 upside down (Shift+F), 3 both. */
+typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz, flip; } Adjust;
+static const Adjust k_identity = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
+static Adjust s_wall_adj[MAX_WALLS], s_floor_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
+static Adjust s_ceil_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0}; /* the ceiling's; h: its height (-1 the room's walls) */
 /* The ceiling is one flat plane at s_ceil_y: by default the top of the room's tallest wall, or
  * its own height above the highest floor (s_floor_top). y is down. */
 static float s_ceil_y, s_floor_top;
@@ -270,7 +271,7 @@ static void images_enter_room(int room, int group);
 
 static int adjust_is_identity(const Adjust *a) {
     return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
-           a->rect == 0 && a->mx == 0 && a->mz == 0;
+           a->rect == 0 && a->mx == 0 && a->mz == 0 && a->flip == 0;
 }
 
 static void apply_adjust(float *x, float *y, const Adjust *a, float px, float py) {
@@ -2636,6 +2637,8 @@ static void wall_image_uv(int j, const V3 *p, const CustomImage *im, float *u, f
     float up = w->height > 0 ? (base_y - p->y) / w->height : 0;
     float su = 0.5f + (sacross - 0.5f - a->ox / 100.0f) / a->sx;
     float sv = 0.5f + ((1.0f - up) - 0.5f - a->oy / 100.0f) / a->sy;
+    if ((int)a->flip & 1) su = 1.0f - su;
+    if ((int)a->flip & 2) sv = 1.0f - sv;
     *u = su * im->tw;
     *v = sv * im->th;
 }
@@ -2863,8 +2866,11 @@ static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on
             IV a[12], b[12];
             for (int k = 0; k < 3; ++k) {
                 a[k].p = s->v[k];
-                a[k].u = (st[k][0] - (float)i) * (float)im->tw;
-                a[k].v = (st[k][1] - (float)j) * (float)im->th;
+                float fu = st[k][0] - (float)i, fv = st[k][1] - (float)j;
+                if ((int)adj->flip & 1) fu = 1.0f - fu;
+                if ((int)adj->flip & 2) fv = 1.0f - fv;
+                a[k].u = fu * (float)im->tw;
+                a[k].v = fv * (float)im->th;
             }
             /* This repeat's columns; draw_image_poly cuts the rows. */
             int n = clip_iv(a, 3, b, 0, 0, 1); if (n < 3) continue;
@@ -3263,10 +3269,10 @@ static void fits_load(void) {
         if (line[0] == 'L') {
             LayerFit lf;
             if (s_layer_fit_count < MAX_LAYER_FITS &&
-                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0,
-                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
+                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0, lf.a.flip = 0,
+                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
                         &lf.a.ox, &lf.a.oy, &lf.a.sx, &lf.a.sy, &lf.a.rot, &lf.a.h,
-                        &lf.a.rect, &lf.a.mx, &lf.a.mz) >= 8) &&
+                        &lf.a.rect, &lf.a.mx, &lf.a.mz, &lf.a.flip) >= 8) &&
                 lf.a.sx > 0.01f && lf.a.sy > 0.01f)
                 s_layer_fits[s_layer_fit_count++] = lf;
             continue;
@@ -3369,12 +3375,13 @@ static void fits_save(void) {
                 s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
                 s_fits[i].obst, s_fits[i].shape, s_fits[i].open);
     fprintf(f, "# L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y "
-               "rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved]\n");
+               "rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved] [flip: 1 left-right, 2 upside down]\n");
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
-        if (l->a.mx != 0 || l->a.mz != 0) fprintf(f, " %.1f %.1f", l->a.mx, l->a.mz);
+        if (l->a.mx != 0 || l->a.mz != 0 || l->a.flip != 0) fprintf(f, " %.1f %.1f", l->a.mx, l->a.mz);
+        if (l->a.flip != 0) fprintf(f, " %d", (int)l->a.flip);
         fprintf(f, "\n");
     }
     fprintf(f, "# W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)\n");
@@ -3659,6 +3666,7 @@ static void edit_keys(const bool *keys) {
     if (!s_edit) return;
     int shift = keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT];
     int ctrl = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+    int alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
     float fast = shift ? 5.0f : 1.0f;
     float step = 0.25f * fast, grow = 1.0f + 0.002f * fast, turn = 0.002f * fast;
     int hstep = (int)(10 * fast);
@@ -3702,11 +3710,13 @@ static void edit_keys(const bool *keys) {
         back_down = keys[SDL_SCANCODE_BACKSPACE];
     }
     {
-        /* F5: next image on the selected wall, floor or ceiling (none, then each file).
-         * Shift+F5 twice: delete the selection's image file. Ctrl+Shift+F5 / Ctrl+F5 spread a
-         * wall's image over one more / one fewer wall along its loop. */
+        /* F5: next image on the selected wall, floor or ceiling (none, then each file); Alt+F5
+         * the previous one. Shift+F5 twice: delete the selection's image file. Ctrl+Shift+F5 /
+         * Ctrl+F5 spread a wall's image over one more / one fewer wall along its loop. */
         static int f5_down, del_armed = -1;
         static unsigned del_frame;
+        int dir = alt ? -1 : 1;
+#define IMG_STEP(c) ((c) + dir >= s_image_count ? -1 : (c) + dir < -1 ? s_image_count - 1 : (c) + dir)
         if (keys[SDL_SCANCODE_F5] && !f5_down) {
             int cur = s_sel == SEL_CEILING ? s_ceil_img : s_sel == -1 ? s_floor_img
                     : sel_cap() >= 0 ? s_cap_img[sel_cap()]
@@ -3734,7 +3744,7 @@ static void edit_keys(const bool *keys) {
             } else if (sel_cap() >= 0) {
                 int *img = &s_cap_img[sel_cap()];
                 if (!shift && !ctrl) {
-                    *img = *img + 1 >= s_image_count ? -1 : *img + 1;
+                    *img = IMG_STEP(*img);
                     s_img_version++;
                     s_fit_saved = 0;
                 }
@@ -3745,7 +3755,7 @@ static void edit_keys(const bool *keys) {
                 pe_toast(msg);
             } else if (s_sel == SEL_CEILING) {
                 if (!shift && !ctrl) {
-                    s_ceil_img = s_ceil_img + 1 >= s_image_count ? -1 : s_ceil_img + 1;
+                    s_ceil_img = IMG_STEP(s_ceil_img);
                     s_img_version++;
                     s_fit_saved = 0;
                 }
@@ -3756,7 +3766,7 @@ static void edit_keys(const bool *keys) {
                 pe_toast(msg);
             } else if (s_sel == -1) {
                 if (!shift && !ctrl) {
-                    s_floor_img = s_floor_img + 1 >= s_image_count ? -1 : s_floor_img + 1;
+                    s_floor_img = IMG_STEP(s_floor_img);
                     s_img_version++;
                     s_fit_saved = 0;
                 }
@@ -3768,7 +3778,7 @@ static void edit_keys(const bool *keys) {
             } else {
                 if (shift && ctrl) s_wall_span[s_sel]++;
                 else if (ctrl) { if (s_wall_span[s_sel] > 1) s_wall_span[s_sel]--; }
-                else s_wall_img[s_sel] = s_wall_img[s_sel] + 1 >= s_image_count ? -1 : s_wall_img[s_sel] + 1;
+                else s_wall_img[s_sel] = IMG_STEP(s_wall_img[s_sel]);
                 s_img_version++;
                 s_fit_saved = 0;
                 char msg[200];
@@ -3779,6 +3789,7 @@ static void edit_keys(const bool *keys) {
             }
         }
         f5_down = keys[SDL_SCANCODE_F5];
+#undef IMG_STEP
     }
     {
         /* F3: save the selected wall's texture, as it looks now, as a shared image (see
@@ -3793,6 +3804,33 @@ static void edit_keys(const bool *keys) {
         f3_down = keys[SDL_SCANCODE_F3];
     }
     made_top_keys(keys, ctrl);
+    {
+        /* F: mirror the selection's F5 image left-right, Shift+F upside down. */
+        static int f_down;
+        if (keys[SDL_SCANCODE_F] && !f_down) {
+            Adjust *a = NULL;
+            int img = -1;
+            if (s_sel == -1) { a = &s_floor_adj; img = s_floor_img; }
+            else if (s_sel == SEL_CEILING) { a = &s_ceil_adj; img = s_ceil_img; }
+            else if (sel_cap() >= 0 && sel_cap() < MAX_LOOPS) { a = &s_cap_adj[sel_cap()]; img = s_cap_img[sel_cap()]; }
+            else if (s_sel >= 0 && s_sel < s_wall_count) {
+                int first = s_wall_cover[s_sel] >= 0 ? s_wall_cover[s_sel] : s_sel;
+                a = &s_wall_adj[first];
+                img = s_wall_img[first];
+            }
+            if (!a || img < 0) {
+                pe_toast("F flips an F5 image: select a wall, floor, ceiling or top that has one");
+            } else {
+                int flip = (int)a->flip ^ (shift ? 2 : 1);
+                a->flip = (float)flip;
+                s_adj_version++;
+                s_fit_saved = 0;
+                pe_toast(flip == 0 ? "Image: not flipped" : flip == 1 ? "Image: flipped left-right"
+                         : flip == 2 ? "Image: flipped upside down" : "Image: flipped both ways");
+            }
+        }
+        f_down = keys[SDL_SCANCODE_F];
+    }
     if (s_sel_pending && SEL_CAP0 - s_sel_pending < s_loop_count) {
         s_sel = s_sel_pending;
         s_sel_pending = 0;
@@ -3986,8 +4024,8 @@ static void read_keys(void) {
         if (s_edit)
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
-                     "room shape, F5 image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
-                     "G+4/6/8/2 move wall, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
+                     "room shape, F5 / Alt+F5 next / previous image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
+                     "G+4/6/8/2 move wall, F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");

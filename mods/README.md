@@ -134,6 +134,8 @@ it, 4/6 left/right; Ctrl faster), to widen a room that feels cramped: the walls 
 stretch to stay joined, a floor strip fills the gap, and the wall keeps the picture of where it
 really is. Only the drawing moves: collision stays. 5 resets it; L lines keep the move as two
 extra numbers.
+F mirrors the selection's F5 image left-right and Shift+F upside down (again to undo), on walls,
+the floor, the ceiling and tops; L lines keep it as a 13th number (1, 2 or 3 for both).
 Fits are kept in the mod's room data (below): room lines, and "L" lines for single walls, the
 floor, the ceiling and obstacle tops (layer -100-N for loop N). An obstacle Aya stands inside (a
 stage) gets no walls and a floor at her height.
