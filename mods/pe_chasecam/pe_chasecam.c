@@ -269,6 +269,7 @@ typedef struct { int room, group, wall, span; char name[96]; } WallImage;
 static WallImage s_wall_images[MAX_WALL_IMAGES];
 static int s_wall_image_count;
 static void images_enter_room(int room, int group);
+static int images_off(void);
 
 static int adjust_is_identity(const Adjust *a) {
     return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
@@ -1726,6 +1727,19 @@ static int xoff_find(int room, int sel) {
     return -1;
 }
 
+/* Editor Ctrl+T: this room's F5 images hidden (rooms.txt "X room -10"); its W lines stay. */
+#define XOFF_IMAGES -10
+static int images_off(void) {
+    static unsigned version = ~0u;
+    static int room = -999, off;
+    if (version != s_xoff_version || room != pe_room_number()) {
+        version = s_xoff_version;
+        room = pe_room_number();
+        off = xoff_find(room, XOFF_IMAGES) >= 0;
+    }
+    return off;
+}
+
 static void xoff_flags(void) {
     int room = pe_room_number();
     s_off_room = s_off_floor = s_off_ceil = 0;
@@ -3131,13 +3145,17 @@ static void delete_image(int idx) {
 
 /* Which wall each image covers, and how far along it each wall starts. */
 static void update_cover(void) {
-    if (s_cover_img == s_img_version && s_cover_mesh == s_mesh_version && s_cover_walls == s_wall_count)
+    static int cover_off = -1;
+    int off = images_off();
+    if (s_cover_img == s_img_version && s_cover_mesh == s_mesh_version && s_cover_walls == s_wall_count &&
+        cover_off == off)
         return;
+    cover_off = off;
     s_cover_img = s_img_version;
     s_cover_mesh = s_mesh_version;
     s_cover_walls = s_wall_count;
     for (int i = 0; i < MAX_WALLS; ++i) s_wall_cover[i] = -1;
-    for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
+    for (int i = 0; i < s_wall_count && i < MAX_WALLS && !off; ++i) {
         if (s_wall_img[i] < 0) continue;
         float total = 0;
         for (int k = 0; k < s_wall_span[i] && i + k < s_wall_count; ++k) {
@@ -3591,12 +3609,12 @@ static void draw_room(void) {
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall == 1 && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0)
                 draw_wall_image(&s_surf[i]);
-    if (room_shape() == 0 && s_floor_img >= 0)
+    if (room_shape() == 0 && s_floor_img >= 0 && !images_off())
         for (int i = 0; i < s_floor_surf_count; ++i) draw_flat_image(&s_surf[i], s_floor_img, &s_floor_adj, 1);
-    if (room_shape() == 0 && s_ceil_img >= 0 && s_solid_walls && ceil_ok)
+    if (room_shape() == 0 && s_ceil_img >= 0 && s_solid_walls && ceil_ok && !images_off())
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall == 2) draw_flat_image(&s_surf[i], s_ceil_img, &s_ceil_adj, 0);
-    if (room_shape() == 0 && s_solid_walls)
+    if (room_shape() == 0 && s_solid_walls && !images_off())
         for (int i = s_floor_surf_count; i < s_surf_count; ++i) {
             const Surface *s = &s_surf[i];
             if (s->wall == SURF_CAP && s->src < MAX_LOOPS && s_cap_img[s->src] >= 0)
@@ -3935,7 +3953,7 @@ static void fits_save(void) {
         fprintf(f, "\n");
     }
     fprintf(f, "# X room sel: no other cameras' textures there (-2 the whole room, -1 floor, -3 ceiling, "
-               "-100-N top of obstacle loop N, else wall edge)\n");
+               "-100-N top of obstacle loop N, -10 the room's F5 images hidden, else wall edge)\n");
     for (int i = 0; i < s_xoff_count; ++i) fprintf(f, "X %d %d\n", s_xoff[i].room, s_xoff[i].sel);
     fclose(f);
     s_fit_saved = 1;
@@ -4256,6 +4274,17 @@ static void edit_keys(const bool *keys) {
             pe_toast(msg);
         }
         o_down = keys[SDL_SCANCODE_O];
+        /* Ctrl+T: all of this room's F5 images off / on again (saved; the images stay assigned). */
+        static int t_down;
+        if (keys[SDL_SCANCODE_T] && !t_down && ctrl) {
+            int room = pe_room_number(), at = xoff_find(room, XOFF_IMAGES);
+            if (at >= 0) s_xoff[at] = s_xoff[--s_xoff_count];
+            else if (s_xoff_count < MAX_XOFF) s_xoff[s_xoff_count++] = (XOff){room, XOFF_IMAGES};
+            s_xoff_version++;
+            s_fit_saved = 0;
+            pe_toast(at >= 0 ? "This room's F5 images: ON" : "This room's F5 images: OFF");
+        }
+        t_down = keys[SDL_SCANCODE_T];
     }
     {
         static int back_down;
