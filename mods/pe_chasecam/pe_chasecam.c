@@ -1069,6 +1069,20 @@ static void gather_tiles(void) {
     if (!state) return;
     u16 out_x = (u16)(state->disp_src_x - ((u16)g_GeomScroll.state.position.x - 160));
     u16 out_y = (u16)(state->disp_src_y - ((u16)g_GeomScroll.state.position.y - 112));
+    {
+        /* Scrolling rooms: the picture as if scrolled to its centre, tiles and projection offset
+         * from the same numbers, so the room's textures don't slide while the game scrolls (its
+         * live screen offset and scroll position don't move together). */
+        const CameraViewport *v = (const CameraViewport *)((const u8 *)state + state->entry_offset_1C) +
+                                  g_GeomScroll.state.position.groupSelect;
+        if (v->width > 0 && v->height > 0 && v->prefix.gpu.geom_screen) {
+            int cx = (v->minX + v->maxX) / 2, cy = (v->minY + v->maxY) / 2;
+            out_x = (u16)(state->disp_src_x - (cx - 160));
+            out_y = (u16)(state->disp_src_y - (cy - 112));
+            s_pic_offset_x = (s16)(160 - (cx - (s16)v->width / 2));
+            s_pic_offset_y = (s16)(112 - (cy - (s16)v->height / 2));
+        }
+    }
     unsigned h = 2166136261u;
     PeBackgroundInfo bg;
     Render_GetBackgroundInfo(&bg);
