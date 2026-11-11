@@ -4080,7 +4080,8 @@ static void select_next_wall(int back) {
     for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i) cap_dist[i] = 1e30f;
     for (int i = 0; i < s_wall_count && i < MAX_WALLS; ++i) {
         const WallEdge *w = &s_walls_list[i];
-        if (w->height <= 0) continue;
+        /* Walls lowered to 0 with PageDown (own height set) stay selectable, to raise them again. */
+        if (w->height <= 0 && s_wall_adj[i].h < 0) continue;
         float ex = w->b.x - w->a.x, ez = w->b.z - w->a.z, len2 = ex * ex + ez * ez;
         float t = len2 > 0 ? clampf(((x - w->a.x) * ex + (z - w->a.z) * ez) / len2, 0, 1) : 0;
         float dx = w->a.x + ex * t - x, dz = w->a.z + ez * t - z;
