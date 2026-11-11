@@ -155,6 +155,7 @@ static unsigned s_mesh_version;   /* bumped whenever build_mesh rebuilds s_surf 
 static float s_floor_y;           /* the collision floor's usual height (median) */
 static int s_mesh_shape = -1;
 static unsigned s_mesh_cam, s_mesh_frame; /* room camera the mesh was cut for (in_room_view) */
+static unsigned s_mesh_xcams;             /* and the other cameras (s_xcam_key) */
 static float s_coll[4];           /* the collision floor's bounds: x0, x1, z0, z1 */
 /* Picture box: floor at s_floor_y, side walls on these bounds, walls up to the room's height. */
 static float s_box[4];            /* x0, x1, z0, z1 */
@@ -290,10 +291,14 @@ typedef struct {
     u16 ot;        /* the tile's ordering-table entry: lower is nearer */
     u16 cell;      /* the sprite's index in its mesh entry = its HD atlas cell */
     uint64_t hd;   /* the entry's HD atlas key, 0 when there is none */
+    u16 entry;     /* its mesh entry */
+    u8 slot;       /* the camera whose picture it belongs to (s_cams), 0 the room camera now */
 } Tile;
-#define MAX_TILES 16384 /* the frame's tiles, then the filled cells' (see build_fill_map) */
+/* The room camera's tiles this frame [0, s_tile_count), the room's other cameras' tiles
+ * [s_tile_count, s_tile_total) (see "Other cameras"), then the filled cells' (build_fill_map). */
+#define MAX_TILES 32000
 static Tile s_tiles[MAX_TILES];
-static int s_tile_count;
+static int s_tile_count, s_tile_total;
 static unsigned s_tile_hash, s_tile_frame;
 
 /* Screen cells (16 px) covering a margin around the frame, each listing its tiles. */
@@ -314,11 +319,36 @@ typedef struct {
     u16 tile;
     u8 wall;
     u16 surf; /* the surface it was cut from: its pieces share one depth (see draw_piece) */
+    u8 rank, nrank; /* its camera's place among the surface's cameras (0 on top), and how many */
 } Piece;
-#define MAX_PIECES 40000
+#define MAX_PIECES 80000
 static Piece s_pieces[MAX_PIECES];
 static int s_piece_count;
 static unsigned s_piece_key;
+
+/* ---- the room's cameras ("Other cameras") ----
+ * A room can have several cameras (geometry groups); all of their pictures stay in video memory,
+ * the game only draws the selected one. Slot 0 is the camera showing now (the globals:
+ * s_pic_scratch, s_fit, s_wall_adj...), slots 1.. the others, each placed as if its view were
+ * scrolled to its centre, with its own room fit and layers from rooms.txt. Every surface takes
+ * its texture from the camera that sees it best (F1 "Other cameras"). */
+#define MAX_CAMS 8
+typedef struct {
+    int group, first, count;   /* its tiles: s_tiles[first, first + count) */
+    u32 scratch[9];            /* view matrix and projection distance, as g_EntityRenderScratch */
+    float offx, offy;          /* the screen offset its tiles were placed for */
+    float ox, oy, sx, sy;      /* its room fit */
+    Adjust floor_adj, ceil_adj;
+    Adjust *wall_adj, *cap_adj;
+    float (*wall_pivot)[2], (*cap_pivot)[2];
+    int *cell_start;
+    u16 *cell_items;
+} CamPic;
+static CamPic s_cams[MAX_CAMS];
+static int s_cam_count;          /* slots filled by the last gather_tiles (0 or 1: no others) */
+static unsigned s_xcam_key;      /* the other cameras' groups, for build_mesh */
+static int s_merge_mode = 1;     /* F1 "Other cameras": 0 off, 1 sharpest first, 2 room camera first */
+static const char *const kMergeModes[] = {"Off", "Sharpest camera", "Room camera first"};
 
 /* ---- packets (two buffers, one per draw slot) ---- */
 typedef struct {
@@ -354,7 +384,7 @@ typedef struct {
 } PrimLine;
 
 #define MAX_TRI_PRIMS 24000
-#define MAX_TEX_PRIMS 60000
+#define MAX_TEX_PRIMS 90000
 #define MAX_LINE_PRIMS 12000
 static PrimG3 s_tri_prims[2][MAX_TRI_PRIMS];
 static PrimFT3 s_tex_prims[2][MAX_TEX_PRIMS];
@@ -415,9 +445,19 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
  * camera changes (s_mesh_cam). */
 #define COARSE_EDGE 1800.0f
 #define VIEW_LIMIT 1600.0f /* picture pixels from the centre: the fill area, scrolling and fit */
+static int in_view_of(const u32 *scratch, const V3 *a, const V3 *b, const V3 *c);
 static int in_room_view(const V3 *a, const V3 *b, const V3 *c) {
-    const GteMatrix *m = (const GteMatrix *)g_EntityRenderScratch;
-    const float H = (float)g_EntityRenderScratch[8];
+    if (in_view_of(g_EntityRenderScratch, a, b, c)) return 1;
+    /* Parts other cameras see get their textures too (see "Other cameras"). */
+    if (s_merge_mode)
+        for (int k = 1; k < s_cam_count; ++k)
+            if (in_view_of(s_cams[k].scratch, a, b, c)) return 1;
+    return 0;
+}
+
+static int in_view_of(const u32 *scratch, const V3 *a, const V3 *b, const V3 *c) {
+    const GteMatrix *m = (const GteMatrix *)scratch;
+    const float H = (float)scratch[8];
     const V3 *p[3] = {a, b, c};
     float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
     int behind = 0;
@@ -805,9 +845,10 @@ static void build_mesh(void) {
     if (s_mesh_key == db->triangles.pointer && s_mesh_tris == db->triangleCount &&
         s_mesh_wall_height == s_fit.wall && s_mesh_obstacle_height == s_fit.obst &&
         s_mesh_inside_loop == s_inside_loop && s_mesh_height_version == s_height_version &&
-        s_mesh_shape == room_shape() &&
+        s_mesh_shape == room_shape() && s_mesh_xcams == s_xcam_key &&
         (s_mesh_cam == room_camera_key() || s_frame - s_mesh_frame < 30)) /* moving cameras: twice a second */
         return;
+    s_mesh_xcams = s_xcam_key;
     s_mesh_shape = room_shape();
     s_mesh_cam = room_camera_key();
     s_mesh_frame = s_frame;
@@ -962,27 +1003,14 @@ static void build_mesh(void) {
 
 static unsigned hash_add(unsigned h, unsigned v) { return (h ^ v) * 16777619u; }
 
-/* The sprites Render_BuildMeshList would draw this frame, with Render_DrawSpriteEntry's
- * placement (static layers; scrolling, wrapped layers are left out). */
-static void gather_tiles(void) {
-    GeomState *state = g_GeomState;
-    s_tile_count = 0;
-    s_tile_frame = s_frame;
-    memcpy(s_pic_scratch, s_saved_scratch, sizeof s_pic_scratch);
-    s_pic_offset_x = s_saved_offset_x;
-    s_pic_offset_y = s_saved_offset_y;
-    if (!state) return;
-    u16 out_x = (u16)(state->disp_src_x - ((u16)g_GeomScroll.state.position.x - 160));
-    u16 out_y = (u16)(state->disp_src_y - ((u16)g_GeomScroll.state.position.y - 112));
+/* Appends the visible tiles of camera group `group`, placed for tiles moved by (out_x, out_y),
+ * as slot `slot`. */
+static void gather_group(GeomState *state, int group, int slot, u16 out_x, u16 out_y, uint64_t geometry_key,
+                         unsigned *h) {
     GeomEntry *entries = (GeomEntry *)((u8 *)state + state->entry_offset);
-    unsigned h = 2166136261u;
-    PeBackgroundInfo bg;
-    Render_GetBackgroundInfo(&bg);
-    uint64_t geometry_key = bg.hd_enabled && bg.hd_pack_path && *bg.hd_pack_path ? bg.geometry_key : 0;
     for (unsigned e = 0; e < state->entry_count06; ++e) {
         GeomEntry *entry = &entries[e];
-        if (!(entry->head.b.flags & 2) || entry->group != g_GeomScroll.state.position.groupSelect)
-            continue;
+        if (!(entry->head.b.flags & 2) || entry->group != group) continue;
         if (entry->head.b.flags & 4) continue;
         const RenderTilePacket *sprites = (const RenderTilePacket *)entry->u30.prim;
         const RenderTexturePagePacket *pages = entry->u34.pagePackets;
@@ -992,7 +1020,7 @@ static void gather_tiles(void) {
         int raw_y = (s16)(u16)(entry->scr_y + out_y);
         int base_ot = state->field26 + (int)((*(const u32 *)entry >> 8) & 0xFFF);
         uint64_t hd = geometry_key ? hd_entry_key(geometry_key, e) : 0;
-        for (unsigned i = 0; i < entry->prim_count && s_tile_count < MAX_TILES; ++i) {
+        for (unsigned i = 0; i < entry->prim_count && s_tile_total < MAX_TILES; ++i) {
             u32 word = pos[i];
             int x = (s16)(raw_x + (int)(word >> 22));
             int y = (s16)(raw_y + (int)((word >> 12) & 0x3FF));
@@ -1001,7 +1029,7 @@ static void gather_tiles(void) {
             if (x < CELL_X0 || y < CELL_Y0 || x >= CELL_X0 + CELLS_W * 16 - 16 ||
                 y >= CELL_Y0 + CELLS_H * 16 - 16)
                 continue;
-            Tile *t = &s_tiles[s_tile_count++];
+            Tile *t = &s_tiles[s_tile_total++];
             t->x = (s16)x;
             t->y = (s16)y;
             t->u = sprites[i].u;
@@ -1015,11 +1043,85 @@ static void gather_tiles(void) {
             t->ot = (u16)ot;
             t->cell = (u16)i;
             t->hd = hd;
-            h = hash_add(h, (unsigned)x | ((unsigned)y << 16));
-            h = hash_add(h, t->u | (t->v << 8) | ((unsigned)t->clut << 16));
-            h = hash_add(h, t->tpage | ((unsigned)t->ot << 16));
+            t->entry = (u16)e;
+            t->slot = (u8)slot;
+            *h = hash_add(*h, (unsigned)x | ((unsigned)y << 16));
+            *h = hash_add(*h, t->u | (t->v << 8) | ((unsigned)t->clut << 16));
+            *h = hash_add(*h, t->tpage | ((unsigned)t->ot << 16));
         }
     }
+}
+
+/* The sprites Render_BuildMeshList would draw this frame, with Render_DrawSpriteEntry's
+ * placement (static layers; scrolling, wrapped layers are left out); then, with "Other cameras"
+ * on, the other camera groups' sprites as each would be drawn with its view scrolled to its
+ * centre (Render_DrawMeshList), and each one's camera from the viewport table
+ * (Render_LoadGeomState). */
+static void gather_tiles(void) {
+    GeomState *state = g_GeomState;
+    s_tile_count = s_tile_total = 0;
+    s_cam_count = 0;
+    s_tile_frame = s_frame;
+    memcpy(s_pic_scratch, s_saved_scratch, sizeof s_pic_scratch);
+    s_pic_offset_x = s_saved_offset_x;
+    s_pic_offset_y = s_saved_offset_y;
+    if (!state) return;
+    u16 out_x = (u16)(state->disp_src_x - ((u16)g_GeomScroll.state.position.x - 160));
+    u16 out_y = (u16)(state->disp_src_y - ((u16)g_GeomScroll.state.position.y - 112));
+    unsigned h = 2166136261u;
+    PeBackgroundInfo bg;
+    Render_GetBackgroundInfo(&bg);
+    uint64_t geometry_key = bg.hd_enabled && bg.hd_pack_path && *bg.hd_pack_path ? bg.geometry_key : 0;
+    int active = g_GeomScroll.state.position.groupSelect;
+    gather_group(state, active, 0, out_x, out_y, geometry_key, &h);
+    s_tile_count = s_tile_total;
+    CamPic *c0 = &s_cams[0];
+    c0->group = active;
+    c0->first = 0;
+    c0->count = s_tile_count;
+    s_cam_count = 1;
+    unsigned xkey = 0;
+    if (s_merge_mode && room_shape() == 0) {
+        GeomEntry *entries = (GeomEntry *)((u8 *)state + state->entry_offset);
+        u8 seen[256] = {0};
+        seen[active & 0xFF] = 1;
+        const CameraViewport *views = (const CameraViewport *)((const u8 *)state + state->entry_offset_1C);
+        for (unsigned e = 0; e < state->entry_count06 && s_cam_count < MAX_CAMS; ++e) {
+            int g = entries[e].group;
+            if (seen[g] || !(entries[e].head.b.flags & 2) || (entries[e].head.b.flags & 4)) continue;
+            seen[g] = 1;
+            const CameraViewport *v = &views[g];
+            if (v->prefix.gpu.geom_screen == 0 || v->width <= 0 || v->height <= 0) continue;
+            CamPic *c = &s_cams[s_cam_count];
+            memset(c->scratch, 0, sizeof c->scratch);
+            u16 *m = (u16 *)c->scratch;
+            m[0] = v->prefix.gpu.half02;
+            m[1] = v->prefix.gpu.half04;
+            m[2] = v->prefix.gpu.half06;
+            m[3] = v->prefix.gpu.half08;
+            m[4] = v->prefix.gpu.half0A;
+            m[5] = v->prefix.gpu.half0C;
+            m[6] = v->prefix.gpu.half0E;
+            m[7] = v->prefix.gpu.half10;
+            m[8] = v->prefix.gpu.half12;
+            c->scratch[5] = v->prefix.gpu.word14;
+            c->scratch[6] = v->prefix.gpu.word18;
+            c->scratch[7] = v->prefix.gpu.word1C;
+            c->scratch[8] = v->prefix.gpu.geom_screen;
+            int cx = (v->minX + v->maxX) / 2, cy = (v->minY + v->maxY) / 2;
+            c->offx = (float)(160 - (cx - (s16)v->width / 2));
+            c->offy = (float)(112 - (cy - (s16)v->height / 2));
+            c->group = g;
+            c->first = s_tile_total;
+            gather_group(state, g, s_cam_count, (u16)(state->disp_src_x - (cx - 160)),
+                         (u16)(state->disp_src_y - (cy - 112)), geometry_key, &h);
+            c->count = s_tile_total - c->first;
+            if (c->count <= 0) continue;
+            xkey = hash_add(xkey, (unsigned)g + 1);
+            s_cam_count++;
+        }
+    }
+    s_xcam_key = xkey;
     s_tile_hash = h;
 }
 
@@ -1028,20 +1130,22 @@ static void gather_tiles(void) {
 static u8 s_tile_hidden[MAX_TILES];
 static u16 s_tile_solid[MAX_TILES]; /* its opaque texels, 0..256 (hide_covered_tiles) */
 
-static void bin_tiles(void) {
+/* One camera's tiles [first, first + count) into its cell lists: start (CELLS + 1 entries) into
+ * items, from items[base]; returns the next free item. */
+static int bin_tiles(int first, int count, int *start, u16 *items, int base) {
     static int counts[CELLS_W * CELLS_H];
     memset(counts, 0, sizeof counts);
     for (int pass = 0; pass < 2; ++pass) {
         if (pass == 1) {
-            int sum = 0;
+            int sum = base;
             for (int c = 0; c < CELLS_W * CELLS_H; ++c) {
-                s_cell_start[c] = sum;
+                start[c] = sum;
                 sum += counts[c];
                 counts[c] = 0;
             }
-            s_cell_start[CELLS_W * CELLS_H] = sum;
+            start[CELLS_W * CELLS_H] = sum;
         }
-        for (int i = 0; i < s_tile_count; ++i) {
+        for (int i = first; i < first + count; ++i) {
             if (s_tile_hidden[i]) continue;
             int cx0 = (s_tiles[i].x - CELL_X0) >> 4, cy0 = (s_tiles[i].y - CELL_Y0) >> 4;
             int cx1 = (s_tiles[i].x + 15 - CELL_X0) >> 4, cy1 = (s_tiles[i].y + 15 - CELL_Y0) >> 4;
@@ -1049,12 +1153,13 @@ static void bin_tiles(void) {
                 for (int cx = cx0; cx <= cx1; ++cx) {
                     if (cx < 0 || cy < 0 || cx >= CELLS_W || cy >= CELLS_H) continue;
                     int c = cy * CELLS_W + cx;
-                    if (pass == 1 && s_cell_start[c] + counts[c] < MAX_CELL_ITEMS)
-                        s_cell_items[s_cell_start[c] + counts[c]] = (u16)i;
+                    if (pass == 1 && start[c] + counts[c] < MAX_CELL_ITEMS)
+                        items[start[c] + counts[c]] = (u16)i;
                     counts[c]++;
                 }
         }
     }
+    return start[CELLS_W * CELLS_H];
 }
 
 /* ================= projection through the room camera ================= */
@@ -1090,6 +1195,9 @@ static int clip_edge(CV *in, int n, CV *out, int axis, float lim, int keep_great
 }
 
 static int s_projecting; /* the surface being cut, for the per-surface counts */
+static const CamPic *s_cc; /* the camera it is being cut for */
+static int s_cut_tiles = 1, s_cut_fill = 1; /* cut_into_tiles: the camera's tiles, the gap fill */
+static u8 s_cut_rank, s_cut_nrank = 1;      /* the pieces' rank (Piece.rank, nrank) */
 
 /* One texel of a tile (i, j inside it) from a 1024x512 copy of video memory; 0 = transparent. */
 static u16 vram_tile_texel(const u16 *vram, const Tile *t, int i, int j) {
@@ -1157,6 +1265,8 @@ static void add_piece(const CV *a, const CV *b, const CV *c, const Tile *t, int 
     p->tile = (u16)tile;
     p->wall = wall;
     p->surf = (u16)s_projecting;
+    p->rank = s_cut_rank;
+    p->nrank = s_cut_nrank;
 }
 
 static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float maxx, float miny,
@@ -1164,22 +1274,55 @@ static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float max
 static int wall_rect_xy(int i, const V3 *p, float *x, float *y);
 static int picture_xy(const V3 *p, float *x, float *y);
 
-/* Whether the room camera is under ceiling surface s (y is down): only then the picture shows it. */
-static int ceiling_in_picture(const Surface *s) {
-    const GteMatrix *m = (const GteMatrix *)s_pic_scratch;
-    float cy = -((float)m->m[0][1] * (float)m->t[0] + (float)m->m[1][1] * (float)m->t[1] +
-                 (float)m->m[2][1] * (float)m->t[2]) / 4096.0f;
+/* Camera c's view of world point p (view space, before projection). */
+static void cam_view(const CamPic *c, const V3 *p, float out[3]) {
+    const GteMatrix *m = (const GteMatrix *)c->scratch;
+    for (int r = 0; r < 3; ++r)
+        out[r] = (m->m[r][0] * p->x + m->m[r][1] * p->y + m->m[r][2] * p->z) / 4096.0f +
+                 (float)m->t[r];
+}
+
+/* A view-space point on camera c's picture, with its room fit (no layer). */
+static void cam_screen(const CamPic *c, const float v[3], float *x, float *y) {
+    float H = (float)c->scratch[8], q = 1.0f / v[2];
+    *x = 160.0f + (c->offx + H * v[0] * q - 160.0f) * c->sx + c->ox;
+    *y = 112.0f + (c->offy + H * v[1] * q - 112.0f) * c->sy + c->oy;
+}
+
+/* The camera's height (y is down) and whether it is under ceiling surface s: only then its
+ * picture shows the ceiling. */
+static float cam_y(const CamPic *c) {
+    const GteMatrix *m = (const GteMatrix *)c->scratch;
+    return -((float)m->m[0][1] * (float)m->t[0] + (float)m->m[1][1] * (float)m->t[1] +
+             (float)m->m[2][1] * (float)m->t[2]) / 4096.0f;
+}
+static int cam_under(const CamPic *c, const Surface *s) {
+    float cy = cam_y(c);
     for (int k = 0; k < 3; ++k)
         if (cy <= s->v[k].y) return 0;
     return 1;
 }
 
-/* Cuts one surface along every tile it covers in the room camera's picture. */
-static void project_surface(const Surface *s) {
+/* Surface s's layer adjustment on camera c's picture. */
+static void cam_layer(const CamPic *c, const Surface *s, float *x, float *y) {
+    if (s->wall == 1 && s->src < MAX_WALLS)
+        apply_adjust(x, y, &c->wall_adj[s->src], c->wall_pivot[s->src][0], c->wall_pivot[s->src][1]);
+    else if (s->wall == SURF_CAP) {
+        apply_adjust(x, y, &c->floor_adj, 160.0f, 112.0f);
+        if (s->src < MAX_LOOPS && c->cap_adj[s->src].sx != 0)
+            apply_adjust(x, y, &c->cap_adj[s->src], c->cap_pivot[s->src][0], c->cap_pivot[s->src][1]);
+    } else if (s->wall != 1)
+        apply_adjust(x, y, s->wall == 2 ? &c->ceil_adj : &c->floor_adj, 160.0f, 112.0f);
+}
+
+/* Cuts one surface along every tile it covers in camera c's picture. */
+static void project_surface(const CamPic *c, const Surface *s) {
+    s_cc = c;
     if (s->src == SRC_NO_TEXTURE) return;
-    if (s->wall == 2 && !ceiling_in_picture(s)) return;
+    if (s->wall == 2 && !cam_under(c, s)) return;
     if (s->wall == 1 && s->src < MAX_WALLS && s_wall_cover[s->src] >= 0) return;
-    if (s->wall == 1 && s->src < MAX_WALLS && s_wall_adj[s->src].rect > 0.5f) {
+    if (s->wall == 1 && s->src < MAX_WALLS && c->wall_adj[s->src].rect > 0.5f) {
+        if (c != &s_cams[0]) return; /* the rectangle is placed on the room camera's picture */
         /* Rectangle mode: picture position is an even (affine) spread over the wall, so 1/z = 1. */
         CV base[3];
         float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
@@ -1198,13 +1341,11 @@ static void project_surface(const Surface *s) {
         cut_into_tiles(base, 3, s->wall, minx, maxx, miny, maxy);
         return;
     }
-    const float H = (float)s_pic_scratch[8];
-    const float ox = s_pic_offset_x, oy = s_pic_offset_y;
     float view[3][3];
     for (int k = 0; k < 3; ++k) {
         V3 pp = s->v[k];
         if (s->wall == 1 && s->src < MAX_WALLS) wall_picture_point(s->src, &pp);
-        room_view(&pp, view[k]);
+        cam_view(c, &pp, view[k]);
     }
     /* Near clip in the room's view space, keeping world positions. */
     float poly[4][6];
@@ -1231,15 +1372,8 @@ static void project_surface(const Surface *s) {
     float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
     for (int k = 0; k < n; ++k) {
         float q = 1.0f / poly[k][2];
-        base[k].sx = 160.0f + (ox + H * poly[k][0] * q - 160.0f) * s_fit.sx + s_fit.ox;
-        base[k].sy = 112.0f + (oy + H * poly[k][1] * q - 112.0f) * s_fit.sy + s_fit.oy;
-        if (s->wall == 1 && s->src < MAX_WALLS)
-            apply_adjust(&base[k].sx, &base[k].sy, &s_wall_adj[s->src], s_wall_pivot[s->src][0],
-                         s_wall_pivot[s->src][1]);
-        else if (s->wall == SURF_CAP)
-            cap_adjust(s->src, &base[k].sx, &base[k].sy);
-        else if (s->wall != 1)
-            apply_adjust(&base[k].sx, &base[k].sy, s->wall == 2 ? &s_ceil_adj : &s_floor_adj, 160.0f, 112.0f);
+        cam_screen(c, poly[k], &base[k].sx, &base[k].sy);
+        cam_layer(c, s, &base[k].sx, &base[k].sy);
         base[k].q = q;
         base[k].wx = poly[k][3] * q;
         base[k].wy = poly[k][4] * q;
@@ -1338,7 +1472,7 @@ static int fill_source_at(int x, int y) {
 /* The filled tile of cell c (made on first use), or -1. */
 static int fill_tile(int c) {
     if (s_fill_tile[c] >= 0) return s_fill_tile[c];
-    int at = s_tile_count + s_fill_count;
+    int at = s_tile_total + s_fill_count;
     if (at >= MAX_TILES) return -1;
     /* Which of the last FILL_PERIOD source cells back from the edge, along each axis. */
     int from = s_fill_from[c], fx = from % CELLS_W, fy = from / CELLS_W;
@@ -1386,17 +1520,20 @@ static void cut_into_tiles(const CV *base, int n, u8 wall, float minx, float max
     if (cx1 >= CELLS_W) cx1 = CELLS_W - 1;
     if (cy1 >= CELLS_H) cy1 = CELLS_H - 1;
     ++s_stamp;
-    for (int cy = cy0; cy <= cy1; ++cy)
+    const int *start = s_cc ? s_cc->cell_start : s_cell_start;
+    const u16 *items = s_cc ? s_cc->cell_items : s_cell_items;
+    for (int cy = cy0; cy <= cy1 && s_cut_tiles; ++cy)
         for (int cx = cx0; cx <= cx1; ++cx) {
             int c = cy * CELLS_W + cx;
-            for (int it = s_cell_start[c]; it < s_cell_start[c + 1]; ++it) {
-                int ti = s_cell_items[it];
+            for (int it = start[c]; it < start[c + 1]; ++it) {
+                int ti = items[it];
                 if (s_tile_stamp[ti] == s_stamp) continue;
                 s_tile_stamp[ti] = s_stamp;
                 cut_by_tile(base, n, wall, ti);
             }
         }
-    /* And the cells no tile covers, from the nearest one. */
+    /* And the cells no tile covers, from the nearest one (the room camera's picture only). */
+    if (!s_cut_fill) return;
     int gx0 = (int)floorf((minx - CELL_X0 - s_fill_ax) / 16), gx1 = (int)floorf((maxx - CELL_X0 - s_fill_ax) / 16);
     int gy0 = (int)floorf((miny - CELL_Y0 - s_fill_ay) / 16), gy1 = (int)floorf((maxy - CELL_Y0 - s_fill_ay) / 16);
     if (gx0 < 0) gx0 = 0;
@@ -1518,15 +1655,14 @@ static int tile_cmp_top_first(const void *a, const void *b) {
 /* Marks the tiles whose texels (all but fewer than HIDE_BELOW) lie under opaque texels of tiles
  * drawn over them. */
 #define HIDE_BELOW 32
-static void hide_covered_tiles(const u16 *vram) {
+/* One camera's tiles [first, first + count); s_tile_hidden / s_tile_solid cleared by the caller. */
+static void hide_covered_tiles(const u16 *vram, int first, int count) {
     static u8 opaque[CELLS_W * 16 * CELLS_H * 16];
     static u16 order[MAX_TILES];
-    memset(s_tile_hidden, 0, sizeof s_tile_hidden);
-    for (int i = 0; i < s_tile_count; ++i) s_tile_solid[i] = 256;
-    if (!vram || s_tile_count <= 0) return;
+    if (!vram || count <= 0) return;
     int x0 = 1 << 30, x1 = -(1 << 30), y0 = 1 << 30, y1 = -(1 << 30);
-    for (int i = 0; i < s_tile_count; ++i) {
-        order[i] = (u16)i;
+    for (int i = first; i < first + count; ++i) {
+        order[i - first] = (u16)i;
         if (s_tiles[i].x < x0) x0 = s_tiles[i].x;
         if (s_tiles[i].x + 16 > x1) x1 = s_tiles[i].x + 16;
         if (s_tiles[i].y < y0) y0 = s_tiles[i].y;
@@ -1534,9 +1670,10 @@ static void hide_covered_tiles(const u16 *vram) {
     }
     const int pitch = CELLS_W * 16;
     for (int y = y0; y < y1; ++y) memset(&opaque[(y - CELL_Y0) * pitch + (x0 - CELL_X0)], 0, (size_t)(x1 - x0));
-    qsort(order, (size_t)s_tile_count, sizeof order[0], tile_cmp_top_first);
-    for (int n = 0; n < s_tile_count; ++n) {
+    qsort(order, (size_t)count, sizeof order[0], tile_cmp_top_first);
+    for (int n = 0; n < count; ++n) {
         const Tile *t = &s_tiles[order[n]];
+        if (s_tile_hidden[order[n]]) continue; /* its texels were replaced (tile_texels_ok) */
         u8 solid[16][16];
         int visible = 0, solid_n = 0;
         u8 *row0 = &opaque[(t->y - CELL_Y0) * pitch + (t->x - CELL_X0)];
@@ -1562,10 +1699,303 @@ static void hide_covered_tiles(const u16 *vram) {
 }
 
 static int piece_cmp_tile(const void *a, const void *b) {
-    return (int)((const Piece *)a)->tile - (int)((const Piece *)b)->tile;
+    const Piece *pa = a, *pb = b;
+    if (pa->rank != pb->rank) return (int)pa->rank - (int)pb->rank;
+    return (int)pa->tile - (int)pb->tile;
+}
+
+/* ---- other cameras: their layers, texel checks, and which camera textures what ---- */
+static Adjust s_xwall_adj[MAX_CAMS][MAX_WALLS], s_xcap_adj[MAX_CAMS][MAX_LOOPS];
+static float s_xwall_pivot[MAX_CAMS][MAX_WALLS][2], s_xcap_pivot[MAX_CAMS][MAX_LOOPS][2];
+static int s_xcell_start[MAX_CAMS][CELLS_W * CELLS_H + 1];
+static u16 s_xcell_items[MAX_CELL_ITEMS];
+
+/* Editor Ctrl+O: rooms and surfaces that keep the room camera's picture only. rooms.txt
+ * "X room sel": sel -2 the whole room, -1 the floor, -3 the ceiling, -100-N obstacle top N,
+ * >= 0 a wall edge. */
+typedef struct { int room, sel; } XOff;
+#define MAX_XOFF 4096
+static XOff s_xoff[MAX_XOFF];
+static int s_xoff_count;
+static unsigned s_xoff_version;
+static u8 s_off_room, s_off_floor, s_off_ceil, s_off_wall[MAX_WALLS], s_off_cap[MAX_LOOPS];
+
+static int xoff_find(int room, int sel) {
+    for (int i = 0; i < s_xoff_count; ++i)
+        if (s_xoff[i].room == room && s_xoff[i].sel == sel) return i;
+    return -1;
+}
+
+static void xoff_flags(void) {
+    int room = pe_room_number();
+    s_off_room = s_off_floor = s_off_ceil = 0;
+    memset(s_off_wall, 0, sizeof s_off_wall);
+    memset(s_off_cap, 0, sizeof s_off_cap);
+    for (int i = 0; i < s_xoff_count; ++i) {
+        int sel = s_xoff[i].sel;
+        if (s_xoff[i].room != room) continue;
+        if (sel == -2) s_off_room = 1;
+        else if (sel == -1) s_off_floor = 1;
+        else if (sel == SEL_CEILING) s_off_ceil = 1;
+        else if (sel <= SEL_CAP0 && SEL_CAP0 - sel < MAX_LOOPS) s_off_cap[SEL_CAP0 - sel] = 1;
+        else if (sel >= 0 && sel < MAX_WALLS) s_off_wall[sel] = 1;
+    }
+}
+
+static int merge_allowed(const Surface *s) {
+    if (s_off_room) return 0;
+    if (s->wall == 1) return s->src >= MAX_WALLS || !s_off_wall[s->src];
+    if (s->wall == 2) return !s_off_ceil;
+    if (s->wall == SURF_CAP) return s->src >= MAX_LOOPS || !s_off_cap[s->src];
+    return !s_off_floor;
+}
+
+/* Other camera k's room fit and layers (rooms.txt rows for its group), pivots and cell lists. */
+static int cam_load(int k, int item_base) {
+    CamPic *c = &s_cams[k];
+    int room = pe_room_number();
+    c->ox = c->oy = 0;
+    c->sx = c->sy = 1;
+    for (int i = 0; i < s_fit_count; ++i)
+        if (s_fits[i].room == room && s_fits[i].group == c->group) {
+            c->ox = s_fits[i].ox;
+            c->oy = s_fits[i].oy;
+            c->sx = s_fits[i].sx;
+            c->sy = s_fits[i].sy;
+        }
+    c->floor_adj = c->ceil_adj = k_identity;
+    c->wall_adj = s_xwall_adj[k];
+    c->cap_adj = s_xcap_adj[k];
+    c->wall_pivot = s_xwall_pivot[k];
+    c->cap_pivot = s_xcap_pivot[k];
+    int walls = s_wall_count < MAX_WALLS ? s_wall_count : MAX_WALLS;
+    int loops = s_loop_count < MAX_LOOPS ? s_loop_count : MAX_LOOPS;
+    for (int i = 0; i < walls; ++i) c->wall_adj[i] = k_identity;
+    for (int i = 0; i < loops; ++i) c->cap_adj[i] = k_identity;
+    for (int i = 0; i < s_layer_fit_count; ++i) {
+        const LayerFit *l = &s_layer_fits[i];
+        if (l->room != room || l->group != c->group) continue;
+        if (l->layer == -1) c->floor_adj = l->a;
+        else if (l->layer == LAYER_CEILING) c->ceil_adj = l->a;
+        else if (l->layer <= SEL_CAP0 && SEL_CAP0 - l->layer < loops) c->cap_adj[SEL_CAP0 - l->layer] = l->a;
+        else if (l->layer >= 0 && l->layer < walls) c->wall_adj[l->layer] = l->a;
+    }
+    /* Pivots as wall_pivots places them, on this camera's picture. */
+    for (int i = 0; i < walls; ++i) {
+        const V3 *a = &s_wall_orig[i][0], *b = &s_wall_orig[i][1];
+        float h = s_walls_list[i].height;
+        V3 mid = {(a->x + b->x) * 0.5f, (a->y + b->y) * 0.5f - h * 0.5f, (a->z + b->z) * 0.5f};
+        float v[3];
+        cam_view(c, &mid, v);
+        c->wall_pivot[i][0] = 160.0f;
+        c->wall_pivot[i][1] = 112.0f;
+        if (v[2] >= 16.0f) cam_screen(c, v, &c->wall_pivot[i][0], &c->wall_pivot[i][1]);
+    }
+    for (int i = 0; i < loops; ++i) {
+        const WallLoop *l = &s_loops[i];
+        V3 mid = {(l->minx + l->maxx) * 0.5f, s_cap_y[i] < 1e8f ? s_cap_y[i] : s_floor_y,
+                  (l->minz + l->maxz) * 0.5f};
+        float v[3], x = 160.0f, y = 112.0f;
+        cam_view(c, &mid, v);
+        if (v[2] >= 16.0f) {
+            cam_screen(c, v, &x, &y);
+            apply_adjust(&x, &y, &c->floor_adj, 160.0f, 112.0f);
+        }
+        c->cap_pivot[i][0] = x;
+        c->cap_pivot[i][1] = y;
+    }
+    c->cell_start = s_xcell_start[k];
+    c->cell_items = s_xcell_items;
+    return bin_tiles(c->first, c->count, c->cell_start, c->cell_items, item_base);
+}
+
+/* Texels of the room camera's tiles as last seen while it showed (by mesh entry and sprite),
+ * so another camera's tile whose video memory was used for something else since is left out. */
+#define REF_SLOTS 65536
+static u32 s_ref_key[REF_SLOTS], s_ref_val[REF_SLOTS];
+static const void *s_ref_state;
+static int s_ref_room = -1;
+static u32 s_tile_check[MAX_TILES]; /* other cameras' tiles: their texels at the last rebuild */
+static unsigned s_xvalid_version, s_check_next;
+
+static u32 *ref_slot(u32 key) {
+    u32 h = (key * 2654435761u) & (REF_SLOTS - 1);
+    for (int n = 0; n < REF_SLOTS; ++n, h = (h + 1) & (REF_SLOTS - 1)) {
+        if (s_ref_key[h] == key) return &s_ref_val[h];
+        if (!s_ref_key[h]) {
+            s_ref_key[h] = key;
+            s_ref_val[h] = 0;
+            return &s_ref_val[h];
+        }
+    }
+    return NULL;
+}
+
+static u32 tile_texel_hash(const u16 *vram, const Tile *t) {
+    u32 h = 2166136261u;
+    for (int j = 0; j < 16; ++j)
+        for (int i = 0; i < 16; ++i) h = hash_add(h, vram_tile_texel(vram, t, i, j));
+    return h | 1;
+}
+
+/* Whether the tile's texels and palette are plain video memory (not drawn over). */
+static int tile_known(const u8 *known, const Tile *t) {
+    if (!known) return 1;
+    int bx = (t->tpage & 0xF) * 64, by = ((t->tpage >> 4) & 1) * 256, depth = (t->tpage >> 7) & 3;
+    int w = depth == 0 ? 4 : depth == 1 ? 8 : 16;
+    int x = (bx + t->u * w / 16) & 1023, y = (by + t->v) & 511;
+    int cx = (t->clut & 0x3F) * 16, cy = (t->clut >> 6) & 0x1FF;
+    return known[y * 1024 + x] && known[((y + 15) & 511) * 1024 + ((x + w - 1) & 1023)] &&
+           (depth == 2 || known[cy * 1024 + cx]);
+}
+
+/* Room camera tiles: remember their texels. Other cameras' tiles: hidden when their memory no
+ * longer holds them. */
+static void check_tiles(const u16 *vram, const u8 *known) {
+    if (s_ref_state != (const void *)g_GeomState || s_ref_room != pe_room_number()) {
+        memset(s_ref_key, 0, sizeof s_ref_key);
+        s_ref_state = g_GeomState;
+        s_ref_room = pe_room_number();
+    }
+    if (!vram) return;
+    for (int i = 0; i < s_tile_total; ++i) {
+        const Tile *t = &s_tiles[i];
+        u32 *ref = ref_slot(((u32)t->entry << 16 | t->cell) + 1);
+        if (i < s_tile_count) {
+            if (ref && !*ref) *ref = tile_texel_hash(vram, t);
+            continue;
+        }
+        if (!tile_known(known, t)) {
+            s_tile_hidden[i] = 1;
+            continue;
+        }
+        u32 h = tile_texel_hash(vram, t);
+        s_tile_check[i] = h;
+        if (ref && *ref && *ref != h) s_tile_hidden[i] = 1;
+    }
+}
+
+/* A few of the other cameras' tiles each frame: a changed one rebuilds the pieces. */
+static void recheck_tiles(void) {
+    int n = s_tile_total - s_tile_count;
+    if (n <= 0 || s_cam_count < 2) return;
+    const u16 *vram = Psyz_GpuGetVramCopy(NULL);
+    if (!vram) return;
+    for (int k = 0; k < 48 && k < n; ++k) {
+        int i = s_tile_count + (int)(s_check_next++ % (unsigned)n);
+        if (s_tile_hidden[i] || !s_tile_check[i]) continue;
+        if (tile_texel_hash(vram, &s_tiles[i]) != s_tile_check[i]) {
+            s_xvalid_version++;
+            return;
+        }
+    }
+}
+
+/* Each camera's depth (nearest view z of the room's surfaces) and solid tiles per picture cell. */
+static float s_zbuf[MAX_CAMS][CELLS_W * CELLS_H];
+static u8 s_cover[MAX_CAMS][CELLS_W * CELLS_H];
+
+static int cell_of(float x, float y) {
+    int cx = (int)floorf((x - CELL_X0) / 16), cy = (int)floorf((y - CELL_Y0) / 16);
+    if (cx < 0 || cy < 0 || cx >= CELLS_W || cy >= CELLS_H) return -1;
+    return cy * CELLS_W + cx;
+}
+
+static void cam_depths(int k) {
+    const CamPic *c = &s_cams[k];
+    float *zb = s_zbuf[k];
+    for (int i = 0; i < CELLS_W * CELLS_H; ++i) zb[i] = 1e30f;
+    for (int i = 0; i < s_surf_count; ++i) {
+        const Surface *s = &s_surf[i];
+        if (s->wall == 2 && !cam_under(c, s)) continue;
+        float v[3][3], x[3], y[3];
+        int ok = 1;
+        for (int j = 0; j < 3 && ok; ++j) {
+            cam_view(c, &s->v[j], v[j]);
+            ok = v[j][2] >= 16.0f;
+            if (ok) cam_screen(c, v[j], &x[j], &y[j]);
+        }
+        if (!ok) continue;
+        float area = (x[1] - x[0]) * (y[2] - y[0]) - (x[2] - x[0]) * (y[1] - y[0]);
+        if (fabsf(area) < 1e-3f) continue;
+        int cx0 = (int)floorf((fminf(x[0], fminf(x[1], x[2])) - CELL_X0) / 16);
+        int cx1 = (int)floorf((fmaxf(x[0], fmaxf(x[1], x[2])) - CELL_X0) / 16);
+        int cy0 = (int)floorf((fminf(y[0], fminf(y[1], y[2])) - CELL_Y0) / 16);
+        int cy1 = (int)floorf((fmaxf(y[0], fmaxf(y[1], y[2])) - CELL_Y0) / 16);
+        if (cx1 < 0 || cy1 < 0 || cx0 >= CELLS_W || cy0 >= CELLS_H) continue;
+        if (cx0 < 0) cx0 = 0;
+        if (cy0 < 0) cy0 = 0;
+        if (cx1 >= CELLS_W) cx1 = CELLS_W - 1;
+        if (cy1 >= CELLS_H) cy1 = CELLS_H - 1;
+        for (int cy = cy0; cy <= cy1; ++cy)
+            for (int cx = cx0; cx <= cx1; ++cx) {
+                float px = CELL_X0 + cx * 16 + 8.0f, py = CELL_Y0 + cy * 16 + 8.0f;
+                float w0 = ((x[1] - px) * (y[2] - py) - (x[2] - px) * (y[1] - py)) / area;
+                float w1 = ((x[2] - px) * (y[0] - py) - (x[0] - px) * (y[2] - py)) / area;
+                float w2 = 1.0f - w0 - w1;
+                if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+                float iz = w0 / v[0][2] + w1 / v[1][2] + w2 / v[2][2];
+                if (iz <= 0) continue;
+                float z = 1.0f / iz;
+                int cell = cy * CELLS_W + cx;
+                if (z < zb[cell]) zb[cell] = z;
+            }
+    }
+    u8 *cov = s_cover[k];
+    memset(cov, 0, CELLS_W * CELLS_H);
+    for (int i = c->first; i < c->first + c->count; ++i) {
+        if (s_tile_hidden[i] || s_tile_solid[i] < FILL_SOLID) continue;
+        int cell = cell_of(s_tiles[i].x + 8.0f, s_tiles[i].y + 8.0f);
+        if (cell >= 0) cov[cell] = 1;
+    }
+}
+
+/* How well camera k shows surface s: samples (of RANK_SAMPLES) it sees unhidden on a solid tile,
+ * -1 when it can't show it at all; *area: its size on the picture (texels). */
+#define RANK_SAMPLES 7
+static int cam_score(int k, const Surface *s, float *area) {
+    const CamPic *c = &s_cams[k];
+    if (s->wall == 2 && !cam_under(c, s)) return -1;
+    if ((s->wall == 0 || s->wall == SURF_CAP) && cam_y(c) >= fminf(s->v[0].y, fminf(s->v[1].y, s->v[2].y)))
+        return -1; /* a floor seen from below */
+    V3 p[3];
+    float lx[3], ly[3];
+    for (int j = 0; j < 3; ++j) {
+        p[j] = s->v[j];
+        if (s->wall == 1 && s->src < MAX_WALLS) wall_picture_point(s->src, &p[j]);
+        float v[3];
+        cam_view(c, &p[j], v);
+        if (v[2] < 16.0f) return -1;
+        cam_screen(c, v, &lx[j], &ly[j]);
+        cam_layer(c, s, &lx[j], &ly[j]);
+    }
+    *area = fabsf((lx[1] - lx[0]) * (ly[2] - ly[0]) - (lx[2] - lx[0]) * (ly[1] - ly[0])) * 0.5f;
+    static const float w[RANK_SAMPLES][3] = {{0.8f, 0.1f, 0.1f}, {0.1f, 0.8f, 0.1f}, {0.1f, 0.1f, 0.8f},
+                                             {0.45f, 0.45f, 0.1f}, {0.1f, 0.45f, 0.45f},
+                                             {0.45f, 0.1f, 0.45f}, {1 / 3.0f, 1 / 3.0f, 1 / 3.0f}};
+    int good = 0;
+    for (int n = 0; n < RANK_SAMPLES; ++n) {
+        V3 q = {p[0].x * w[n][0] + p[1].x * w[n][1] + p[2].x * w[n][2],
+                p[0].y * w[n][0] + p[1].y * w[n][1] + p[2].y * w[n][2],
+                p[0].z * w[n][0] + p[1].z * w[n][1] + p[2].z * w[n][2]};
+        float v[3], x, y;
+        cam_view(c, &q, v);
+        if (v[2] < 16.0f) continue;
+        cam_screen(c, v, &x, &y);
+        int cell = cell_of(x, y);
+        if (cell < 0) continue;
+        float zb = s_zbuf[k][cell];
+        if (zb < 1e29f && v[2] > zb * 1.04f + 40.0f) continue; /* something nearer hides it */
+        cam_layer(c, s, &x, &y);
+        cell = cell_of(x, y);
+        if (cell >= 0 && s_cover[k][cell]) good++;
+    }
+    return good;
 }
 
 static void build_pieces(void) {
+    if (s_cam_count < 1) s_cam_count = 1;
+    int merging = s_merge_mode && room_shape() == 0 && s_cam_count > 1;
     unsigned key = hash_add(s_tile_hash, (unsigned)s_surf_count);
     for (int i = 0; i < 8; ++i) key = hash_add(key, s_pic_scratch[i]);
     key = hash_add(key, s_pic_scratch[8] | ((unsigned)(u16)s_pic_offset_x << 16));
@@ -1579,24 +2009,120 @@ static void build_pieces(void) {
     key = hash_add(key, s_adj_version);
     key = hash_add(key, s_img_version);
     key = hash_add(key, (unsigned)s_fill_mode);
-    if (key == s_piece_key) return;
+    key = hash_add(key, (unsigned)merging * 3u + (unsigned)s_merge_mode);
+    key = hash_add(key, s_xvalid_version);
+    key = hash_add(key, s_xoff_version);
+    key = hash_add(key, (unsigned)pe_room_number());
+    if (key == s_piece_key) {
+        if (merging) recheck_tiles();
+        return;
+    }
     s_piece_key = key;
     s_piece_count = 0;
-    s_piece_vram = Psyz_GpuGetVramCopy(NULL);
-    hide_covered_tiles(s_piece_vram);
-    bin_tiles();
+    const u8 *known = NULL;
+    s_piece_vram = Psyz_GpuGetVramCopy(&known);
+    memset(s_tile_hidden, 0, sizeof s_tile_hidden);
+    for (int i = 0; i < s_tile_total; ++i) s_tile_solid[i] = 256;
+    if (merging) check_tiles(s_piece_vram, known);
+    hide_covered_tiles(s_piece_vram, 0, s_tile_count);
+    CamPic *c0 = &s_cams[0];
+    memcpy(c0->scratch, s_pic_scratch, sizeof c0->scratch);
+    c0->offx = s_pic_offset_x;
+    c0->offy = s_pic_offset_y;
+    c0->ox = s_fit.ox;
+    c0->oy = s_fit.oy;
+    c0->sx = s_fit.sx;
+    c0->sy = s_fit.sy;
+    c0->floor_adj = s_floor_adj;
+    c0->ceil_adj = s_ceil_adj;
+    c0->wall_adj = s_wall_adj;
+    c0->cap_adj = s_cap_adj;
+    c0->wall_pivot = s_wall_pivot;
+    c0->cap_pivot = s_cap_pivot;
+    c0->cell_start = s_cell_start;
+    c0->cell_items = s_cell_items;
+    c0->first = 0;
+    c0->count = s_tile_count;
+    bin_tiles(0, s_tile_count, s_cell_start, s_cell_items, 0);
     build_fill_map();
     wall_pivots();
+    if (merging) {
+        int base = 0;
+        for (int k = 1; k < s_cam_count; ++k) {
+            hide_covered_tiles(s_piece_vram, s_cams[k].first, s_cams[k].count);
+            base = cam_load(k, base);
+        }
+        for (int k = 0; k < s_cam_count; ++k) cam_depths(k);
+        xoff_flags();
+    }
     memset(s_surf_pieces, 0, sizeof s_surf_pieces);
     memset(s_surf_rgb, 0, sizeof s_surf_rgb);
     for (int i = 0; i < s_surf_count; ++i) {
+        const Surface *s = &s_surf[i];
         s_projecting = i;
         int first = s_piece_count;
-        project_surface(&s_surf[i]);
+        int list[2], n = 0;
+        if (merging && merge_allowed(s) &&
+            !(s->wall == 1 && s->src < MAX_WALLS && s_wall_adj[s->src].rect > 0.5f)) {
+            int order[MAX_CAMS], cov[MAX_CAMS], m = 0;
+            float area[MAX_CAMS];
+            for (int k = 0; k < s_cam_count; ++k) {
+                float a = 0;
+                int g = cam_score(k, s, &a);
+                if (g <= 0) continue;
+                order[m] = k;
+                cov[k] = g;
+                area[k] = a;
+                m++;
+            }
+            /* Best first: shows the whole surface, then the most texels (sharpest); with
+             * "Room camera first" the room camera leads whenever it shows the surface. */
+            for (int a = 1; a < m; ++a)
+                for (int b = a; b > 0; --b) {
+                    int x = order[b - 1], y = order[b];
+                    int fx = cov[x] == RANK_SAMPLES, fy = cov[y] == RANK_SAMPLES;
+                    int swap;
+                    if (s_merge_mode == 2 && (x == 0 || y == 0)) swap = y == 0;
+                    else swap = fy != fx ? fy : area[y] > area[x];
+                    if (!swap) break;
+                    order[b - 1] = y;
+                    order[b] = x;
+                }
+            for (int a = 0; a < m && n < 2; ++a) {
+                list[n++] = order[a];
+                if (cov[order[a]] == RANK_SAMPLES) break;
+            }
+        }
+        if (n == 0 || (n == 1 && list[0] == 0)) {
+            /* The room camera alone, with its gap fill, as without other cameras. */
+            s_cut_rank = 0;
+            s_cut_nrank = 1;
+            s_cut_tiles = s_cut_fill = 1;
+            project_surface(c0, s);
+        } else {
+            int fill = list[0] == 0;
+            s_cut_nrank = (u8)(n + fill);
+            s_cut_tiles = 1;
+            s_cut_fill = 0;
+            for (int r = 0; r < n; ++r) {
+                s_cut_rank = (u8)r;
+                project_surface(&s_cams[list[r]], s);
+            }
+            if (fill) {
+                s_cut_rank = (u8)n;
+                s_cut_tiles = 0;
+                s_cut_fill = 1;
+                project_surface(c0, s);
+            }
+            s_cut_rank = 0;
+            s_cut_nrank = 1;
+            s_cut_tiles = s_cut_fill = 1;
+        }
         /* In tile order: within one ordering-table entry the first linked draws last (on top),
          * as the game's earlier background entries cover its later ones at the same depth. */
         qsort(&s_pieces[first], (size_t)(s_piece_count - first), sizeof(Piece), piece_cmp_tile);
     }
+    s_cc = NULL;
 }
 
 /* ================= picture box ================= */
@@ -1983,6 +2509,8 @@ static void draw_piece(const Piece *pc) {
     const Tile *t = &s_tiles[pc->tile];
     /* Nearer background layers (masks) draw over farther ones, all over the flat colour. */
     int layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 8);
+    /* Several cameras on one surface: the better camera's pieces sit nearer than the next's. */
+    if (pc->nrank > 1) layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 9) + (pc->nrank - 1 - pc->rank) * 8;
     int depth = clamp_depth((pc->wall ? wall_depth(maxz) - (pc->wall == SURF_CAP ? 4 : 0) : floor_depth(maxz)) - layer);
     TriJob job = {TRI_TILE, t, 0, 0, 0, 0, 0, depth};
     emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
@@ -3233,6 +3761,8 @@ static void fits_load(void) {
     s_layer_fit_count = 0;
     s_wall_image_count = 0;
     s_made_count = 0;
+    s_xoff_count = 0;
+    s_xoff_version++;
     char *buf = data_read("rooms.txt", NULL);
     if (!buf) return;
     for (char *line = buf, *next; line; line = next) {
@@ -3248,6 +3778,13 @@ static void fits_load(void) {
                 sscanf(line + 1, "%d %d %d %d %95[^\r\n]", &wi.room, &wi.group, &wi.wall, &wi.span,
                        wi.name) == 5)
                 s_wall_images[s_wall_image_count++] = wi;
+            continue;
+        }
+        if (line[0] == 'X') {
+            XOff x;
+            if (s_xoff_count < MAX_XOFF && sscanf(line + 1, "%d %d", &x.room, &x.sel) == 2 &&
+                xoff_find(x.room, x.sel) < 0)
+                s_xoff[s_xoff_count++] = x;
             continue;
         }
         if (line[0] == 'C') {
@@ -3397,6 +3934,9 @@ static void fits_save(void) {
         for (int k = 0; k < t->n; ++k) fprintf(f, " %d", t->walls[k]);
         fprintf(f, "\n");
     }
+    fprintf(f, "# X room sel: no other cameras' textures there (-2 the whole room, -1 floor, -3 ceiling, "
+               "-100-N top of obstacle loop N, else wall edge)\n");
+    for (int i = 0; i < s_xoff_count; ++i) fprintf(f, "X %d %d\n", s_xoff[i].room, s_xoff[i].sel);
     fclose(f);
     s_fit_saved = 1;
     char msg[96];
@@ -3700,6 +4240,23 @@ static void edit_keys(const bool *keys) {
         }
     }
     end_down = keys[SDL_SCANCODE_END];
+    {
+        /* Ctrl+O: other cameras' textures off / on again for the selection; with the whole room
+         * selected (before numpad .), for the whole room. Saved as X lines in rooms.txt. */
+        static int o_down;
+        if (keys[SDL_SCANCODE_O] && !o_down && ctrl) {
+            int room = pe_room_number(), at = xoff_find(room, s_sel);
+            if (at >= 0) s_xoff[at] = s_xoff[--s_xoff_count];
+            else if (s_xoff_count < MAX_XOFF) s_xoff[s_xoff_count++] = (XOff){room, s_sel};
+            s_xoff_version++;
+            s_fit_saved = 0;
+            char name[64], msg[160];
+            snprintf(msg, sizeof msg, "Other cameras' textures %s: %s", at >= 0 ? "ON" : "OFF",
+                     s_sel == -2 ? "whole room" : sel_name(name, sizeof name));
+            pe_toast(msg);
+        }
+        o_down = keys[SDL_SCANCODE_O];
+    }
     {
         static int back_down;
         if (keys[SDL_SCANCODE_BACKSPACE] && !back_down) {
@@ -4218,6 +4775,11 @@ static int chasecam_init(void) {
     pe_menu_register_choice(0, "Gap fill",
                             "Where the picture shows nothing: Off leaves the plain colour, Short "
                             "repeats the picture's edge a little, Long repeats it far.", &s_fill_mode, kFillModes, 3);
+    pe_menu_register_choice(0, "Other cameras",
+                            "Rooms with several cameras: texture each surface from the camera that "
+                            "shows it sharpest, or from the room camera first and the others only "
+                            "where it shows nothing. Editor Ctrl+O turns it off for a room or surface.",
+                            &s_merge_mode, kMergeModes, 3);
     pe_menu_register_choice(0, "Rooms' shape",
                             "Every room without a choice of its own (Backspace): built from the "
                             "picture, or walls on the walkable floor's edges.", &s_default_shape,
