@@ -400,6 +400,28 @@ static PrimFT3 s_tex_prims[2][MAX_TEX_PRIMS];
 static PrimLine s_line_prims[2][MAX_LINE_PRIMS];
 static int s_tri_used, s_tex_used, s_line_used;
 
+/* Performance counters for the F7 dump: summed over PERF_WINDOW frames (s_perf), the last whole
+ * window kept in s_perf_last. Frame time is the time between two draw_room calls (the whole
+ * frame: game, mod and GPU); draw time is draw_room alone; build time is build_pieces' rebuilds. */
+#define PERF_WINDOW 120
+typedef struct {
+    unsigned frames, rebuilds, splits, split_deep, drops;
+    double frame_ms, frame_max, draw_ms, draw_max, build_ms, build_max;
+    unsigned tri, tex, line, tri_max, tex_max;
+    double flat_area, tex_area, img_area; /* screen pixels drawn (320x224 units), summed */
+    unsigned semi, semi_bands;            /* semi-transparent pieces drawn, depth bands they use */
+} PerfStat;
+static PerfStat s_perf, s_perf_last;
+static Uint64 s_perf_prev; /* the last draw_room's start */
+/* A triangle's on-screen area in native pixels (its own area, at most its box cut to the screen). */
+static double perf_area(int x0, int y0, int x1, int y1, int x2, int y2, int minx, int maxx, int miny, int maxy) {
+    double a = fabs((double)(x1 - x0) * (y2 - y0) - (double)(x2 - x0) * (y1 - y0)) * 0.5;
+    int bx0 = minx < 0 ? 0 : minx, bx1 = maxx > 320 ? 320 : maxx, by0 = miny < 0 ? 0 : miny, by1 = maxy > 224 ? 224 : maxy;
+    double box = bx1 > bx0 && by1 > by0 ? (double)(bx1 - bx0) * (by1 - by0) : 0;
+    return a < box ? a : box;
+}
+static double perf_ms(Uint64 a, Uint64 b) { return (double)(b - a) * 1000.0 / (double)SDL_GetPerformanceFrequency(); }
+
 /* ---- HD backgrounds ----
  * The game's room tiles carry a command that makes PsyZ draw them from the HD background
  * pack (Render_LoadMeshEntry). Triangles cut from those tiles send the same cell with the
@@ -2390,6 +2412,7 @@ static void emit_tri(const float a[3], const float b[3], const float c[3], int b
     if (p->y2 < miny) miny = p->y2; if (p->y2 > maxy) maxy = p->y2;
     if (!screen_ok(minx, maxx, miny, maxy)) return;
     s_tri_used++;
+    s_perf.flat_area += perf_area(p->x0, p->y0, p->x1, p->y1, p->x2, p->y2, minx, maxx, miny, maxy);
     p->tag.length = 6;
     p->code = 0x30;
     p->r0 = fog(a[2], base_r); p->g0 = fog(a[2], base_g); p->b0 = fog(a[2], base_b);
@@ -2452,7 +2475,9 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
 static void emit_split(const TV *a, const TV *b, const TV *c, const TriJob *job, int level) {
     int need = tri_screen(a, b, c);
     if (need < 0) return;
+    if (need && level >= 6) s_perf.split_deep++;
     if (need && level < 6) {
+        s_perf.splits++;
         TV ab = tv_mid(a, b), bc = tv_mid(b, c), ca = tv_mid(c, a);
         emit_split(a, &ab, &ca, job, level + 1);
         emit_split(&ab, b, &bc, job, level + 1);
@@ -2509,6 +2534,7 @@ static void emit_tex(const TV *a, const TV *b, const TV *c, const Tile *t, int d
     if (p->y2 < miny) miny = p->y2; if (p->y2 > maxy) maxy = p->y2;
     if (!screen_ok(minx, maxx, miny, maxy)) return;
     s_tex_used++;
+    s_perf.tex_area += perf_area(p->x0, p->y0, p->x1, p->y1, p->x2, p->y2, minx, maxx, miny, maxy);
     float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
     p->tag.length = 12;
     hd_select(p, t);
@@ -2538,7 +2564,18 @@ static void surf_depths(void) {
     }
 }
 
+/* Semi-transparent tiles (code & 2): PsyZ ends its batch, starts a new render pass and copies
+ * the framebuffer at every switch between opaque and semi-transparent triangles, so pieces of
+ * both kinds interleaved in depth order cost hundreds of passes a frame (room 95: 75 of 677
+ * tiles). draw_room draws the semi-transparent pieces in a pass of their own, first, each
+ * moved to the near edge of its SEMI_BAND-slot depth band: linked first, they are drawn last
+ * in their slot, all together, over what is at that depth. */
+#define SEMI_BAND 64
+static int s_semi_pass;     /* draw_piece: 1 draws only semi-transparent pieces, 0 only the rest */
+static uint64_t s_semi_mask; /* this frame's bands with semi-transparent pieces */
+
 static void draw_piece(const Piece *pc) {
+    if (((s_tiles[pc->tile].code & 2) != 0) != s_semi_pass) return;
     TV in[3], poly[4];
     for (int k = 0; k < 3; ++k) {
         to_view(&pc->p[k], in[k].v);
@@ -2560,6 +2597,11 @@ static void draw_piece(const Piece *pc) {
     /* Several cameras on one surface: the better camera's pieces sit nearer than the next's. */
     if (pc->nrank > 1) layer = 1 + ((0xFFF - (t->ot & 0xFFF)) >> 9) + (pc->nrank - 1 - pc->rank) * 8;
     int depth = clamp_depth((pc->wall ? wall_depth(maxz) - (pc->wall == SURF_CAP ? 4 : 0) : floor_depth(maxz)) - layer);
+    if (s_semi_pass) {
+        depth = clamp_depth(depth & ~(SEMI_BAND - 1));
+        s_semi_mask |= UINT64_C(1) << ((depth / SEMI_BAND) & 63);
+        s_perf.semi++;
+    }
     TriJob job = {TRI_TILE, t, 0, 0, 0, 0, 0, depth};
     emit_split(&poly[0], &poly[1], &poly[2], &job, 0);
     if (n == 4) emit_split(&poly[0], &poly[2], &poly[3], &job, 0);
@@ -3267,6 +3309,7 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     if (p->y2 < miny) miny = p->y2; if (p->y2 > maxy) maxy = p->y2;
     if (!screen_ok(minx, maxx, miny, maxy)) return;
     s_tex_used++;
+    s_perf.img_area += perf_area(p->x0, p->y0, p->x1, p->y1, p->x2, p->y2, minx, maxx, miny, maxy);
     float k = fogk((a->v[2] + b->v[2] + c->v[2]) / 3.0f);
     p->tag.length = 12;
     hd_select(p, hd);
@@ -3643,26 +3686,74 @@ static int surf_hidden(int i) {
     return s->src < s_wall_count && s_wall_adj[s->src].hide != 0;
 }
 
+static void draw_room_body(void);
+
 static void draw_room(void) {
+    Uint64 t0 = SDL_GetPerformanceCounter();
+    if (s_perf_prev) {
+        double f = perf_ms(s_perf_prev, t0);
+        if (f < 1000.0) { s_perf.frame_ms += f; if (f > s_perf.frame_max) s_perf.frame_max = f; }
+    }
+    s_perf_prev = t0;
+    draw_room_body();
+    double d = perf_ms(t0, SDL_GetPerformanceCounter());
+    s_perf.draw_ms += d;
+    if (d > s_perf.draw_max) s_perf.draw_max = d;
+    s_perf.tri += (unsigned)s_tri_used;
+    s_perf.tex += (unsigned)s_tex_used;
+    s_perf.line += (unsigned)s_line_used;
+    if ((unsigned)s_tri_used > s_perf.tri_max) s_perf.tri_max = (unsigned)s_tri_used;
+    if ((unsigned)s_tex_used > s_perf.tex_max) s_perf.tex_max = (unsigned)s_tex_used;
+    if (s_tri_used >= MAX_TRI_PRIMS || s_tex_used >= MAX_TEX_PRIMS) s_perf.drops++;
+    for (uint64_t m = s_semi_mask; m; m &= m - 1) s_perf.semi_bands++;
+    if (++s_perf.frames >= PERF_WINDOW) {
+        s_perf_last = s_perf;
+        memset(&s_perf, 0, sizeof s_perf);
+    }
+}
+
+static void draw_room_body(void) {
     s_tri_used = s_tex_used = s_line_used = 0;
     if (pe_room_number() != s_images_room || s_fit.group != s_images_group)
         images_enter_room(pe_room_number(), s_fit.group);
     update_cover();
     int textured = s_textures && s_tile_frame + 2 >= s_frame && s_tile_count > 0;
-    if (textured) build_pieces();
+    if (textured) {
+        unsigned before = s_piece_key;
+        Uint64 b0 = SDL_GetPerformanceCounter();
+        build_pieces();
+        if (s_piece_key != before) {
+            double b = perf_ms(b0, SDL_GetPerformanceCounter());
+            s_perf.rebuilds++;
+            s_perf.build_ms += b;
+            if (b > s_perf.build_max) s_perf.build_max = b;
+        }
+    }
     s_tint_backing = textured;
-    for (int i = 0; i < s_floor_surf_count; ++i)
-        if (!surf_hidden(i)) draw_surface(&s_surf[i]);
     int ceil_ok = ceiling_visible();
-    if (s_solid_walls)
-        for (int i = s_floor_surf_count; i < s_surf_count; ++i)
-            if ((s_surf[i].wall != 2 || ceil_ok) && !surf_hidden(i)) draw_surface(&s_surf[i]);
-    if (textured) surf_depths();
-    if (textured)
+    s_semi_mask = 0;
+    if (textured) {
+        surf_depths();
+        /* Semi-transparent pieces first (see SEMI_BAND): linked first = drawn last in a slot. */
+        s_semi_pass = 1;
         for (int i = 0; i < s_piece_count; ++i)
             if ((!s_pieces[i].wall || s_solid_walls) && (s_pieces[i].wall != 2 || ceil_ok) &&
                 !surf_hidden(s_pieces[i].surf))
                 draw_piece(&s_pieces[i]);
+        s_semi_pass = 0;
+    }
+    for (int i = 0; i < s_floor_surf_count; ++i)
+        if (!surf_hidden(i)) draw_surface(&s_surf[i]);
+    if (s_solid_walls)
+        for (int i = s_floor_surf_count; i < s_surf_count; ++i)
+            if ((s_surf[i].wall != 2 || ceil_ok) && !surf_hidden(i)) draw_surface(&s_surf[i]);
+    if (textured) {
+        s_semi_pass = 0;
+        for (int i = 0; i < s_piece_count; ++i)
+            if ((!s_pieces[i].wall || s_solid_walls) && (s_pieces[i].wall != 2 || ceil_ok) &&
+                !surf_hidden(s_pieces[i].surf))
+                draw_piece(&s_pieces[i]);
+    }
     if (s_solid_walls && room_shape() == 0)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
             if (s_surf[i].wall == 1 && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0 &&
@@ -5299,6 +5390,28 @@ static void dump_room(void) {
     fprintf(f, "tiles %d%s, pieces %d, surfaces %d floor + %d wall\n\n", s_tile_count,
             stale ? " (STALE: not gathered this frame)" : "", s_piece_count, s_floor_surf_count,
             s_surf_count - s_floor_surf_count);
+    {
+        /* The last whole window, or the frames so far when none has ended yet. */
+        const PerfStat *p = s_perf_last.frames ? &s_perf_last : &s_perf;
+        double n = p->frames ? (double)p->frames : 1.0;
+        fprintf(f, "performance (last %u frames): frame %.2f ms avg / %.2f max (%.0f fps), "
+                   "chase camera draw %.2f ms avg / %.2f max\n",
+                p->frames, p->frame_ms / n, p->frame_max, p->frame_ms > 0 ? 1000.0 * n / p->frame_ms : 0.0,
+                p->draw_ms / n, p->draw_max);
+        fprintf(f, "  piece rebuilds %u (%.2f ms avg / %.2f max each); triangles per frame: flat %.0f (max %u), "
+                   "textured %.0f (max %u), lines %.0f; cut in four %.0f per frame, still too big at 6 cuts %.0f; "
+                   "frames with a full buffer %u (flat max %d, textured max %d)\n",
+                p->rebuilds, p->rebuilds ? p->build_ms / p->rebuilds : 0.0, p->build_max, p->tri / n, p->tri_max,
+                p->tex / n, p->tex_max, p->line / n, p->splits / n, p->split_deep / n, p->drops, MAX_TRI_PRIMS,
+                MAX_TEX_PRIMS);
+        fprintf(f, "  screen painted over per frame (1.0 = the whole screen once): flat %.2f, textured %.2f, "
+                   "wall/floor images %.2f, total %.2f\n",
+                p->flat_area / n / (320.0 * 224.0), p->tex_area / n / (320.0 * 224.0),
+                p->img_area / n / (320.0 * 224.0),
+                (p->flat_area + p->tex_area + p->img_area) / n / (320.0 * 224.0));
+        fprintf(f, "  semi-transparent pieces per frame %.0f, in %.1f depth bands (each band = one switch "
+                   "to semi-transparent drawing in PsyZ)\n\n", p->semi / n, p->semi_bands / n);
+    }
 
     GeomState *state = g_GeomState;
     if (state) {
