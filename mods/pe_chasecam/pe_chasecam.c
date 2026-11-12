@@ -257,6 +257,10 @@ typedef struct {
 } CustomImage;
 static CustomImage s_images[MAX_IMAGES];
 static int s_proxy_x = -1, s_proxy_y; /* HD-only images' shared texels in video memory (proxy_ensure) */
+/* The proxy is PROXY_SIZE square; tiles sample its centre 16x16 (PROXY_PAD in from each edge), so a
+ * seam pixel that reads one texel past the tile still finds proxy texels, not the game's. */
+#define PROXY_SIZE 32
+#define PROXY_PAD 8
 static int s_image_count, s_images_room = -999, s_images_group = -1;
 static int s_wall_img[MAX_WALLS], s_wall_span[MAX_WALLS]; /* image index (-1 none) on a first wall */
 static int s_floor_img = -1;             /* image index (-1 none) on the floor */
@@ -2802,7 +2806,7 @@ static void reserve_loaded(const CustomImage *except) {
         for (int k = 0; k < o->chunks; ++k) reserve(o->vx[k], o->vy[k], 64, o->h, 1);
         reserve(o->cx, o->cy, 256, 1, 1);
     }
-    if (s_proxy_x >= 0) reserve(s_proxy_x, s_proxy_y, 16, 16, 1);
+    if (s_proxy_x >= 0) reserve(s_proxy_x, s_proxy_y, PROXY_SIZE, PROXY_SIZE, 1);
 }
 
 /* Is image idx on a wall, the floor or the ceiling of this room now? */
@@ -2952,7 +2956,7 @@ static int image_hd(CustomImage *im) {
     return im->hd_on;
 }
 
-/* ---- the proxy: 16x16 15-bit texels of PROXY_RGB15 in blank video memory, shared by every
+/* ---- the proxy: PROXY_SIZE square of 15-bit texels of PROXY_RGB15 in blank video memory, shared by every
  * HD-only image (each piece selects its own HD cell over it). Checked once a frame; if the game
  * writes there it moves. ---- */
 static unsigned s_proxy_frame, s_proxy_retry;
@@ -2967,37 +2971,37 @@ static int proxy_ensure(void) {
     if (!vram) return 0;
     if (s_proxy_x >= 0) {
         int ok = 1;
-        for (int y = 0; y < 16 && ok; ++y)
-            for (int x = 0; x < 16 && ok; ++x) {
+        for (int y = 0; y < PROXY_SIZE && ok; ++y)
+            for (int x = 0; x < PROXY_SIZE && ok; ++x) {
                 int at = (s_proxy_y + y) * 1024 + s_proxy_x + x;
                 ok = known[at] && vram[at] == PROXY_RGB15;
             }
         if (ok) return s_proxy_ok = 1;
         pe_mod_log(MOD_ID, "HD-only images: the proxy's video memory was taken, moving it");
-        reserve(s_proxy_x, s_proxy_y, 16, 16, 0);
+        reserve(s_proxy_x, s_proxy_y, PROXY_SIZE, PROXY_SIZE, 0);
         s_proxy_x = -1;
     }
     if (s_proxy_retry && (int)(s_frame - s_proxy_retry) < 0) return 0;
     for (int half = 1; half >= 0; --half)
-        for (int y = half * 256; y + 16 <= half * 256 + 256; y += 16)
-            for (int x = 1008; x >= 0; x -= 16) {
+        for (int y = half * 256; y + PROXY_SIZE <= half * 256 + 256; y += PROXY_SIZE)
+            for (int x = 1024 - PROXY_SIZE; x >= 0; x -= PROXY_SIZE) { /* stays in one 64-column page */
                 int ok = 1;
-                for (int j = 0; j < 16 && ok; ++j)
-                    for (int i = 0; i < 16 && ok; ++i) ok = vram_blank(vram, known, x + i, y + j);
+                for (int j = 0; j < PROXY_SIZE && ok; ++j)
+                    for (int i = 0; i < PROXY_SIZE && ok; ++i) ok = vram_blank(vram, known, x + i, y + j);
                 if (!ok) continue;
-                static u16 buf[16 * 16];
-                for (int i = 0; i < 16 * 16; ++i) buf[i] = PROXY_RGB15;
-                RECT r = {(short)x, (short)y, 16, 16};
+                static u16 buf[PROXY_SIZE * PROXY_SIZE];
+                for (int i = 0; i < PROXY_SIZE * PROXY_SIZE; ++i) buf[i] = PROXY_RGB15;
+                RECT r = {(short)x, (short)y, PROXY_SIZE, PROXY_SIZE};
                 LoadImage(&r, buf);
                 DrawSync(0);
-                reserve(x, y, 16, 16, 1);
+                reserve(x, y, PROXY_SIZE, PROXY_SIZE, 1);
                 s_proxy_x = x;
                 s_proxy_y = y;
                 s_proxy_retry = 0;
                 pe_mod_log(MOD_ID, "HD-only images: proxy at x %d y %d", x, y);
                 return s_proxy_ok = 1;
             }
-    if (!s_proxy_retry) pe_mod_log(MOD_ID, "HD-only images: no blank 16x16 of video memory for the proxy");
+    if (!s_proxy_retry) pe_mod_log(MOD_ID, "HD-only images: no blank 32x32 of video memory for the proxy");
     s_proxy_retry = s_frame + 60;
     return 0;
 }
@@ -3339,7 +3343,7 @@ static void draw_image_poly(CustomImage *im, IV *a, int n, int on_floor) {
         int m = clip_iv(a, n, x, 0, 0, 1); if (m < 3) return;
         m = clip_iv(x, m, y, 0, (float)im->tw, 0); if (m < 3) return;
         u16 tpage = (u16)(((s_proxy_x >> 6) & 0xF) | (((s_proxy_y >> 8) & 1) << 4) | (2 << 7));
-        int pu = s_proxy_x & 63, pv = s_proxy_y & 255;
+        int pu = (s_proxy_x & 63) + PROXY_PAD, pv = (s_proxy_y & 255) + PROXY_PAD;
         float umin = 1e9f, umax = -1e9f, vmin = 1e9f, vmax = -1e9f;
         for (int k = 0; k < m; ++k) {
             umin = fminf(umin, y[k].u); umax = fmaxf(umax, y[k].u);
