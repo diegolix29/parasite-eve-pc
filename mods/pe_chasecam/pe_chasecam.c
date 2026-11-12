@@ -177,7 +177,10 @@ static float s_inside_y;
  * neighbours stretch to meet it and a floor strip fills the gap; collision stays where it was,
  * and the wall keeps the picture of where it really is. */
 /* flip: the F5 image on it mirrored, 1 left-right (F), 2 upside down (Shift+F), 3 both. */
-typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz, flip; } Adjust;
+/* ea, eb: a wall's ends pushed out along the wall (world units; < 0 pulled in toward its centre),
+ * end a / end b (L held + numpad 4/6, Shift pulls in). A joined corner moves with it, so the
+ * neighbour stretches. Drawing only, like mx, mz. */
+typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz, flip, ea, eb; } Adjust;
 static const Adjust k_identity = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
 static Adjust s_wall_adj[MAX_WALLS], s_floor_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
 static Adjust s_ceil_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0}; /* the ceiling's; h: its height (-1 the room's walls) */
@@ -273,7 +276,7 @@ static int images_off(void);
 
 static int adjust_is_identity(const Adjust *a) {
     return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
-           a->rect == 0 && a->mx == 0 && a->mz == 0 && a->flip == 0;
+           a->rect == 0 && a->mx == 0 && a->mz == 0 && a->flip == 0 && a->ea == 0 && a->eb == 0;
 }
 
 static void apply_adjust(float *x, float *y, const Adjust *a, float px, float py) {
@@ -708,11 +711,16 @@ static int on_floor(float x, float z) {
  * between where a wall was and where it is drawn (unless that is floor already). */
 static void apply_wall_moves(void) {
     static V3 na[MAX_WALLS], nb[MAX_WALLS];
+    static float ux[MAX_WALLS], uz[MAX_WALLS]; /* each wall's unit direction a -> b */
     int any = 0;
     for (int i = 0; i < s_wall_count; ++i) {
-        s_wall_orig[i][0] = s_walls_list[i].a;
-        s_wall_orig[i][1] = s_walls_list[i].b;
-        any |= s_wall_adj[i].mx != 0 || s_wall_adj[i].mz != 0;
+        const WallEdge *w = &s_walls_list[i];
+        s_wall_orig[i][0] = w->a;
+        s_wall_orig[i][1] = w->b;
+        any |= s_wall_adj[i].mx != 0 || s_wall_adj[i].mz != 0 || s_wall_adj[i].ea != 0 || s_wall_adj[i].eb != 0;
+        float dx = w->b.x - w->a.x, dz = w->b.z - w->a.z, len = sqrtf(dx * dx + dz * dz);
+        ux[i] = len > 0 ? dx / len : 0;
+        uz[i] = len > 0 ? dz / len : 0;
     }
     if (!any) return;
     for (int l = 0; l < s_loop_count; ++l) {
@@ -726,10 +734,13 @@ static void apply_wall_moves(void) {
             if (p >= 0 && same_point(&s_walls_list[p].b, &w->a)) {
                 const Adjust *mp = &s_wall_adj[p];
                 na[i] = (m->mx == 0 && m->mz == 0 && mp->mx == 0 && mp->mz == 0) ? w->a : moved_corner(p, i);
+                /* both walls' ends at this corner push it along their own direction */
+                na[i].x += ux[p] * mp->eb - ux[i] * m->ea;
+                na[i].z += uz[p] * mp->eb - uz[i] * m->ea;
             } else {
                 na[i] = w->a;
-                na[i].x += m->mx;
-                na[i].z += m->mz;
+                na[i].x += m->mx - ux[i] * m->ea;
+                na[i].z += m->mz - uz[i] * m->ea;
             }
         }
         for (int k = 0; k < n; ++k) {
@@ -739,8 +750,8 @@ static void apply_wall_moves(void) {
                 nb[i] = na[nx];
             } else {
                 nb[i] = w->b;
-                nb[i].x += s_wall_adj[i].mx;
-                nb[i].z += s_wall_adj[i].mz;
+                nb[i].x += s_wall_adj[i].mx + ux[i] * s_wall_adj[i].eb;
+                nb[i].z += s_wall_adj[i].mz + uz[i] * s_wall_adj[i].eb;
             }
         }
     }
@@ -750,6 +761,10 @@ static void apply_wall_moves(void) {
         s_walls_list[i].b = nb[i];
         if (same_point(&oa, &na[i]) && same_point(&ob, &nb[i])) continue;
         float cx = (oa.x + ob.x + na[i].x + nb[i].x) * 0.25f, cz = (oa.z + ob.z + na[i].z + nb[i].z) * 0.25f;
+        /* a wall only lengthened or shortened along itself leaves no gap */
+        float area = fabsf((ob.x - oa.x) * (nb[i].z - oa.z) - (ob.z - oa.z) * (nb[i].x - oa.x)) +
+                     fabsf((nb[i].x - oa.x) * (na[i].z - oa.z) - (nb[i].z - oa.z) * (na[i].x - oa.x));
+        if (area < 1.0f) continue;
         if (on_floor(cx, cz)) continue;
         push_surface(&oa, &ob, &nb[i], 1, 0, SRC_STRIP, 0);
         push_surface(&oa, &nb[i], &na[i], 1, 0, SRC_STRIP, 0);
@@ -3838,10 +3853,10 @@ static void fits_load(void) {
         if (line[0] == 'L') {
             LayerFit lf;
             if (s_layer_fit_count < MAX_LAYER_FITS &&
-                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0, lf.a.flip = 0,
-                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
+                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0, lf.a.flip = 0, lf.a.ea = 0, lf.a.eb = 0,
+                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
                         &lf.a.ox, &lf.a.oy, &lf.a.sx, &lf.a.sy, &lf.a.rot, &lf.a.h,
-                        &lf.a.rect, &lf.a.mx, &lf.a.mz, &lf.a.flip) >= 8) &&
+                        &lf.a.rect, &lf.a.mx, &lf.a.mz, &lf.a.flip, &lf.a.ea, &lf.a.eb) >= 8) &&
                 lf.a.sx > 0.01f && lf.a.sy > 0.01f)
                 s_layer_fits[s_layer_fit_count++] = lf;
             continue;
@@ -3944,13 +3959,16 @@ static void fits_save(void) {
                 s_fits[i].ox, s_fits[i].oy, s_fits[i].sx, s_fits[i].sy, s_fits[i].wall,
                 s_fits[i].obst, s_fits[i].shape, s_fits[i].open);
     fprintf(f, "# L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y "
-               "rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved] [flip: 1 left-right, 2 upside down]\n");
+               "rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved] [flip: 1 left-right, 2 upside down] "
+               "[end_a end_b: the wall's ends pushed out along it]\n");
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
+        int ends = l->a.ea != 0 || l->a.eb != 0;
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
-        if (l->a.mx != 0 || l->a.mz != 0 || l->a.flip != 0) fprintf(f, " %.1f %.1f", l->a.mx, l->a.mz);
-        if (l->a.flip != 0) fprintf(f, " %d", (int)l->a.flip);
+        if (l->a.mx != 0 || l->a.mz != 0 || l->a.flip != 0 || ends) fprintf(f, " %.1f %.1f", l->a.mx, l->a.mz);
+        if (l->a.flip != 0 || ends) fprintf(f, " %d", (int)l->a.flip);
+        if (ends) fprintf(f, " %.1f %.1f", l->a.ea, l->a.eb);
         fprintf(f, "\n");
     }
     fprintf(f, "# W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)\n");
@@ -4063,7 +4081,7 @@ static void sel_toast(void) {
     if (s_sel >= 0)
         snprintf(height, sizeof height, "  height %.0f%s%s%s", s_walls_list[s_sel].height,
                  a->h >= 0 ? "" : " (room's)", a->rect > 0.5f ? "  rectangle" : "",
-                 a->mx != 0 || a->mz != 0 ? "  moved" : "");
+                 a->mx != 0 || a->mz != 0 || a->ea != 0 || a->eb != 0 ? "  moved" : "");
     else if (s_sel == SEL_CEILING)
         snprintf(height, sizeof height, "  height %.0f%s", s_floor_top - s_ceil_y,
                  a->h >= 0 ? "" : " (tallest wall)");
@@ -4473,6 +4491,24 @@ static void edit_keys(const bool *keys) {
             if (keys[SDL_SCANCODE_KP_2]) { a->mx -= fx * sp; a->mz -= fz * sp; }
             if (keys[SDL_SCANCODE_KP_6]) { a->mx += rx * sp; a->mz += rz * sp; }
             if (keys[SDL_SCANCODE_KP_4]) { a->mx -= rx * sp; a->mz -= rz * sp; }
+        } else if (keys[SDL_SCANCODE_L] && s_sel >= 0 && s_sel < s_wall_count) {
+            /* L held + 4/6 on a wall: push its left/right end (as the chase camera sees it) out
+             * along the wall; Shift pulls it back in toward the centre; Ctrl faster. Drawing only.
+             * Uses the wall where the collision has it, so the sides don't swap as it grows. */
+            float sp = (ctrl ? 24.0f : 6.0f) * (shift ? -1.0f : 1.0f);
+            float rx = cosf(s_yaw) * s_mirror, rz = -sinf(s_yaw) * s_mirror;
+            const V3 *wa = &s_wall_orig[s_sel][0], *wb = &s_wall_orig[s_sel][1];
+            float len = sqrtf((wb->x - wa->x) * (wb->x - wa->x) + (wb->z - wa->z) * (wb->z - wa->z));
+            int b_right = (wb->x - wa->x) * rx + (wb->z - wa->z) * rz >= 0;
+            float *left = b_right ? &a->ea : &a->eb, *right = b_right ? &a->eb : &a->ea;
+            if (keys[SDL_SCANCODE_KP_4]) *left += sp;
+            if (keys[SDL_SCANCODE_KP_6]) *right += sp;
+            /* never pull the ends in past each other */
+            float minimum = 8.0f - len;
+            if (a->ea + a->eb < minimum) {
+                if (keys[SDL_SCANCODE_KP_4]) *left = minimum - *right;
+                else *right = minimum - *left;
+            }
         } else {
             if (keys[SDL_SCANCODE_KP_4]) a->ox -= step;
             if (keys[SDL_SCANCODE_KP_6]) a->ox += step;
@@ -4491,7 +4527,8 @@ static void edit_keys(const bool *keys) {
         if (memcmp(&old, a, sizeof old) != 0) {
             changed = 1;
             s_adj_version++;
-            if (old.h != a->h || old.mx != a->mx || old.mz != a->mz) s_height_version++; /* moved, or 5 reset it */
+            if (old.h != a->h || old.mx != a->mx || old.mz != a->mz || old.ea != a->ea || old.eb != a->eb)
+                s_height_version++; /* moved, or 5 reset it */
         }
     }
     if (s_sel == SEL_CEILING && (keys[SDL_SCANCODE_PAGEUP] || keys[SDL_SCANCODE_PAGEDOWN])) {
@@ -4626,7 +4663,7 @@ static void read_keys(void) {
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
                      "room shape, F5 / Alt+F5 next / previous image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
-                     "G+4/6/8/2 move wall, F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
+                     "G+4/6/8/2 move wall, L+4/6 lengthen wall's side (L+Shift shorten), F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
