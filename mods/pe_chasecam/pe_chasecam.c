@@ -4116,16 +4116,18 @@ static void sel_toast(void) {
     pe_toast(msg);
 }
 
-/* The floor, the ceiling, then walls and obstacle tops by distance from Aya (an obstacle's top
- * just before its nearest wall): numpad . steps to the next one out (Shift: back in). */
+/* The floor, the ceiling, then walls by number, each obstacle top right after its loop's last
+ * wall (made tops last): numpad . steps to the next one (Shift: back). Ctrl+numpad . jumps to
+ * the wall or top nearest Aya instead. */
 typedef struct { int sel; float dist; } SelOrder;
 static int cmp_sel_dist(const void *a, const void *b) {
     float da = ((const SelOrder *)a)->dist, db = ((const SelOrder *)b)->dist;
     return da < db ? -1 : da > db;
 }
 
-static void select_next_wall(int back) {
+static void select_next_wall(int back, int nearest) {
     static SelOrder list[MAX_WALLS + MAX_LOOPS];
+    static float near_dist[MAX_WALLS + MAX_LOOPS];
     static int order[MAX_WALLS + MAX_LOOPS + 2];
     static float cap_dist[MAX_LOOPS];
     int m = 0;
@@ -4140,7 +4142,8 @@ static void select_next_wall(int back) {
         float t = len2 > 0 ? clampf(((x - w->a.x) * ex + (z - w->a.z) * ez) / len2, 0, 1) : 0;
         float dx = w->a.x + ex * t - x, dz = w->a.z + ez * t - z;
         float dist = dx * dx + dz * dz;
-        list[m++] = (SelOrder){i, dist};
+        near_dist[m] = dist;
+        list[m++] = (SelOrder){i, (float)i};
         if (w->loop >= 0 && w->loop < s_loop_count && w->loop < MAX_LOOPS)
             cap_dist[w->loop] = fminf(cap_dist[w->loop], dist);
     }
@@ -4156,8 +4159,17 @@ static void select_next_wall(int back) {
         }
     }
     for (int i = 0; i < s_loop_count && i < MAX_LOOPS; ++i)
-        if (!s_loops[i].outer && s_cap_y[i] < 1e8f && cap_dist[i] < 1e29f)
-            list[m++] = (SelOrder){SEL_CAP0 - i, cap_dist[i] - 0.5f};
+        if (!s_loops[i].outer && s_cap_y[i] < 1e8f && cap_dist[i] < 1e29f) {
+            near_dist[m] = cap_dist[i] - 0.5f;
+            list[m++] = (SelOrder){SEL_CAP0 - i, (float)(s_loops[i].first + s_loops[i].count - 1) + 0.5f};
+        }
+    if (nearest) {
+        int best = -1;
+        for (int i = 0; i < m; ++i)
+            if (best < 0 || near_dist[i] < near_dist[best]) best = i;
+        if (best >= 0) s_sel = list[best].sel;
+        return;
+    }
     qsort(list, (size_t)m, sizeof list[0], cmp_sel_dist);
     int n = 0;
     order[n++] = -1;
@@ -4285,7 +4297,7 @@ static void edit_keys(const bool *keys) {
     int hstep = (int)(10 * fast);
 
     int moved_sel = 0;
-    if (keys[SDL_SCANCODE_KP_PERIOD] && !dot_down) { select_next_wall(shift); moved_sel = 1; }
+    if (keys[SDL_SCANCODE_KP_PERIOD] && !dot_down) { select_next_wall(shift, ctrl); moved_sel = 1; }
     if (keys[SDL_SCANCODE_KP_DIVIDE] && !div_down) { s_sel = -1; moved_sel = 1; }
     if (keys[SDL_SCANCODE_KP_MULTIPLY] && !mul_down) { s_sel = -2; moved_sel = 1; }
     if (keys[SDL_SCANCODE_END] && !end_down) {
@@ -4699,7 +4711,7 @@ static void read_keys(void) {
     if (keys[SDL_SCANCODE_F9] && !s_f9_down && s_enabled) {
         s_edit = !s_edit;
         if (s_edit)
-            pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
+            pe_toast("Fit editor: numpad . next wall (Ctrl: nearest), / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
                      "room shape, F5 / Alt+F5 next / previous image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
                      "G+4/6/8/2 move wall, L+4/6 lengthen wall's side (L+Shift shorten), H hide/show selection, F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
