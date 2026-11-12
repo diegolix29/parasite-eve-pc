@@ -222,7 +222,7 @@ static float s_cy = 112.0f; /* chase view centre: lower while the editor splits 
 typedef struct PeChasecamFile { const char *path; const unsigned char *data; unsigned size; } PeChasecamFile;
 extern const PeChasecamFile pe_chasecam_files[];
 extern const unsigned pe_chasecam_file_count;
-#define MAX_IMAGES 48
+#define MAX_IMAGES 1024 /* listed per room: the room's folder + common (only used ones load) */
 #define IMG_CHUNK 128
 typedef struct {
     char name[96], path[600];
@@ -2675,6 +2675,10 @@ static void image_forget_vram(CustomImage *im) {
     im->loaded = 0;
 }
 
+static int cmp_name(const void *a, const void *b) {
+    return SDL_strcasecmp(*(char *const *)a, *(char *const *)b);
+}
+
 /* Lists the room's and the common images; forgets the last room's uploads. */
 static void images_enter_room(int room, int group) {
     for (int i = 0; i < s_image_count; ++i) {
@@ -2714,6 +2718,9 @@ static void images_enter_room(int room, int group) {
         if (!dir[0]) continue;
         int count = 0;
         char **files = SDL_GlobDirectory(dir, "*.bmp", SDL_GLOB_CASEINSENSITIVE, &count);
+        if (files && count > 1) qsort(files, (size_t)count, sizeof files[0], cmp_name); /* F5 in name order */
+        if (files && s_image_count + count > MAX_IMAGES)
+            pe_mod_log(MOD_ID, "more than %d images in textures/%s: the rest are not listed", MAX_IMAGES, subs[d]);
         for (int i = 0; files && i < count && s_image_count < MAX_IMAGES; ++i) {
             int dup = 0;
             for (int j = 0; j < s_image_count; ++j) dup |= !strcmp(s_images[j].name, files[i]);
