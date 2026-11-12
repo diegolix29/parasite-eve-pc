@@ -59,6 +59,7 @@
 94 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 96 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 97 0 0.00 0.00 1.0000 1.0000 1400 460 -1 0
+95 0 0.00 0.00 1.0000 1.0000 1400 500 -1 0
 # L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved] [flip: 1 left-right, 2 upside down] [end_a end_b: the wall's ends pushed out along it] [hidden: 1 not drawn]
 L 5 0 0 0.00 0.00 1.0000 1.0000 0.0000 60 0
 L 5 0 2 0.00 0.00 1.0000 1.0000 0.0000 20 0
@@ -889,6 +890,8 @@ L 97 0 -107 0.00 0.00 1.0000 1.0000 0.0000 340 0
 L 97 0 -109 0.00 0.00 1.0000 1.0000 0.0000 300 0
 L 97 0 -114 0.00 0.00 1.0000 1.0000 0.0000 60 0
 L 97 0 -116 0.50 2.75 1.0000 1.0000 0.0000 -1 0
+L 95 0 -101 1.25 11.00 1.0000 1.0000 0.0000 260 0
+L 95 0 -102 -2.75 14.50 1.0000 1.0000 0.0000 300 0
 # W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)
 W 24 0 3 1 theater_facade.bmp
 W 24 0 4 1 theater_facade.bmp
