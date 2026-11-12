@@ -180,7 +180,8 @@ static float s_inside_y;
 /* ea, eb: a wall's ends pushed out along the wall (world units; < 0 pulled in toward its centre),
  * end a / end b (L held + numpad 4/6, Shift pulls in). A joined corner moves with it, so the
  * neighbour stretches. Drawing only, like mx, mz. */
-typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz, flip, ea, eb; } Adjust;
+/* hide: 1 = not drawn at all (H in the F9 editor), texture and F5 image both. */
+typedef struct { float ox, oy, sx, sy, rot, h, rect, mx, mz, flip, ea, eb, hide; } Adjust;
 static const Adjust k_identity = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
 static Adjust s_wall_adj[MAX_WALLS], s_floor_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0};
 static Adjust s_ceil_adj = {0, 0, 1, 1, 0, -1, 0, 0, 0, 0}; /* the ceiling's; h: its height (-1 the room's walls) */
@@ -276,7 +277,7 @@ static int images_off(void);
 
 static int adjust_is_identity(const Adjust *a) {
     return a->ox == 0 && a->oy == 0 && a->sx == 1 && a->sy == 1 && a->rot == 0 && a->h < 0 &&
-           a->rect == 0 && a->mx == 0 && a->mz == 0 && a->flip == 0 && a->ea == 0 && a->eb == 0;
+           a->rect == 0 && a->mx == 0 && a->mz == 0 && a->flip == 0 && a->ea == 0 && a->eb == 0 && a->hide == 0;
 }
 
 static void apply_adjust(float *x, float *y, const Adjust *a, float px, float py) {
@@ -3210,8 +3211,13 @@ static void wall_image_uv(int j, const V3 *p, const CustomImage *im, float *u, f
     float sacross = (s_wall_cum[j] + t * sqrtf(len2)) / s_cover_len[first];
     float base_y = w->a.y + (w->b.y - w->a.y) * t;
     float up = w->height > 0 ? (base_y - p->y) / w->height : 0;
-    float su = 0.5f + (sacross - 0.5f - a->ox / 100.0f) / a->sx;
-    float sv = 0.5f + ((1.0f - up) - 0.5f - a->oy / 100.0f) / a->sy;
+    /* turn (7/9) about the image's centre, in world units so it turns without shearing */
+    float cl = s_cover_len[first], wh = w->height > 0 ? w->height : 1.0f;
+    float dx = (sacross - 0.5f) * cl, dy = ((1.0f - up) - 0.5f) * wh;
+    float c = cosf(a->rot), sn = sinf(a->rot);
+    float rx = dx * c + dy * sn, ry = -dx * sn + dy * c;
+    float su = 0.5f + (rx / cl - a->ox / 100.0f) / a->sx;
+    float sv = 0.5f + (ry / wh - a->oy / 100.0f) / a->sy;
     if ((int)a->flip & 1) su = 1.0f - su;
     if ((int)a->flip & 2) sv = 1.0f - sv;
     *u = su * im->tw;
@@ -3616,6 +3622,16 @@ static void draw_panel(void) {
 /* The ceiling shows only while the chase camera is under it: from above it would hide the room. */
 static int ceiling_visible(void) { return s_cam[1] > s_ceil_y + 50.0f; }
 
+/* Surface i hidden with H in the editor (its wall's, the floor's, the ceiling's or its top's). */
+static int surf_hidden(int i) {
+    if (i < 0 || i >= s_surf_count) return 0;
+    const Surface *s = &s_surf[i];
+    if (s->wall == 0) return s_floor_adj.hide != 0;
+    if (s->wall == 2) return s_ceil_adj.hide != 0;
+    if (s->wall == SURF_CAP) return s->src < MAX_LOOPS && s_cap_adj[s->src].hide != 0;
+    return s->src < s_wall_count && s_wall_adj[s->src].hide != 0;
+}
+
 static void draw_room(void) {
     s_tri_used = s_tex_used = s_line_used = 0;
     if (pe_room_number() != s_images_room || s_fit.group != s_images_group)
@@ -3624,28 +3640,33 @@ static void draw_room(void) {
     int textured = s_textures && s_tile_frame + 2 >= s_frame && s_tile_count > 0;
     if (textured) build_pieces();
     s_tint_backing = textured;
-    for (int i = 0; i < s_floor_surf_count; ++i) draw_surface(&s_surf[i]);
+    for (int i = 0; i < s_floor_surf_count; ++i)
+        if (!surf_hidden(i)) draw_surface(&s_surf[i]);
     int ceil_ok = ceiling_visible();
     if (s_solid_walls)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
-            if (s_surf[i].wall != 2 || ceil_ok) draw_surface(&s_surf[i]);
+            if ((s_surf[i].wall != 2 || ceil_ok) && !surf_hidden(i)) draw_surface(&s_surf[i]);
     if (textured) surf_depths();
     if (textured)
         for (int i = 0; i < s_piece_count; ++i)
-            if ((!s_pieces[i].wall || s_solid_walls) && (s_pieces[i].wall != 2 || ceil_ok))
+            if ((!s_pieces[i].wall || s_solid_walls) && (s_pieces[i].wall != 2 || ceil_ok) &&
+                !surf_hidden(s_pieces[i].surf))
                 draw_piece(&s_pieces[i]);
     if (s_solid_walls && room_shape() == 0)
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
-            if (s_surf[i].wall == 1 && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0)
+            if (s_surf[i].wall == 1 && s_surf[i].src < MAX_WALLS && s_wall_cover[s_surf[i].src] >= 0 &&
+                !surf_hidden(i))
                 draw_wall_image(&s_surf[i]);
     if (room_shape() == 0 && s_floor_img >= 0 && !images_off())
-        for (int i = 0; i < s_floor_surf_count; ++i) draw_flat_image(&s_surf[i], s_floor_img, &s_floor_adj, 1);
+        for (int i = 0; i < s_floor_surf_count; ++i)
+            if (!surf_hidden(i)) draw_flat_image(&s_surf[i], s_floor_img, &s_floor_adj, 1);
     if (room_shape() == 0 && s_ceil_img >= 0 && s_solid_walls && ceil_ok && !images_off())
         for (int i = s_floor_surf_count; i < s_surf_count; ++i)
-            if (s_surf[i].wall == 2) draw_flat_image(&s_surf[i], s_ceil_img, &s_ceil_adj, 0);
+            if (s_surf[i].wall == 2 && !surf_hidden(i)) draw_flat_image(&s_surf[i], s_ceil_img, &s_ceil_adj, 0);
     if (room_shape() == 0 && s_solid_walls && !images_off())
         for (int i = s_floor_surf_count; i < s_surf_count; ++i) {
             const Surface *s = &s_surf[i];
+            if (surf_hidden(i)) continue;
             if (s->wall == SURF_CAP && s->src < MAX_LOOPS && s_cap_img[s->src] >= 0)
                 draw_flat_image(s, s_cap_img[s->src], &s_cap_adj[s->src], 0);
         }
@@ -3853,10 +3874,10 @@ static void fits_load(void) {
         if (line[0] == 'L') {
             LayerFit lf;
             if (s_layer_fit_count < MAX_LAYER_FITS &&
-                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0, lf.a.flip = 0, lf.a.ea = 0, lf.a.eb = 0,
-                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
+                (lf.a.h = -1, lf.a.rect = 0, lf.a.mx = 0, lf.a.mz = 0, lf.a.flip = 0, lf.a.ea = 0, lf.a.eb = 0, lf.a.hide = 0,
+                 sscanf(line + 1, "%d %d %d %f %f %f %f %f %f %f %f %f %f %f %f %f", &lf.room, &lf.group, &lf.layer,
                         &lf.a.ox, &lf.a.oy, &lf.a.sx, &lf.a.sy, &lf.a.rot, &lf.a.h,
-                        &lf.a.rect, &lf.a.mx, &lf.a.mz, &lf.a.flip, &lf.a.ea, &lf.a.eb) >= 8) &&
+                        &lf.a.rect, &lf.a.mx, &lf.a.mz, &lf.a.flip, &lf.a.ea, &lf.a.eb, &lf.a.hide) >= 8) &&
                 lf.a.sx > 0.01f && lf.a.sy > 0.01f)
                 s_layer_fits[s_layer_fit_count++] = lf;
             continue;
@@ -3960,15 +3981,16 @@ static void fits_save(void) {
                 s_fits[i].obst, s_fits[i].shape, s_fits[i].open);
     fprintf(f, "# L room group layer(-1 floor, -2 ceiling, -100-N top of obstacle loop N, else wall edge) offset_x offset_y scale_x scale_y "
                "rotation height(-1 = the room's) rectangle(0/1) [move_x move_z: a wall drawn moved] [flip: 1 left-right, 2 upside down] "
-               "[end_a end_b: the wall's ends pushed out along it]\n");
+               "[end_a end_b: the wall's ends pushed out along it] [hidden: 1 not drawn]\n");
     for (int i = 0; i < s_layer_fit_count; ++i) {
         const LayerFit *l = &s_layer_fits[i];
-        int ends = l->a.ea != 0 || l->a.eb != 0;
+        int hide = l->a.hide != 0, ends = l->a.ea != 0 || l->a.eb != 0 || hide;
         fprintf(f, "L %d %d %d %.2f %.2f %.4f %.4f %.4f %.0f %d", l->room, l->group, l->layer,
                 l->a.ox, l->a.oy, l->a.sx, l->a.sy, l->a.rot, l->a.h, l->a.rect > 0.5f);
         if (l->a.mx != 0 || l->a.mz != 0 || l->a.flip != 0 || ends) fprintf(f, " %.1f %.1f", l->a.mx, l->a.mz);
         if (l->a.flip != 0 || ends) fprintf(f, " %d", (int)l->a.flip);
         if (ends) fprintf(f, " %.1f %.1f", l->a.ea, l->a.eb);
+        if (hide) fprintf(f, " 1");
         fprintf(f, "\n");
     }
     fprintf(f, "# W room group wall(-1 floor, -2 ceiling, -100-N top of obstacle loop N) span image (a file in textures/room_NNN or textures/common)\n");
@@ -4449,6 +4471,23 @@ static void edit_keys(const bool *keys) {
             }
         }
         f_down = keys[SDL_SCANCODE_F];
+        /* H: the selected wall, floor, ceiling or top hidden / shown (texture and image; saved). */
+        static int h_down;
+        if (keys[SDL_SCANCODE_H] && !h_down) {
+            if (s_sel == -2) {
+                pe_toast("H hides a wall, the floor, the ceiling or a top: select one first");
+            } else {
+                Adjust *a = sel_adjust();
+                a->hide = a->hide != 0 ? 0.0f : 1.0f;
+                s_adj_version++;
+                s_fit_saved = 0;
+                char name[64], msg[120];
+                snprintf(msg, sizeof msg, "%s: %s", sel_name(name, sizeof name),
+                         a->hide != 0 ? "HIDDEN (H shows it again)" : "shown");
+                pe_toast(msg);
+            }
+        }
+        h_down = keys[SDL_SCANCODE_H];
     }
     if (s_sel_pending && SEL_CAP0 - s_sel_pending < s_loop_count) {
         s_sel = s_sel_pending;
@@ -4663,7 +4702,7 @@ static void read_keys(void) {
             pe_toast("Fit editor: numpad . next wall, / floor, * whole room; 4/6/8/2 move, "
                      "+/- size, 7/9 turn, 1/3 width (Ctrl: height), End rectangle, Backspace "
                      "room shape, F5 / Alt+F5 next / previous image (Shift+F5 twice deletes it), F3 save wall/floor/ceiling texture, "
-                     "G+4/6/8/2 move wall, L+4/6 lengthen wall's side (L+Shift shorten), F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
+                     "G+4/6/8/2 move wall, L+4/6 lengthen wall's side (L+Shift shorten), H hide/show selection, F / Shift+F flip image, M mark wall, B top over marked walls (Ctrl+B deletes), N clear marks, 5 reset, 0 save");
         else {
             if (!s_fit_saved) fits_save();
             pe_toast("Fit editor off");
