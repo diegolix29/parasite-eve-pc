@@ -38,6 +38,7 @@
 #include "pe1/psyq_gpu.h"
 #include "pe1/draw_buffers.h"
 #include <psyz/gpu.h>
+#include <psyz/video.h>
 #include "pe1/render_buffers.h"
 #include "pe1/render_camera.h"
 #include "pe1/render_packets.h"
@@ -412,6 +413,7 @@ typedef struct {
     unsigned semi, semi_bands;            /* semi-transparent pieces drawn, depth bands they use */
 } PerfStat;
 static PerfStat s_perf, s_perf_last;
+static double s_perf_draw_acc; /* draw_room ms since the last log line */
 static Uint64 s_perf_prev; /* the last draw_room's start */
 /* A triangle's on-screen area in native pixels (its own area, at most its box cut to the screen). */
 static double perf_area(int x0, int y0, int x1, int y1, int x2, int y2, int minx, int maxx, int miny, int maxy) {
@@ -3698,6 +3700,7 @@ static void draw_room(void) {
     draw_room_body();
     double d = perf_ms(t0, SDL_GetPerformanceCounter());
     s_perf.draw_ms += d;
+    s_perf_draw_acc += d;
     if (d > s_perf.draw_max) s_perf.draw_max = d;
     s_perf.tri += (unsigned)s_tri_used;
     s_perf.tex += (unsigned)s_tex_used;
@@ -4852,10 +4855,35 @@ static void own_angles(void) {
     pos->baseAngleAnalog = s_written_angle;
 }
 
+/* Every PERF_LOG_FRAMES game frames, chase camera on or off: one pe_mods.log line with where the
+ * frame time went (PsyZ's counters: Psyz_PerfTake). Diagnostics for slow rooms. */
+#define PERF_LOG_FRAMES 150
+static void perf_log(void) {
+    static Uint64 start;
+    static unsigned frames;
+    Uint64 now = SDL_GetPerformanceCounter();
+    if (!start) { start = now; Psyz_PerfTake(NULL); s_perf_draw_acc = 0; return; }
+    if (++frames < PERF_LOG_FRAMES) return;
+    PsyzPerfCounters c;
+    Psyz_PerfTake(&c);
+    double total = perf_ms(start, now), n = frames;
+    double other = total - c.present_ms - c.wait_ms - c.flush_ms - s_perf_draw_acc;
+    pe_mod_log(MOD_ID, "perf room %d chase %s: game frame %.1f ms (%.1f fps), %u presents (%.1f/s); per game "
+               "frame: present %.1f ms, pacing sleep %.1f, PsyZ batches %.1f (%.1f flushes, %.1f passes, %.1f "
+               "semi), chase draw %.1f, rest (game + PsyZ commands) %.1f",
+               pe_room_number(), s_enabled ? "on" : "off", total / n, 1000.0 * n / total, c.frames,
+               1000.0 * c.frames / total, c.present_ms / n, c.wait_ms / n, c.flush_ms / n, c.flushes / n,
+               c.passes / n, c.semi_passes / n, s_perf_draw_acc / n, other / n);
+    start = now;
+    frames = 0;
+    s_perf_draw_acc = 0;
+}
+
 static int on_frame(void *ctx, void *user) {
     (void)ctx;
     (void)user;
     s_frame++;
+    perf_log();
     read_keys();
     float mdx = s_mouse_dx, mdy = s_mouse_dy, wheel = s_wheel;
     s_mouse_dx = s_mouse_dy = s_wheel = 0;
