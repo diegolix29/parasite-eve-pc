@@ -84,7 +84,8 @@ and press **Fit size to reference**. This:
 - applies location, rotation and scale,
 - scales the model to Aya's height (head top to sole) and stands it on the reference's floor.
 
-Then check the direction: your model must **face the same way as the reference**. If not, rotate
+Fit size centres the model on its lower legs, so a braid, ponytail or cape doesn't push the skeleton
+behind the body. Then check the direction: your model must **face the same way as the reference**. If not, rotate
 it (R Z 180), and apply the rotation (Ctrl+A > Rotation).
 
 ## Step 3: Fit the joints (and pose T-pose / A-pose models)
@@ -94,8 +95,13 @@ models. Aya has short legs and high hips: a model with longer legs that skips th
 10-20 cm above its knees. The game takes a skin's own bone lengths (animations only carry
 rotations), so the joints can go where your model's are.
 
-1. **Make fitting rig**: a copy of the skeleton, `PE_Aya_FitRig`, opens in Pose mode. Its arms are
-   already aimed at your model's arms when the tool can find them (the status line says which).
+1. **Make fitting rig**: a copy of the skeleton, `PE_Aya_FitRig`, opens in Pose mode.
+   - If your model came with its own skeleton (a .dae, or an FBX / glTF with an armature) using
+     common bone names (LeftArm, LeftForeArm, LeftHand, LeftUpLeg, LeftLeg, LeftFoot, Neck, Head;
+     Mixamo, Unity, Unreal, VRM and Biped names work too), every joint is placed on it: shoulders,
+     elbows, wrists, neck, head, hips, knees and ankles, each bone aimed at the next joint. The
+     status line lists them. Check them in X-ray (Alt+Z) from the front and the side.
+   - Otherwise only the arms are aimed at your model's arms when the tool can find them.
 2. Put every joint where your model bends. In Pose mode, select a bone and press G to move its
    joint (the round end where it starts), R to turn it. Check from the front (numpad 1) and the side
    (numpad 3):

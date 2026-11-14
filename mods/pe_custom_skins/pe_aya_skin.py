@@ -75,7 +75,7 @@ ARMS = (4, 5, 6, 14, 15, 16)
 LENGTHS = (2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27, 28)
 # farthest a vertex may be from an arm bone (metres, at the game's size): sleeves, cuffs, a closed hand
 ARM_REACH = {4: 0.13, 5: 0.10, 6: 0.08, 14: 0.13, 15: 0.10, 16: 0.08}
-LEG_REACH = {22: 0.11, 23: 0.08, 24: 0.12, 26: 0.11, 27: 0.08, 28: 0.12}
+LEG_REACH = {22: 0.11, 23: 0.08, 24: 0.085, 26: 0.11, 27: 0.08, 28: 0.085}   # feet: a shoe, not a dress hem
 
 # The game's 240 vertex normals (g_RenderNormalTable, src/main/render/object.c); a vertex stores an index.
 NORMAL_TABLE = [
@@ -954,7 +954,9 @@ def _assign_welded(V, N, edges, seg, side_l, log=print, deform=None, tree=None):
     log('bones assigned: ' + ', '.join('%s %d' % kv for kv in counts.items()))
     _assign_welded.segments = S               # the bone segments where the model stands
     if tree is not None:
-        part = fix_spans(part, edges, tree, log)
+        col = {int(c): j for j, c in enumerate(cand)}
+        part = fix_spans(part, edges, tree, log,
+                         cost=lambda v, q: D[v, col[q]] if q in col else np.inf)
     return part
 
 
@@ -1004,7 +1006,7 @@ def major_tree(game):
     return tree
 
 
-def fix_spans(part, edges, tree, log=print):
+def fix_spans(part, edges, tree, log=print, cost=None):
     """The game moves each vertex with one bone, so an edge between two bones that don't share a joint
     (left and right thigh across a skirt, neck to pelvis down a ponytail, head to arm through hair)
     stretches across the screen when they move apart. Each vertex on such an edge may take a bone of
@@ -1040,7 +1042,11 @@ def fix_spans(part, edges, tree, log=print):
                 if tree.get(q, 0) > 0: cands.add(tree[q])
             cands |= {c for c, par in tree.items() if par in cands}
             best, bc = int(part[v]), cur
+            here = cost(v, int(part[v])) if cost else 0.0
             for c in sorted(cands):
+                # never a bone much farther from the vertex than its own (a dress panel near a shin must
+                # not go to the thigh 35 cm away: it would fly off when she runs)
+                if cost is not None and cost(v, c) > here + 0.04: continue
                 k = bad_at(v, c)
                 if k < bc: best, bc = c, k
             if best != part[v]:
@@ -1080,6 +1086,27 @@ def smooth_weights(V, part, segments, neighbours, width=0.02):
 # =============================================================================================
 # Collada (.dae) reader: Blender 5 dropped its own importer (numpy + xml only)
 # =============================================================================================
+def joint_kind(name):
+    """What a model's own skeleton bone is, from its name (Mixamo, Unity, Unreal, Blender rigify-like,
+    VRM, Biped): 'upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot', 'neck', 'head' or None."""
+    n = name.lower()
+    for junk in ('mixamorig:', 'mixamorig_', 'bip01', 'bip001', 'j_bip_', 'def-', 'org-', 'mch-'):
+        n = n.replace(junk, '')
+    if any(w in n for w in ('twist', 'end', 'nub', 'finger', 'thumb', 'index', 'middle', 'ring', 'pinky',
+                            'toe', 'ball', 'roll', 'pole', 'ik', 'helper', 'hair', 'eye', 'jaw', 'tongue',
+                            'breast', 'skirt', 'cloth', 'spine', 'chest')):
+        return None
+    if 'forearm' in n or 'lowerarm' in n or 'elbow' in n: return 'forearm'
+    if 'upperarm' in n or n.rstrip('_.lr ').endswith('arm') or 'leftarm' in n or 'rightarm' in n: return 'upperarm'
+    if 'hand' in n or 'wrist' in n: return 'hand'
+    if 'upleg' in n or 'thigh' in n or 'upperleg' in n: return 'thigh'
+    if 'calf' in n or 'shin' in n or 'lowerleg' in n or 'knee' in n or 'leg' in n: return 'shin'
+    if 'foot' in n or 'ankle' in n: return 'foot'
+    if 'neck' in n: return 'neck'
+    if n.strip('_. ').endswith('head') or n == 'head': return 'head'
+    return None
+
+
 import xml.etree.ElementTree as _ET
 ET_ERRORS = (_ET.ParseError, ValueError, KeyError, IndexError, AttributeError, OSError)
 
@@ -1229,8 +1256,12 @@ def read_dae(path):
     out = []
     world = {}                                      # every node's world matrix, by id, sid and name
 
+    joints = {}                                     # JOINT nodes: name -> position (scene pose)
+
     def collect(node, M):
         M = M @ node_matrix(node)
+        if node.get('type') == 'JOINT' and (node.get('name') or node.get('sid')):
+            joints.setdefault(node.get('name') or node.get('sid'), (AX @ M[:3, 3]) * metre)
         for k in (node.get('id'), node.get('sid'), node.get('name')):
             if k and k not in world: world[k] = M
         for ch in node.findall(T_('node')): collect(ch, M)
@@ -1308,7 +1339,7 @@ def read_dae(path):
             if m: out.append(m)
     if not out:
         raise SkinError('no mesh found in %s' % os.path.basename(path))
-    return out, materials
+    return out, materials, {k: [float(x) for x in v] for k, v in joints.items()}
 
 
 # =============================================================================================
@@ -1496,7 +1527,16 @@ if HAVE_BPY:
         obj = user_mesh(context)
         sel = [o for o in context.selected_objects if o.type == 'MESH' and o.name != REFMESH] or [obj]
         if obj not in sel: sel.append(obj)
+        joints = {}
         for o in sel:
+            if 'pe_joints' in o:
+                joints.update({k: list(v) for k, v in o['pe_joints'].items()})
+            # the model's own skeleton (FBX, glTF): where its joints are, for the fitting rig to snap to
+            for m_ in o.modifiers:
+                if m_.type == 'ARMATURE' and m_.object and m_.object.name not in (RIG, FITRIG) and m_.object.type == 'ARMATURE':
+                    a = m_.object
+                    for pb in a.pose.bones:
+                        joints.setdefault(pb.name, list(a.matrix_world @ pb.head))
             # bake the model as it looks now (its own skeleton's pose, the shape keys' current mix, its
             # modifiers) into a plain mesh: Blender can't apply a modifier to a mesh with shape keys
             own = [m for m in o.modifiers if not (m.type == 'ARMATURE' and m.object and m.object.name == RIG)]
@@ -1518,6 +1558,7 @@ if HAVE_BPY:
             bpy.ops.object.join()
         obj = context.view_layer.objects.active
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        if joints: obj['pe_joints'] = joints             # world positions (the object is at the origin now)
         context.scene.pe_aya.model = obj
         return obj
 
@@ -1530,11 +1571,21 @@ if HAVE_BPY:
         h_me = V[:, 2].max() - V[:, 2].min()
         if h_me <= 1e-6: raise SkinError('the model is flat')
         k = h_ref / h_me
-        c_ref = np.array([(ref[:, 0].min() + ref[:, 0].max()) / 2, (ref[:, 1].min() + ref[:, 1].max()) / 2, ref[:, 2].min()])
         Vs = V * k
-        c_me = np.array([(Vs[:, 0].min() + Vs[:, 0].max()) / 2, (Vs[:, 1].min() + Vs[:, 1].max()) / 2, Vs[:, 2].min()])
+
+        def legs_centre(P):
+            """Middle of the lower legs (15-40 % of the height): where the body stands. The whole
+            model's box would be pulled back by a braid, ponytail or cape, putting the skeleton
+            behind the body (head joint at the back of the skull, spine along the back)."""
+            z0 = P[:, 2].min(); h = P[:, 2].max() - z0
+            band = P[(P[:, 2] > z0 + 0.15 * h) & (P[:, 2] < z0 + 0.40 * h)]
+            if len(band) < 8: band = P
+            return np.array([(band[:, 0].min() + band[:, 0].max()) / 2, (band[:, 1].min() + band[:, 1].max()) / 2, z0])
+        c_ref, c_me = legs_centre(ref), legs_centre(Vs)
         M = Matrix.Translation(Vector((c_ref - c_me).tolist())) @ Matrix.Scale(k, 4)
         obj.data.transform(M)
+        if 'pe_joints' in obj:
+            obj['pe_joints'] = {k: list(M @ Vector(v)) for k, v in obj['pe_joints'].items()}
         obj.data.update()
         return 'Fitted: scaled x%.3f, height %.2f m, feet on the reference floor' % (k, h_ref)
 
@@ -1633,6 +1684,38 @@ if HAVE_BPY:
             done.append('left' if side == sl else 'right')
         return done
 
+    def snap_to_joints(rig, obj, game):
+        """The model brought its own skeleton (a .dae, an FBX or glTF with an armature): put the fitting
+        rig's shoulders, elbows, wrists, neck, head, hips, knees and ankles on its joints, each bone aimed
+        at the next joint. Which side is which comes from where the joint is, not its name."""
+        J = {k: np.array(v, float) for k, v in obj['pe_joints'].items()}
+        sl = side_left(game)
+        mid = np.mean([v[0] for v in J.values()]) if J else 0.0
+        found = {}
+        for name, pos in J.items():
+            kind = joint_kind(name)
+            if not kind: continue
+            if kind in ('neck', 'head'):
+                key = kind
+            else:
+                key = ('L' if (pos[0] - mid) * sl > 0 else 'R') + kind
+            if key not in found or len(name) < len(found[key][0]): found[key] = (name, pos)
+        CH = [('neck', 10, 'head'), ('head', 11, None)]
+        for S, (u, f, h, t, s_, ft) in (('L', (4, 5, 6, 22, 23, 24)), ('R', (14, 15, 16, 26, 27, 28))):
+            CH += [(S + 'upperarm', u, S + 'forearm'), (S + 'forearm', f, S + 'hand'), (S + 'hand', h, None),
+                   (S + 'thigh', t, S + 'shin'), (S + 'shin', s_, S + 'foot'), (S + 'foot', ft, None)]
+        done = []
+        for key, part, nxt in CH:
+            if key not in found: continue
+            pb = rig.pose.bones[bone_name(part)]
+            target = Vector(found[key][1].tolist())
+            pb.matrix = Matrix.Translation(target - pb.head) @ pb.matrix       # joint onto the model's
+            bpy.context.view_layer.update()
+            if nxt and nxt in found:
+                aim(rig, part, found[nxt][1])                                 # bone along the model's
+            done.append(key)
+        return done
+
     def step_fitrig(context):
         game = game_for(context)
         rig = make_rig(game, FITRIG)
@@ -1640,8 +1723,11 @@ if HAVE_BPY:
         rig.data.display_type = 'OCTAHEDRAL'
         set_active(rig, 'POSE')
         obj = context.scene.pe_aya.model
-        auto = auto_fit_arms(rig, obj, game) if obj else []
+        snapped = snap_to_joints(rig, obj, game) if obj is not None and 'pe_joints' in obj else []
+        auto = [] if snapped else (auto_fit_arms(rig, obj, game) if obj else [])
         what = ('arms aimed automatically (%s); ' % ' and '.join(auto)) if auto else ''
+        if snapped:
+            what = 'joints placed on your model\'s own skeleton (%s); check them, ' % ', '.join(snapped)
         return ('Fitting rig made: %sin Pose mode turn (R) bones into your model\'s limbs and move (G) joints to its '
                 'shoulders, elbows, wrists, hips, knees and ankles, then "Pose into game stance"' % what)
 
@@ -2062,7 +2148,7 @@ if HAVE_BPY:
     # ---------------------------------------------------------------- Collada import
     def build_dae(path):
         """Collada file -> mesh objects with their UVs and materials (an Image Texture on Base Color)."""
-        meshes, mats = read_dae(path)
+        meshes, mats, joints = read_dae(path)
         bmats = []
         for md in mats:
             mat = bpy.data.materials.new(md['name'])
@@ -2093,6 +2179,7 @@ if HAVE_BPY:
             me.validate(); me.update()
             ob = bpy.data.objects.new(md['name'], me)
             bpy.context.scene.collection.objects.link(ob)
+            if joints: ob['pe_joints'] = joints           # the model's own skeleton: the fitting rig snaps to it
             objs.append(ob)
         if bpy.context.object and bpy.context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
         for o in bpy.context.selected_objects: o.select_set(False)
