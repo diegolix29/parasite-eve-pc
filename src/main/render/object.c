@@ -1091,7 +1091,7 @@ int Render_SetupEntityPrims(RenderObjectEntity *obj, RenderObjectHeader *model,
     RenderMatrix *matrix;
     int bytes, words;
     s16 skipped;
-    s16 i, j;
+    int i, j;   /* a skin may have over 32767 faces of one kind (counts are u16) */
 
     cursor.header = model;
     obj->header = model;
@@ -1325,7 +1325,7 @@ void Render_InitPrimBlock(RenderObjectEntity *object, s16 x, s16 y, int unused, 
     int flag_copy;
     RenderPacket34 *quad;
     RenderPacket28 *tri;
-    s16 i;
+    int i;      /* skins may have over 32767 faces of one kind */
     s16 side;
     half_page = y == 128;
     page = ((((x >> 6) - 8) * 2) + (y >> 7)) + ((y >> 8) * 30);

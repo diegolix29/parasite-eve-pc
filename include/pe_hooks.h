@@ -98,6 +98,10 @@ typedef enum PeHookId {
                            * phases 2/3 around the battle range dome (Render_AnimationFrame) */
     PE_HOOK_FIELD_BACKGROUND, /* NULL: Render_BuildMeshList entry; nonzero skips the room's
                                * background sprites this frame */
+    PE_HOOK_ACTOR_ALLOC, /* PeHookActorAlloc: Scene_LoadMap, an actor's draw buffer (packets,
+                          * matrices, shadow quads) is about to come from the 16-block entity pool;
+                          * a handler may set `buffer` to host memory of at least `size` bytes that
+                          * stays valid until the actor goes (freeing it finds no pool slot: no-op) */
     PE_HOOK_COUNT
 } PeHookId;
 
@@ -170,6 +174,13 @@ typedef struct PeHookHpLoss {
 typedef struct PeHookFieldCamera {
     int phase;
 } PeHookFieldCamera;
+
+typedef struct PeHookActorAlloc {
+    void *actor;          /* FieldActor * */
+    unsigned int size;    /* bytes the game asks for */
+    int full;             /* 1: packets included (a drawn model), 0: matrices only */
+    void *buffer;         /* set by a handler: use this instead of the pool */
+} PeHookActorAlloc;
 
 typedef struct PeHookPlayerMove {
     const void *actor;

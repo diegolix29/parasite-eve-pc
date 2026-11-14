@@ -9,7 +9,7 @@ cmake --build build-mods
 ```
 
 `PE_MOD_LIST` (CMake cache) picks the mods, by folder name. Default:
-`pe_qol;pe_rebalance;pe_economy;pe_rewards;pe_catalog;pe_shops;pe_collection;pe_wardrobe;pe_stacks;pe_warp;pe_quicksave;pe_cheats;pe_phone;pe_chasecam` (add `pe_hello` for the example).
+`pe_qol;pe_rebalance;pe_economy;pe_rewards;pe_catalog;pe_shops;pe_collection;pe_wardrobe;pe_stacks;pe_warp;pe_quicksave;pe_cheats;pe_phone;pe_chasecam;pe_custom_skins` (add `pe_hello` for the example).
 
 Two switches, so a modded build is safe to hand out:
 - **Build**: `PE_MODS` off (the default) leaves no mod code in the game at all.
@@ -63,6 +63,7 @@ mods/
   pe_challenges/       optional harder rules per run (one file per challenge, Hardcore permadeath),
                        bundles, assisted marker, run summary (opt-in via PE_MOD_LIST)
   pe_chasecam/         experimental camera behind Aya over the walkable floor (F8)
+  pe_custom_skins/     every pe_skins/<folder> with a skin.ini is a free Wardrobe costume
   pe_lang/             language packs: the game's text from a .pelang pack, F1 > Language (not built
                        by default; docs/LOCALIZATION.md, tools in localization/)
   pe_hello/            example mod (not built by default)
@@ -265,6 +266,16 @@ Files (one job each; they talk only through `pe_phone.h`):
 
 `tests/pe_mod_phone_test.c` (CTest `mod-phone`) checks the pure core and `calls/pe1.txt` without the game;
 pe-native-debug's `scenarios/phone_calls.py` checks the game side through real phone saves.
+
+## Custom skins (pe_custom_skins)
+
+At start, every folder `pe_skins/<folder>/` beside the preferences that holds a `skin.ini`
+becomes a free Wardrobe costume (group "Custom skins"); the Wardrobe (pe_wardrobe) loads it like the game's own
+skins (pe_skin_loader.c) and hides it while model.bin is missing. skin.ini lines: `name`, `key`
+(saved in profiles, default `custom/<folder>`), `group`. Players make the folders with the
+Blender tool in `mods/pe_custom_skins/pe_aya_skin.py` (GUIDE.md there) from their own disc; nothing from the game ships.
+A worn skin's model draws from host memory (pe_skin_loader.c on the game's PE_HOOK_ACTOR_ALLOC in
+Scene_LoadMap), not the 16-block entity pool, so a skin may use the format's full 65,535 faces.
 
 ## Cheats (pe_cheats)
 

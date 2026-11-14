@@ -48,6 +48,7 @@
 #include "pe1/scene_assets.h"
 #include "pe1/scene_room_load.h"
 #include "pe1/field_actor.h"
+#include "pe1/entity_allocation.h"
 #include "pe_skin_rows.h"
 
 #define PE_FILE_MAX      0x400000u   /* rooms.bin is ~800 KB */
@@ -289,10 +290,55 @@ static void pe_keep_rooms(void) {
 }
 
 /* Her actor takes the model and idle row again, as the room load does (step 0x27). */
+/* A skin's model draws from host memory, not the game's 16-block entity pool (PS1-sized, shared with
+ * every actor of the room), so a skin may have far more geometry than the game's Aya (up to the
+ * format's 65,535 faces) without taking the other actors' blocks. One buffer for the player, kept for
+ * the run and grown when a bigger skin is worn (a smaller one is never freed while an actor may
+ * still point at it). Only the player, only while her model is a loaded skin's. */
+static void *s_player_buf;
+static size_t s_player_cap;
+
+static int pe_on_actor_alloc(void *ctx, void *user) {
+    PeHookActorAlloc *req = ctx;
+    FieldActor *actor = req ? req->actor : NULL;
+    int i;
+    (void)user;
+    if (!actor || !req->full || actor != g_PlayerEntity || !actor->model_state.model_header) return 0;
+    for (i = 0; i < s_skins; ++i) {
+        const PeSkin *k = &s_skin[i];
+        const u8 *h = (const u8 *)actor->model_state.model_header;
+        if (!k->ok || !k->model.data || h < k->model.data || h >= k->model.data + k->model.size) continue;
+        if (req->size > s_player_cap) {
+            size_t cap = req->size + (req->size >> 2) + 4096;
+            void *b = calloc(1, cap);
+            if (!b) { pe_log("skin", "%s: no host memory for %u bytes (the game's pool tries)", k->folder, req->size); return 0; }
+            s_player_buf = b;                   /* the old one may still be an actor's: kept */
+            s_player_cap = cap;
+        }
+        memset(s_player_buf, 0, req->size);
+        req->buffer = s_player_buf;
+        return 0;
+    }
+    return 0;
+}
+
 static void pe_rebind_player(void) {
     FieldActor *player = g_PlayerEntity;
     s8 *setup;
     if (!player || !g_GameState.bank_slots[0]) return;
+    {   /* instant swap reuses her draw buffer: only when the new model fits it */
+        const RenderObjectHeader *h = g_GameState.bank_slots[0];
+        const size_t need = 2u * (h->packet34_count * sizeof(RenderPacket34) + h->packet28_count * sizeof(RenderPacket28) +
+                                  h->packet24_count * sizeof(RenderPacket24) + h->packet1c_count * sizeof(RenderPacket1C)) +
+                            h->animation_entry_count * sizeof(RenderAnimationLookupEntry) + h->part_count * sizeof(RenderMatrix) +
+                            2 * sizeof(RenderShadowQuad);
+        size_t have = s_player_buf && player->allocation_block == (uintptr_t)s_player_buf ? s_player_cap : 0;
+        unsigned slot;
+        for (slot = 0; slot < 16; ++slot)
+            if (g_EntityAllocationTable[slot].address && g_EntityAllocationTable[slot].address == player->allocation_block)
+                have = (size_t)g_EntityAllocationTable[slot].blockCount * ENTITY_ALLOCATION_BLOCK_SIZE;
+        if (need > have) { pe_log("skin", "instant swap skipped: the model needs a room reload (draw memory)"); return; }
+    }
     player->model_state.model_header = g_GameState.bank_slots[0];
     player->action_data = g_GameState.bank_rows[0][PE_IDLE_MODE];
     Entity_SetActionMode((BattleEntity *)player, PE_IDLE_MODE);
@@ -398,6 +444,7 @@ void pe_skin_register(const char *mod_id) {
     pe_hook_add(PE_HOOK_PLAYER_BANK, pe_on_player_bank, NULL, PE_PRIORITY_LATE, mod_id);   /* after the Wardrobe's bank */
     pe_hook_add(PE_HOOK_PLAYER_TEXTURES, pe_on_player_textures, NULL, PE_PRIORITY_NORMAL, mod_id);
     pe_hook_add(PE_HOOK_PLAYER_ROWS, pe_on_player_rows, NULL, PE_PRIORITY_NORMAL, mod_id);
+    pe_hook_add(PE_HOOK_ACTOR_ALLOC, pe_on_actor_alloc, NULL, PE_PRIORITY_NORMAL, mod_id);
     pe_menu_register_toggle(PE_PAGE_WARDROBE, "Instant swap (experimental)",
         "Swap skins in place, no room reload. Off: the room reloads, as the recomp did.", &s_instant, NULL);
     pe_hook_add(PE_HOOK_FRAME, pe_on_frame, NULL, PE_PRIORITY_LATE, mod_id);
