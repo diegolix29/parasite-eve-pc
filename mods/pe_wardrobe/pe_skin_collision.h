@@ -17,6 +17,38 @@ static unsigned pe_skin_collision_u16(const uint8_t *p) {
     return (unsigned)p[0] | (unsigned)p[1] << 8;
 }
 
+/* Skins made by pe_aya_skin.py before 2026-11-15 append their (bigger) model block at the end of
+ * model.bin and point the root record at it, but keep Aya's own block length in the record. When
+ * that length is too short for the block's own counts, set it to the rest of the file. Returns 1 if
+ * the record was changed; malformed input is left alone (the check below rejects it). */
+static inline int pe_skin_repair_appended_length(void *data, size_t size) {
+    uint8_t *b = (uint8_t *)data;
+    size_t dir, table, model, length, section;
+    uint32_t roots, source, word;
+    unsigned parts, verts, packets = 0, i;
+    if (!b || size < 8) return 0;
+    dir = pe_skin_collision_u32(b + 4);
+    if (dir > size || size - dir < 0x34) return 0;
+    roots = pe_skin_collision_u32(b + dir + 0x0c);
+    table = roots & 0x3fffffu;
+    if (!(roots >> 22) || table > size || size - table < 12) return 0;
+    source = pe_skin_collision_u32(b + table + 4);
+    if (source >> 24) return 0;
+    model = source & 0xffffffu;
+    if (model > size || size - model < 0x1c || size - model > 0xffffffu) return 0;
+    word = pe_skin_collision_u32(b + table);
+    length = word & 0xffffffu;
+    parts = b[model + 2];
+    verts = pe_skin_collision_u16(b + model + 6);
+    for (i = 0; i < 4; ++i)
+        packets += pe_skin_collision_u16(b + model + 8 + 2 * i);
+    section = 0x1cu + 12u * parts + 12u * verts + 12u * packets;
+    if (length >= section + 16 || size - model < section + 16) return 0;
+    word = (word & 0xff000000u) | (uint32_t)(size - model);
+    for (i = 0; i < 4; ++i) b[table + i] = (uint8_t)(word >> (8 * i));
+    return 1;
+}
+
 /* Patch only the host-owned model copy, before Render_SetupEntityPrims reads
  * section14.pad into hit_cylinder.radius for field movement. On malformed
  * input fail without writes. Byte reads avoid alignment/aliasing assumptions. */

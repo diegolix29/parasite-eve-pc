@@ -151,6 +151,8 @@ static PeSkin *pe_load(const char *folder) {
     if (!pe_read(folder, "model.bin", &k->model) || !pe_dir(&k->model)) return pe_load_failed(folder, "model.bin");
     /* Costumes must not change movement clearance. Applies to loose skins and
      * character packs without rewriting installed assets or combat hit bounds. */
+    if (pe_skin_repair_appended_length(k->model.data, k->model.size))
+        pe_log("skin", "%s: model block length taken from the file (older skin tool)", folder);
     if (!pe_skin_normalize_movement(k->model.data, k->model.size)) return pe_load_failed(folder, "model.bin collision bounds");
     if (!pe_read(folder, "texture.bin", &k->tex) || !pe_dir(&k->tex)) return pe_load_failed(folder, "texture.bin");
     for (d = 1; d <= 8; ++d) {

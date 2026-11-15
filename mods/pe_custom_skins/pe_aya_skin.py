@@ -701,6 +701,8 @@ def write_skin(game, mesh, atlas, out_dir, name, key, log, hd_size=0):
     model += block
     w = u32(model, game.rec_at)
     struct.pack_into('<I', model, game.rec_at, (w & 0xFF000000) | new_off)
+    w = u32(model, game.rec_at - 4)                    # the record's length: the new block's
+    struct.pack_into('<I', model, game.rec_at - 4, (w & 0xFF000000) | len(block))
     while len(model) % 2048: model.append(0)
     open(os.path.join(out_dir, 'model.bin'), 'wb').write(model)
 
