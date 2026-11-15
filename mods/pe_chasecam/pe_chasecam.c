@@ -3844,6 +3844,11 @@ static void emit_img(const TV *a, const TV *b, const TV *c, u16 tpage, u16 clut,
     link_prim(&p->tag, depth);
 }
 
+/* Sort distance of the wall or top an image is drawn on (its s_surf_maxz, the same key as its
+ * backing and pieces), 0 = each image triangle sorts by its own farthest point. Without it an image
+ * on a long wall sorted its far half behind the wall's flat backing (room 122's corridor). */
+static float s_img_sort_z;
+
 /* One clipped polygon (image texels) as triangles: texel (u, v) is drawn from (u - uoff, v + voff)
  * of texture page tpage; hd: the HD cell of its 16x16 tile, or NULL. */
 static void image_tris(const IV *y, int m, u16 tpage, u16 clut, float uoff, float voff, const Tile *hd,
@@ -3862,6 +3867,7 @@ static void image_tris(const IV *y, int m, u16 tpage, u16 clut, float uoff, floa
         if (q < 3) continue;
         float maxz = 0;
         for (int k = 0; k < q; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
+        if (s_img_sort_z > 0) maxz = s_img_sort_z;
         int raised = 0;
         if (on_floor)
             for (int k = 0; k < 3; ++k) raised |= tri[k]->p.y < s_floor_low - RAISED_FLOOR_GAP;
@@ -3985,7 +3991,9 @@ static void draw_wall_image(const Surface *s) {
         a[k].p = s->v[k];
         wall_image_uv(s->src, &s->v[k], im, &a[k].u, &a[k].v);
     }
+    s_img_sort_z = s - s_surf < s_surf_count ? s_surf_maxz[s - s_surf] : 0;
     draw_image_poly(im, a, 3, 0);
+    s_img_sort_z = 0;
 }
 
 /* Floor, ceiling or cap image place of a point, in images (0..1 = one copy): over bounds b (x0,
@@ -4033,7 +4041,9 @@ static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on
             /* This repeat's columns; draw_image_poly cuts the rows. */
             int n = clip_iv(a, 3, b, 0, 0, 1); if (n < 3) continue;
             n = clip_iv(b, n, a, 0, (float)im->tw, 0); if (n < 3) continue;
+            s_img_sort_z = s->wall == SURF_CAP && s - s_surf < s_surf_count ? s_surf_maxz[s - s_surf] : 0;
             draw_image_poly(im, a, n, on_floor);
+            s_img_sort_z = 0;
         }
 }
 

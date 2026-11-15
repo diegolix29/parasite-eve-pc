@@ -70,9 +70,15 @@ NAMES = ['root', 'chest', 'Larm_base', 'L_clav', 'L_upperarm', 'L_forearm', 'L_h
 AUTO = (1, 4, 5, 6, 10, 11, 14, 15, 16, 20, 22, 23, 24, 26, 27, 28)
 LEFT, RIGHT = (4, 5, 6, 22, 23, 24), (14, 15, 16, 26, 27, 28)
 ARMS = (4, 5, 6, 14, 15, 16)
-# bone lengths (offset from the parent joint) the fitting rig may change: arm bases, clavicles,
-# shoulders, elbows, wrists, neck, head, hip bases, hips, knees, ankles (not the fingers)
-LENGTHS = (2, 3, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27, 28)
+# bone lengths (offset from the parent joint) the fitting rig may change: shoulders, elbows, wrists,
+# neck, head, hips, knees, ankles (not the fingers). Not the hidden arm bases, clavicles and hip bases:
+# a joint only slides along its parent's axis, so a shoulder the skeleton can't reach (a model's
+# shoulders 3.5 cm more forward than Aya's) made the fit stretch them (arm base -79 -> -97) and lifted
+# both shoulders 4 cm, unevenly. What the skeleton can't reach is kept by LIMB_ROOTS instead.
+LENGTHS = (4, 5, 6, 10, 11, 14, 15, 16, 22, 23, 24, 26, 27, 28)
+# where a limb meets the torso: its skin stays where the model has it relative to the torso, rather
+# than being carried onto the game's joint (shoulders, neck, hips)
+LIMB_ROOTS = (4, 14, 10, 22, 26)
 # farthest a vertex may be from an arm bone (metres, at the game's size): sleeves, cuffs, a closed hand
 ARM_REACH = {4: 0.13, 5: 0.10, 6: 0.08, 14: 0.13, 15: 0.10, 16: 0.08}
 LEG_REACH = {22: 0.11, 23: 0.08, 24: 0.085, 26: 0.11, 27: 0.08, 28: 0.085}   # feet: a shoe, not a dress hem
@@ -1630,6 +1636,7 @@ if HAVE_BPY:
         lengths along the arm. Returns the sides fitted."""
         V, _, _ = mesh_arrays(obj)
         done = []
+        seg = rest_segments(game)
         sl = side_left(game)
         hip_z = to_blender(game.idle[20][1])[2]
         root_x = to_blender(game.idle[1][1])[0]
@@ -1638,8 +1645,9 @@ if HAVE_BPY:
             sh = np.array(rig.pose.bones[bone_name(u)].head)
             L1 = np.linalg.norm(to_blender(game.idle[f][1]) - to_blender(game.idle[u][1]))
             L2 = np.linalg.norm(to_blender(game.idle[h][1]) - to_blender(game.idle[f][1]))
+            L3 = np.linalg.norm(seg[h][1] - seg[h][0]) if h in seg else 0.6 * L2   # wrist to fingertip
             line, gap = [], 0
-            for zs in np.arange(sh[2] - 0.05, sh[2] - (L1 + L2) - 0.12, -0.01):
+            for zs in np.arange(sh[2] - 0.05, sh[2] - 1.4 * (L1 + L2 + L3), -0.01):
                 pts = V[(np.abs(V[:, 2] - zs) < 0.006) & (cx * side > 0.0)]
                 if len(pts) < 6: continue
                 a_pts = outer_cluster(pts, side)
@@ -1659,8 +1667,11 @@ if HAVE_BPY:
                     i = int(np.clip(np.searchsorted(arc, s) - 1, 0, len(line) - 2))
                     t = (s - arc[i]) / max(seg_len[i], 1e-9)
                     return line[i] + (line[i + 1] - line[i]) * min(max(t, 0), 1.5)
-                elbow, wrist = at(L1), at(L1 + L2)
-                tip = at(min(arc[-1], L1 + L2 + 0.08)) if arc[-1] > L1 + L2 + 0.02 else wrist + (wrist - elbow) * 0.4
+                # the line runs to the fingertips: split the model's own arm as the game's is split, so
+                # longer or shorter forearms bend at their own elbow
+                k = arc[-1] / (L1 + L2 + L3)
+                elbow, wrist = at(L1 * k), at((L1 + L2) * k)
+                tip = line[-1]
             else:
                 # T-pose: the points out past the shoulder are the arm
                 x = (V[:, 0] - sh[0]) * side
@@ -1671,12 +1682,14 @@ if HAVE_BPY:
                 dirn = (d / np.maximum(dist[:, None], 1e-9))[dist > np.percentile(dist, 30)].mean(0)
                 if np.linalg.norm(dirn) < 0.5: continue
                 dirn /= np.linalg.norm(dirn)
-                ring = arm[np.abs(dist - L1) < 0.025]
-                elbow = ring.mean(0) if len(ring) >= 8 else sh + dirn * L1
+                # the model's own arm length (shoulder to fingertip), split as the game's is
+                k = float(np.clip(np.percentile(dist, 99.5) / (L1 + L2 + L3), 0.6, 1.6))
+                ring = arm[np.abs(dist - L1 * k) < 0.025]
+                elbow = ring.mean(0) if len(ring) >= 8 else sh + dirn * L1 * k
                 de = np.linalg.norm(arm - elbow, axis=1)
-                ring = arm[(np.abs(de - L2) < 0.025) & (dist > L1)]
-                wrist = ring.mean(0) if len(ring) >= 8 else elbow + (elbow - sh) / max(np.linalg.norm(elbow - sh), 1e-6) * L2
-                beyond = arm[(de > L2 + 0.03) & (dist > L1)]
+                ring = arm[(np.abs(de - L2 * k) < 0.025) & (dist > L1 * k)]
+                wrist = ring.mean(0) if len(ring) >= 8 else elbow + (elbow - sh) / max(np.linalg.norm(elbow - sh), 1e-6) * L2 * k
+                beyond = arm[(de > L2 * k + 0.03) & (dist > L1 * k)]
                 tip = beyond.mean(0) if len(beyond) >= 8 else wrist + (wrist - elbow)
             aim(rig, u, elbow)
             aim(rig, f, wrist)
@@ -1684,7 +1697,119 @@ if HAVE_BPY:
             done.append('left' if side == sl else 'right')
         return done
 
-    def snap_to_joints(rig, obj, game):
+    def joints_by_position(rig, J, CH, mid, sl, reach=0.08):
+        """The model's skeleton names its bones in no way joint_kind knows (bone000, Bone.012, ...):
+        each joint of the fitting rig, already aimed at the model's limbs, takes the model's joint
+        nearest to it on the same side, within `reach` metres. One model joint per rig joint."""
+        found, used = {}, set()
+        names = list(J)
+        P = np.array([J[n] for n in names]) if names else np.zeros((0, 3))
+        for key, part, _ in CH:
+            if not len(P): break
+            pos = np.array(rig.pose.bones[bone_name(part)].head)
+            d = np.linalg.norm(P - pos, axis=1)
+            if key[0] in 'LR':
+                side = 1 if key[0] == 'L' else -1
+                d[(P[:, 0] - mid) * sl * side < 0.01] = np.inf
+            for i in np.argsort(d):
+                if not np.isfinite(d[i]) or d[i] > reach: break
+                k = tuple(np.round(P[i], 4))
+                if k in used: continue
+                used.add(k)
+                found[key] = (names[i], P[i])
+                break
+        # Elbows and knees: once both ends of the limb are matched (shoulder and wrist, hip and ankle),
+        # the middle joint is the model's joint lying between them along the limb, not the one nearest
+        # a guess made from Aya's proportions (a model with longer thighs has its knee 8 cm lower, past
+        # `reach`, and the shin was left pointing nowhere).
+        for S in 'LR':
+            for a_, m_, b_ in (('upperarm', 'forearm', 'hand'), ('thigh', 'shin', 'foot')):
+                ka, km, kb = S + a_, S + m_, S + b_
+                if ka not in found or kb not in found: continue
+                A, B = found[ka][1], found[kb][1]
+                ab = B - A
+                L = float(np.linalg.norm(ab))
+                if L < 1e-4: continue
+                t = ((P - A) @ ab) / (L * L)
+                off = np.linalg.norm(P - (A + t[:, None] * ab), axis=1)
+                ok = (t > 0.2) & (t < 0.8) & (off < 0.25 * L)
+                if not ok.any(): continue
+                i = int(np.argmin(np.where(ok, off + 0.05 * np.abs(t - 0.5) * L, np.inf)))
+                found[km] = (names[i], P[i])
+        return found
+
+    def auto_fit_legs(rig, obj, game):
+        """Fit the fitting rig's legs to the model's legs: horizontal cross-sections from below the
+        crotch to the floor, each side's centres make a line. The hip joint moves onto the top of that
+        line (a model's legs can be set wider or narrower than Aya's); the ankle is where the line is
+        as high above the floor as the game's ankle; the knee splits hip..ankle as the game's thigh and
+        shin do, so a model with longer or shorter thighs bends at its own knee and the bone-length
+        fit (Pose into game stance) follows it. The foot points straight down to the sole, as the
+        game's does. Returns the sides fitted."""
+        V, _, E = mesh_arrays(obj)
+        done = []
+        sl = side_left(game)
+        root_x = to_blender(game.idle[1][1])[0]
+        z0 = V[:, 2].min()
+        Ea, Eb = V[E[:, 0]], V[E[:, 1]]
+
+        def cut(zs):
+            """Where the mesh's edges cross the height zs: a whole cross-section even on a low-poly
+            model, whose long leg faces leave a slice of vertices nearly empty."""
+            da, db = Ea[:, 2] - zs, Eb[:, 2] - zs
+            m = (da * db < 0) | ((da == 0) & (db != 0))
+            k = (da[m] / (da[m] - db[m]))[:, None]
+            return Ea[m] + (Eb[m] - Ea[m]) * k
+        for side, (t, s_, ft) in ((sl, (22, 23, 24)), (-sl, (26, 27, 28))):
+            hip = np.array(rig.pose.bones[bone_name(t)].head)
+            L1 = np.linalg.norm(to_blender(game.idle[s_][1]) - to_blender(game.idle[t][1]))
+            L2 = np.linalg.norm(to_blender(game.idle[ft][1]) - to_blender(game.idle[s_][1]))
+            x = (V[:, 0] - root_x) * side
+            line = []
+            for zs in np.arange(hip[2] - 0.10, z0 + 0.06, -0.01):
+                pts = cut(zs)
+                pts = pts[(pts[:, 0] - root_x) * side > 0.005]
+                if len(pts) < 4: continue
+                # a hand hanging beside the thigh, a skirt or a cape is not the leg: the leg is near the
+                # hip joint, then near the last slice's centre
+                ref = line[-1] if line else hip
+                pts = pts[np.linalg.norm((pts - ref)[:, :2], axis=1) < (0.10 if line else 0.12)]
+                if len(pts) < 4: continue
+                c = pts.mean(0)
+                if line and np.linalg.norm((c - line[-1])[:2]) > 0.05:
+                    continue
+                line.append(c)
+            if len(line) < 10: continue
+            # the hip joint over the leg: the top slices' centre, at the joint's own height
+            top = np.mean(line[:4], axis=0)
+            pb = rig.pose.bones[bone_name(t)]
+            pb.matrix = Matrix.Translation(Vector((top[0] - hip[0], top[1] - hip[1], 0.0))) @ pb.matrix
+            bpy.context.view_layer.update()
+            hip = np.array(pb.head)
+            # the ankle: where the leg's line comes down to the game's ankle height above the floor
+            ankle_h = to_blender(game.idle[ft][1])[2] - to_blender(game.idle_vertices())[:, 2].min()
+            line = np.array(line)
+            low = np.where(line[:, 2] <= z0 + ankle_h)[0]
+            end = int(low[0]) if len(low) else len(line) - 1
+            line = np.vstack([hip, line[:end + 1]])
+            seg_len = np.linalg.norm(np.diff(line, axis=0), axis=1)
+            arc = np.r_[0, np.cumsum(seg_len)]
+            if arc[-1] < 0.5 * (L1 + L2): continue
+
+            def at(s):
+                i = int(np.clip(np.searchsorted(arc, s) - 1, 0, len(line) - 2))
+                tt = (s - arc[i]) / max(seg_len[i], 1e-9)
+                return line[i] + (line[i + 1] - line[i]) * min(max(tt, 0), 1.0)
+            knee, ankle = at(arc[-1] * L1 / (L1 + L2)), line[-1]
+            aim(rig, t, knee)
+            aim(rig, s_, ankle)
+            # the game's foot bone runs from the ankle straight down to the sole (not to the toes):
+            # aimed at the toe tip, posing turned the feet ~45 degrees, toes down
+            aim(rig, ft, np.array([ankle[0], ankle[1], z0]))
+            done.append('left' if side == sl else 'right')
+        return done
+
+    def snap_to_joints(rig, obj, game, by_position=False):
         """The model brought its own skeleton (a .dae, an FBX or glTF with an armature): put the fitting
         rig's shoulders, elbows, wrists, neck, head, hips, knees and ankles on its joints, each bone aimed
         at the next joint. Which side is which comes from where the joint is, not its name."""
@@ -1704,6 +1829,8 @@ if HAVE_BPY:
         for S, (u, f, h, t, s_, ft) in (('L', (4, 5, 6, 22, 23, 24)), ('R', (14, 15, 16, 26, 27, 28))):
             CH += [(S + 'upperarm', u, S + 'forearm'), (S + 'forearm', f, S + 'hand'), (S + 'hand', h, None),
                    (S + 'thigh', t, S + 'shin'), (S + 'shin', s_, S + 'foot'), (S + 'foot', ft, None)]
+        if not found and by_position:
+            found = joints_by_position(rig, J, CH, mid, sl)
         done = []
         for key, part, nxt in CH:
             if key not in found: continue
@@ -1723,11 +1850,17 @@ if HAVE_BPY:
         rig.data.display_type = 'OCTAHEDRAL'
         set_active(rig, 'POSE')
         obj = context.scene.pe_aya.model
-        snapped = snap_to_joints(rig, obj, game) if obj is not None and 'pe_joints' in obj else []
-        auto = [] if snapped else (auto_fit_arms(rig, obj, game) if obj else [])
-        what = ('arms aimed automatically (%s); ' % ' and '.join(auto)) if auto else ''
+        has_joints = obj is not None and 'pe_joints' in obj
+        snapped = snap_to_joints(rig, obj, game) if has_joints else []
+        auto = []
+        if not snapped and obj:
+            auto = ['%s arm' % s for s in auto_fit_arms(rig, obj, game)] + \
+                   ['%s leg' % s for s in auto_fit_legs(rig, obj, game)]
+            # a skeleton whose bone names say nothing (bone000...): its joints by where they are
+            if has_joints: snapped = snap_to_joints(rig, obj, game, by_position=True)
+        what = ('limbs aimed automatically (%s); ' % ', '.join(auto)) if auto else ''
         if snapped:
-            what = 'joints placed on your model\'s own skeleton (%s); check them, ' % ', '.join(snapped)
+            what += 'joints placed on your model\'s own skeleton (%s); check them, ' % ', '.join(snapped)
         return ('Fitting rig made: %sin Pose mode turn (R) bones into your model\'s limbs and move (G) joints to its '
                 'shoulders, elbows, wrists, hips, knees and ankles, then "Pose into game stance"' % what)
 
@@ -1766,11 +1899,27 @@ if HAVE_BPY:
         changed = ['%s %d->%d' % (bone_name(p)[3:], before[p], oz[p]) for p in range(game.NP) if oz[p] != before[p]]
         game.set_oz(oz)
         T = {p: np.array(mat4(*game.idle[p])) for p in range(game.NP)}
+        M = {p: T[p] @ np.linalg.inv(F[p]) for p in F}   # from where the fitting rig has it to the game stance
+        # A limb's joint the game's skeleton can't put where the model has it (the residual after the
+        # length fit): the limb is moved by that much, so its skin meets the torso as on the model
+        # instead of being stretched onto the game's joint. Its children move with it.
+        tree = major_tree(game)
+        shift = {}
+        def depth(p):
+            d = 0
+            while p > 0: p = game.parent[p]; d += 1
+            return d
+        for p in sorted(F, key=depth):
+            q = tree.get(p, 0)
+            if p in LIMB_ROOTS and q in M:
+                want = (M[q] @ np.r_[heads[p], 1.0])[:3]      # the model's joint, carried by the torso
+                shift[p] = want - T[p][:3, 3]
+            else:
+                shift[p] = shift.get(q, np.zeros(3))
         Vh = np.c_[V, np.ones(len(V))]
         out = np.zeros_like(V)
         for j, p in enumerate(labels):
-            M = T[p] @ np.linalg.inv(F[p])           # from where the fitting rig has it to the game stance
-            out += W[:, j:j + 1] * (Vh @ M.T)[:, :3]
+            out += W[:, j:j + 1] * ((Vh @ M[p].T)[:, :3] + shift.get(p, np.zeros(3)))
         Mi = np.array(obj.matrix_world.inverted())
         local = out @ Mi[:3, :3].T + Mi[:3, 3]
         obj.data.vertices.foreach_set('co', local.ravel())
@@ -1902,6 +2051,52 @@ if HAVE_BPY:
             keep[comp == comp[w]] = True; seen.add(comp[w])
         return keep[weld]
 
+    def orient_faces(bm, game, log):
+        """The game draws only the faces turned towards the camera (PS1 back-face culling), so a face
+        wound the wrong way is a hole and its texture shows from inside. Each separate piece of the
+        mesh gets one winding (Blender's Recalculate Outside), then is turned to face away from the
+        game's skeleton if most of its area faces it. Double-sided pieces (each face has a reversed
+        copy at the same place: hair cards, capes) are left as they are."""
+        def key(f):
+            return frozenset(tuple(round(c, 4) for c in v.co) for v in f.verts)
+        count = {}
+        for f in bm.faces:
+            k = key(f); count[k] = count.get(k, 0) + 1
+        segs = [(np.asarray(h, float), np.asarray(t, float)) for p, (h, t) in
+                ((p, v) for p, v in rest_segments(game).items() if p != '_kids')]
+        bm.faces.index_update()
+        bm.faces.ensure_lookup_table()
+        seen, recalc, flipped, kept = set(), 0, 0, 0
+        for f0 in bm.faces:
+            if f0.index in seen: continue
+            island, stack = [], [f0]
+            seen.add(f0.index)
+            while stack:
+                f = stack.pop(); island.append(f)
+                for e in f.edges:
+                    for g in e.link_faces:
+                        if g.index not in seen: seen.add(g.index); stack.append(g)
+            if sum(1 for f in island if count[key(f)] > 1) > len(island) // 2:
+                kept += 1
+                continue
+            before = [f.normal.copy() for f in island]
+            bmesh.ops.recalc_face_normals(bm, faces=island)
+            if any(f.normal.dot(n) < 0 for f, n in zip(island, before)): recalc += 1
+            C = np.array([f.calc_center_median() for f in island])
+            Nf = np.array([f.normal for f in island])
+            A = np.array([f.calc_area() for f in island])
+            best_d = np.full(len(island), np.inf); best_p = np.zeros_like(C)
+            for h, t in segs:
+                d, near = seg_dist(C, h, t)
+                m = d < best_d
+                best_d[m] = d[m]; best_p[m] = near[m]
+            out = float((A * ((C - best_p) * Nf).sum(1)).sum())
+            if out < 0:
+                bmesh.ops.reverse_faces(bm, faces=island); flipped += 1
+        if recalc or flipped or kept:
+            log('face orientation: %d pieces made consistent, %d turned to face out, %d double-sided pieces kept'
+                % (recalc, flipped, kept))
+
     def export_mesh(obj, game, budget, log):
         """Triangulate n-gons, join triangles into quads, decimate to the budget (small pieces kept)."""
         dg = bpy.context.evaluated_depsgraph_get()
@@ -1929,6 +2124,7 @@ if HAVE_BPY:
                 bm = bmesh.new(); bm.from_mesh(me)
                 big = [f for f in bm.faces if len(f.verts) > 4]
                 if big: bmesh.ops.triangulate(bm, faces=big)
+                orient_faces(bm, game, log if attempt == 0 else (lambda *a: None))
                 tri = [f for f in bm.faces if len(f.verts) == 3]
                 if tri:
                     bmesh.ops.join_triangles(bm, faces=tri, angle_face_threshold=math.radians(40),
