@@ -11,6 +11,8 @@ Read GUIDE.md beside this file first. In short:
   1. Load reference   the game's skeleton (PE_Aya_Rig) and Aya's own mesh (PE_Aya_Reference), read
                       from YOUR disc 1 image. Nothing from the game ships with this tool.
   2. Fit size         your model scaled and moved onto the reference (same height, feet on the floor).
+     Clean up         optional: find / remove faces hidden inside the model (a body under clothes,
+                      the scalp under hair, the inside of the mouth); they flicker through in game.
   3. Pose             a model already standing like the reference: skip. A T-pose / A-pose model:
                       "Make fitting rig", turn its bones into your model's limbs (Pose mode), then
                       "Pose into game stance": the model is bent into the game's stance.
@@ -1121,10 +1123,32 @@ def joint_sides(V, part, segments, log=print, shoulders=True):
     return part
 
 
-def smooth_weights(V, part, segments, neighbours, width=0.02):
+def _nearest_dist(P, Q):
+    """Distance from each point of P to the nearest point of Q (None when Q is empty)."""
+    if len(Q) == 0 or len(P) == 0: return None
+    try:
+        from mathutils.kdtree import KDTree
+    except ImportError:
+        return np.array([np.min(np.linalg.norm(Q - x, axis=1)) for x in P])
+    kd = KDTree(len(Q))
+    for i, x in enumerate(Q): kd.insert(x.tolist(), i)
+    kd.balance()
+    return np.array([kd.find(x.tolist())[2] for x in P])
+
+
+# the body's core: when bending a T-pose / A-pose model into the stance it keeps its shape, only the
+# limbs bend at their joints
+TORSO = (1, 20)
+
+
+def smooth_weights(V, part, segments, neighbours, width=0.02, rigid=TORSO, seam_width=0.06):
     """Weights for bending the model into the game stance: each vertex follows its own bone, blended
     with the bones it joins (parent / children) by how close it is to them, over `width` metres.
-    Distances, not mesh edges: the same on a 500 and a 500,000 vertex model."""
+    Distances, not mesh edges: the same on a 500 and a 500,000 vertex model.
+    Torso vertices (rigid) never take a limb's move: the chest is one line down the middle, so the side
+    of a wide chest lies nearer the upper arm than the chest line and followed the arm halfway when a
+    T-pose arm came down 65 degrees (the chest and the top caved in; up to 3.6x stretched edges).
+    The limb's own skin near the joint still blends toward the torso."""
     labels = sorted(set(part.tolist()))
     col = {p: j for j, p in enumerate(labels)}
     n = len(V)
@@ -1137,7 +1161,15 @@ def smooth_weights(V, part, segments, neighbours, width=0.02):
         if p not in D: continue
         for q in neighbours.get(p, ()):
             if q not in D or q not in col: continue
+            if p in rigid and q not in rigid: continue
             W[sel, col[q]] = np.exp(-np.maximum(D[q][sel] - D[p][sel], 0) / width)
+            if q in rigid and p not in rigid:
+                # a limb's skin next to the torso's (a shoulder by the chest, a thigh by the pelvis) blends
+                # by its distance to the torso's own vertices, over seam_width: the torso doesn't move,
+                # so without this the seam edges were stretched up to 6x
+                near = _nearest_dist(V[sel], V[part == q])
+                if near is not None:
+                    W[sel, col[q]] = np.maximum(W[sel, col[q]], np.exp(-near / seam_width))
     W[W < 0.02] = 0
     W /= np.maximum(W.sum(1, keepdims=True), 1e-9)
     return labels, W
@@ -2048,6 +2080,80 @@ if HAVE_BPY:
         return 'Model bent into the game stance and its bones assigned%s: check it with Preview' % (
             ' (bone lengths: %s)' % ', '.join(changed) if changed else '')
 
+    def hidden_faces(obj, reach, rays=32):
+        """Faces no one can see: every ray from the face's centre into its outside half-space hits the
+        model again within `reach` metres (a body under clothes, the scalp under hair, the inside of
+        the mouth or of a boot). The game has no depth buffer and sorts faces in steps of 1.5 cm, so
+        such faces draw through the layer over them. Faces facing a gap (eye holes, sleeves, the
+        neck of a top) let some ray out and stay. Returns (bmesh in world space, hidden face indices,
+        how many faces lie on another surface)."""
+        from mathutils.bvhtree import BVHTree
+        bm = bmesh.new(); bm.from_mesh(obj.data); bm.transform(obj.matrix_world)
+        bm.faces.ensure_lookup_table(); bm.normal_update()
+        tree = BVHTree.FromBMesh(bm)
+        # directions spread evenly over a sphere (Fibonacci), the same every run
+        golden = math.pi * (3.0 - math.sqrt(5.0))
+        sphere = []
+        for i in range(rays * 2):
+            y = 1.0 - (i + 0.5) / rays
+            r = math.sqrt(max(0.0, 1.0 - y * y))
+            sphere.append(Vector((math.cos(golden * i) * r, y, math.sin(golden * i) * r)))
+        hidden, lying = [], 0
+        for f in bm.faces:
+            n = f.normal
+            if n.length < 0.5: continue
+            c = f.calc_center_median() + n * 0.0008
+            seen = False
+            for d in sphere:
+                if d.dot(n) < 0.1: continue
+                hit = tree.ray_cast(c, d, reach)
+                if hit[0] is None or hit[2] == f.index:
+                    seen = True
+                    break
+            if not seen:
+                hidden.append(f.index)
+                continue
+            hit = tree.ray_cast(f.calc_center_median() - n * 0.0005, -n, 0.04)
+            if hit[0] is not None and hit[2] != f.index and bm.faces[hit[2]].normal.dot(n) > 0.5:
+                lying += 1
+        return bm, hidden, lying
+
+    def step_clean(context, remove):
+        obj = user_mesh(context)
+        s = context.scene.pe_aya
+        if context.object and context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
+        size = max(obj.dimensions)
+        if size > 5.0 or size < 0.5:
+            raise SkinError('The model is %.2f m tall: run "Fit size to reference" first (the search '
+                            'distance is in metres)' % size)
+        bm, hidden, lying = hidden_faces(obj, s.clean_reach)
+        bm.free()
+        total = len(obj.data.polygons)
+        note = ('; %d faces lie on another surface (straps, hair over the face): the export sorts them '
+                'nearer' % lying) if lying else ''
+        if not hidden:
+            return 'No hidden faces in %d%s' % (total, note)
+        keep = set(hidden)
+        if not remove:
+            for p in obj.data.polygons: p.select = p.index in keep
+            for e in obj.data.edges: e.select = False
+            for v in obj.data.vertices: v.select = False
+            for p in obj.data.polygons:
+                if p.select:
+                    for vi in p.vertices: obj.data.vertices[vi].select = True
+            for o in context.selected_objects: o.select_set(False)
+            obj.select_set(True); context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_mode(type='FACE')
+            return ('%d of %d faces are hidden (selected in Edit mode: deselect any to keep, X > Faces to '
+                    'delete, or "Remove hidden faces")%s' % (len(hidden), total, note))
+        bm = bmesh.new(); bm.from_mesh(obj.data); bm.faces.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in hidden], context='FACES_ONLY')
+        loose = [v for v in bm.verts if not v.link_faces]
+        if loose: bmesh.ops.delete(bm, geom=loose, context='VERTS')
+        bm.to_mesh(obj.data); bm.free(); obj.data.update()
+        return 'Removed %d hidden faces: %d -> %d (Ctrl+Z to undo)%s' % (len(hidden), total, total - len(hidden), note)
+
     def step_assign(context):
         game = game_for(context)
         obj = user_mesh(context)
@@ -2406,6 +2512,10 @@ if HAVE_BPY:
                                           description='Optional: one picture for the whole model (its UV map), instead of the materials\' pictures')
         hd: bpy.props.BoolProperty(name='HD texture', default=False,
                                    description='Also write texture_hd.png (used only by game builds with HD skin support)')
+        clean_reach: bpy.props.FloatProperty(name='Search distance', default=0.25, min=0.02, max=2.0, unit='LENGTH',
+                                             description='A face is hidden when every ray from it hits the model again '
+                                                         'within this distance. Larger finds more (deep inside), '
+                                                         'smaller only faces right under another layer')
 
     def run(op, fn, *a):
         try:
@@ -2425,6 +2535,10 @@ if HAVE_BPY:
     OPS = [
         _op('reference', 'Load reference', step_reference, 'Read Aya\'s skeleton and mesh from your disc'),
         _op('fit', 'Fit size to reference', step_fit, 'Join your model, apply its pose and transforms, scale and move it onto the reference'),
+        _op('clean_select', 'Select hidden faces', lambda c: step_clean(c, False),
+            'Select the faces hidden inside the model (under clothes, hair, inside the mouth) in Edit mode, to check them'),
+        _op('clean_remove', 'Remove hidden faces', lambda c: step_clean(c, True),
+            'Delete the faces hidden inside the model: they flicker through the layer over them in game'),
         _op('fitrig', 'Make fitting rig', step_fitrig, 'A copy of the skeleton to pose into a T-pose / A-pose model'),
         _op('pose', 'Pose into game stance', step_pose, 'Bend the model from the fitting rig\'s pose into the game\'s stance'),
         _op('assign', 'Assign bones', step_assign, 'Give every vertex one game bone (vertex groups)'),
@@ -2457,6 +2571,11 @@ if HAVE_BPY:
             b = L.box(); b.label(text='2. Your model')
             b.operator('pe_aya.import_dae', icon='IMPORT')
             b.prop(s, 'model'); b.operator('pe_aya.fit')
+            b = L.box(); b.label(text='Clean up (optional, after 2)')
+            b.prop(s, 'clean_reach')
+            r = b.row(align=True)
+            r.operator('pe_aya.clean_select', text='Select hidden', icon='RESTRICT_SELECT_OFF')
+            r.operator('pe_aya.clean_remove', text='Remove hidden', icon='TRASH')
             b = L.box(); b.label(text='3. Fit joints / pose a T-pose')
             b.operator('pe_aya.fitrig'); b.operator('pe_aya.pose')
             b = L.box(); b.label(text='4. Bones')

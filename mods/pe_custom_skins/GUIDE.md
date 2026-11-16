@@ -88,6 +88,23 @@ Fit size centres the model on its lower legs, so a braid, ponytail or cape doesn
 behind the body. Then check the direction: your model must **face the same way as the reference**. If not, rotate
 it (R Z 180), and apply the rotation (Ctrl+A > Rotation).
 
+## Clean up hidden faces (optional, after step 2)
+
+Ripped and game models often keep layers no one sees: the body under the clothes, the scalp under the
+hair, the inside of the mouth or of the boots. The game has no depth buffer (faces are sorted in steps
+of about 1.5 cm), so these faces draw through the layer over them and flicker as the camera moves.
+
+1. **Select hidden**: the faces where every ray from the face hits the model again within
+   **Search distance** (0.25 m) are selected in Edit mode. Look them over; deselect any you want
+   to keep (Shift+click).
+2. Delete them (X > Faces), or press **Remove hidden** to delete them all at once (Ctrl+Z undoes it).
+
+Faces facing a gap (eye holes, sleeves, the neck of a top) let a ray out and are kept. Run it after
+**Fit size** (the distance is in metres at Aya's height). The report also counts the faces lying
+on another surface (straps, a belt, hair over the ears): those stay visible, and the export sorts
+them a little nearer so they don't flicker under the surface below them (needs a game build with
+face lifts, `RENDER_FACE_LIFT` in object.c).
+
 ## Step 3: Fit the joints (and pose T-pose / A-pose models)
 
 Do this for every model whose body isn't built like Aya's, and always for T-pose and A-pose
@@ -116,6 +133,9 @@ rotations), so the joints can go where your model's are.
    joints blended over a couple of centimetres, each vertex gets its bone, and the skeleton
    `PE_Aya_Rig` is rebuilt with your model's bone lengths (the status line lists them). The fitting
    rig is removed. The export writes those lengths into the skin.
+   The chest and pelvis keep their shape: only the limbs bend. The arm's and thigh's own skin next
+   to the torso blends over about 6 cm, so a shoulder stretches a little instead of the chest
+   caving in.
 
 ## Step 4: Bones
 
@@ -252,4 +272,4 @@ information only.
 | *could not reduce the model to the budget* | Lower it yourself (Decimate modifier, or a retopology), then export again. |
 | The skin isn't in the Wardrobe | `skin.ini` and `model.bin` must be in `pe_skins/<folder>/`; mods must be on; restart the game. `pe_mods.log` beside the preferences lists the custom skins found. |
 | Patches of wrong colour in game | Skins exported before this fix: export again. (Each texel keeps a 4-bit colour number that only means something in its own palette, so UV islands that share texels now always share a palette.) |
-| Faces flicker or vanish in game | Very thin or tiny faces: lower the model's detail; remove inner layers. |
+| Faces flicker or vanish in game | Run **Clean up > Remove hidden** and export again. Otherwise very thin or tiny faces: lower the model's detail. |
