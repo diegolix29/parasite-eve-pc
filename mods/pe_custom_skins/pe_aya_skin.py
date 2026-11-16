@@ -1069,6 +1069,53 @@ def fix_spans(part, edges, tree, log=print, cost=None):
     return part
 
 
+def joint_sides(V, part, segments, log=print, shoulders=True):
+    """Skin on the wrong side of a joint goes to the bone on that side (segments: where the model
+    stands, assign_bones.segments).
+    - Shoulders: upper-arm skin on the body's side of the shoulder joint goes to the chest. The chest
+      is one line down the middle, so a wide torso's shoulders lie nearer the upper arm, and bending
+      a T-pose arm ~65 degrees down swung them into the torso. Only when bending the model into the
+      stance (shoulders=True): with the arms already down, this side of the joint is the shoulder's
+      top, which must follow the arm when Aya aims.
+    - Ankles: shin skin past the ankle joint (a boot's heel and sole) goes to the foot. The foot's
+      reach is short (a shoe, not a dress hem), so a heel behind the ankle went to the shin and tore
+      off the boot when the walk bent the ankle.
+    - Wrists: hand skin on the forearm's side of the wrist joint (a gauntlet's or glove's cuff) goes to
+      the forearm; on the hand, the cuff swung out of the arm whenever the wrist bent."""
+    part = np.array(part)
+    V = np.asarray(V, float)
+
+    def along(p):
+        h, t = segments[p]
+        ab = t - h
+        L = max(float(np.linalg.norm(ab)), 1e-9)
+        return ((V - h) @ ab) / L, L
+    do_shoulders, shoulders, ankles = shoulders, 0, 0
+    for arm in (4, 14):
+        if not do_shoulders or arm not in segments: continue
+        s, _ = along(arm)
+        sel = (part == arm) & (s < 0)
+        part[sel] = 1
+        shoulders += int(sel.sum())
+    for shin, foot in ((23, 24), (27, 28)):
+        if shin not in segments or foot not in segments: continue
+        s, L = along(shin)
+        sel = (part == shin) & (s > L)
+        part[sel] = foot
+        ankles += int(sel.sum())
+    wrists = 0
+    for fore, hand in ((5, 6), (15, 16)):
+        if fore not in segments or hand not in segments: continue
+        s, _ = along(hand)
+        sel = (part == hand) & (s < 0)
+        part[sel] = fore
+        wrists += int(sel.sum())
+    if shoulders: log('%d vertices on the body side of the shoulder joints moved to the chest' % shoulders)
+    if ankles: log('%d vertices past the ankle joints (heels, soles) moved to the feet' % ankles)
+    if wrists: log('%d vertices above the wrist joints (gauntlet and glove cuffs) moved to the forearms' % wrists)
+    return part
+
+
 def smooth_weights(V, part, segments, neighbours, width=0.02):
     """Weights for bending the model into the game stance: each vertex follows its own bone, blended
     with the bones it joins (parent / children) by how close it is to them, over `width` metres.
@@ -1866,6 +1913,57 @@ if HAVE_BPY:
         return ('Fitting rig made: %sin Pose mode turn (R) bones into your model\'s limbs and move (G) joints to its '
                 'shoulders, elbows, wrists, hips, knees and ankles, then "Pose into game stance"' % what)
 
+    def twist_leg_hinges(fit, obj, max_turn=90.0):
+        """Turn the fitting rig's thighs, shins and feet about their own length so their hinge (the
+        bone's x axis: the axis the game bends knees and ankles around) lies across the MODEL's knee
+        and toes. The game's Aya stands with her feet turned out (right knee hinge ~19 deg, right
+        ankle ~30-36 deg), and the fitting rig keeps that twist; a model with its knees and toes
+        straight ahead was then bent sideways by every walk and run. Knees: across the model's
+        front (-Y). Feet: across the model's own toe direction, from the shoe below the ankle.
+        Returns what was turned."""
+        Vw, _, _ = mesh_arrays(obj)
+        inv = np.array(fit.matrix_world.inverted())
+        V = Vw @ inv[:3, :3].T + inv[:3, 3]                 # model in the fitting rig's space
+        done = []
+
+        def turn(pb, target):
+            M = np.array(pb.matrix)
+            a = M[:3, 1] / max(np.linalg.norm(M[:3, 1]), 1e-9)      # along the bone
+            x = M[:3, 0] - (M[:3, 0] @ a) * a
+            t = np.asarray(target, float) - (np.asarray(target, float) @ a) * a
+            if np.linalg.norm(t) < 1e-6 or np.linalg.norm(x) < 1e-6: return 0.0
+            ang = math.atan2(np.cross(x, t) @ a, x @ t)
+            ang = max(-math.radians(max_turn), min(math.radians(max_turn), ang))
+            if abs(ang) < math.radians(1): return 0.0
+            head = Vector(pb.head)
+            pb.matrix = (Matrix.Translation(head) @ Matrix.Rotation(ang, 4, Vector(a.tolist()))
+                         @ Matrix.Translation(-head) @ pb.matrix)
+            bpy.context.view_layer.update()
+            return math.degrees(ang)
+        for name, (t, s_, ft) in (('left', (22, 23, 24)), ('right', (26, 27, 28))):
+            names = [bone_name(p) for p in (t, s_, ft)]
+            if not all(n in fit.pose.bones for n in names): continue
+            th, sh, fo = (fit.pose.bones[n] for n in names)
+            a1 = turn(th, (1.0, 0.0, 0.0))
+            a2 = turn(sh, (1.0, 0.0, 0.0))
+            # the shoe: the model below the ankle, near it, on this leg's side
+            ank = np.array(fo.head)
+            side = np.sign(ank[0]) or 1.0
+            dz = ank[2] - V[:, 2]
+            hd = np.linalg.norm((V - ank)[:, :2], axis=1)
+            shoe = V[(dz > 0) & (hd < 0.20) & ((V[:, 0] * side) > 0)]
+            toe = np.array([0.0, -1.0, 0.0])
+            if len(shoe) >= 6:
+                d = shoe.mean(0) - ank
+                d[2] = 0
+                if np.linalg.norm(d) > 0.01:
+                    d /= np.linalg.norm(d)
+                    if d @ toe > 0.5: toe = d                     # within 60 deg of straight ahead
+            a3 = turn(fo, (-toe[1], toe[0], 0.0))                 # across the toes
+            if any(abs(v) >= 1 for v in (a1, a2, a3)):
+                done.append('%s knee %+.0f / ankle %+.0f deg' % (name, a2 + a1, a3))
+        return done
+
     def step_pose(context):
         game = game_for(context)
         obj = user_mesh(context)
@@ -1873,14 +1971,24 @@ if HAVE_BPY:
         rig = bpy.data.objects.get(RIG)
         if not fit or not rig: raise SkinError('Make the fitting rig first')
         if context.object and context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
+        hinges = twist_leg_hinges(fit, obj)
+        if hinges: print('leg hinges turned to the model\'s knees and toes: ' + ', '.join(hinges))
+
+        def fit_matrix(pb):
+            """Where the fitting rig has a bone, without scale: a bone scaled (S) instead of its joint
+            moved (G) would scale its whole part of the model (arms 1.3x thicker); lengths come from
+            where the joints are, not from scale."""
+            loc, rot, _ = (fit.matrix_world @ pb.matrix).decompose()
+            return Matrix.LocRotScale(loc, rot, None)
         Dm = {}
         for pb in fit.pose.bones:
             p = part_of_name(pb.name)
             if p is None: continue
-            D = fit.matrix_world @ pb.matrix @ rig.data.bones[pb.name].matrix_local.inverted() @ rig.matrix_world.inverted()
+            D = fit_matrix(pb) @ rig.data.bones[pb.name].matrix_local.inverted() @ rig.matrix_world.inverted()
             Dm[p] = np.array(D)
         V, N, E = mesh_arrays(obj)
         part = assign_bones(V, N, E, rest_segments(game), side_left(game), log=print, deform=lambda p: Dm[p], tree=major_tree(game))
+        part = joint_sides(V, part, assign_bones.segments, log=print)
         nbr = {}
         for p in AUTO:
             q = game.parent[p]
@@ -1892,7 +2000,7 @@ if HAVE_BPY:
         F = {}
         for pb in fit.pose.bones:
             p = part_of_name(pb.name)
-            if p is not None: F[p] = np.array(fit.matrix_world @ pb.matrix)
+            if p is not None: F[p] = np.array(fit_matrix(pb))
         heads = {p: F[p][:3, 3] for p in F}
         caxis = {p: -F[p][:3, 1] / max(np.linalg.norm(F[p][:3, 1]), 1e-9) for p in F}   # bone y = -game z
         before = list(game.oz)
@@ -1941,6 +2049,7 @@ if HAVE_BPY:
         if context.object and context.object.mode != 'OBJECT': bpy.ops.object.mode_set(mode='OBJECT')
         V, N, E = mesh_arrays(obj)
         part = assign_bones(V, N, E, rest_segments(game), side_left(game), log=print, tree=major_tree(game))
+        part = joint_sides(V, part, assign_bones.segments, log=print, shoulders=False)
         write_groups(obj, part)
         attach_to_rig(obj)
         return 'Bones assigned (%d vertices). Fix any in Edit mode: select, Vertex Groups > Assign' % len(V)
