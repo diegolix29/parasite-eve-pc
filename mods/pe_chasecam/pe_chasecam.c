@@ -12,6 +12,7 @@
  * read where they would have gone). Battles draw through their own pass and keep the room
  * camera. */
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2965,6 +2966,9 @@ static void emit_split(const TV *a, const TV *b, const TV *c, const TriJob *job,
 /* this frame's sort distance per surface (surf_depths): walls and tops their average view z, floors and
  * the ceiling their farthest; 0 unseen */
 static float s_surf_maxz[MAX_SURFACES];
+/* 1: an actor moved this surface's sort distance this frame (actor_sort); its flat colour and images
+ * then sort by s_surf_maxz like its pieces, whatever its kind */
+static u8 s_surf_pushed[MAX_SURFACES];
 
 /* A surface in flat colour: the floor where the room camera shows nothing, and walls. */
 static void draw_surface(const Surface *s) {
@@ -2980,7 +2984,8 @@ static void draw_surface(const Surface *s) {
     float maxz = 0;
     for (int k = 0; k < n; ++k) if (poly[k].v[2] > maxz) maxz = poly[k].v[2];
     /* the same sort key as the surface's textured pieces (surf_depths) */
-    if ((s->wall == 1 || s->wall == SURF_CAP) && s - s_surf < s_surf_count && s_surf_maxz[s - s_surf] > 0)
+    if (s - s_surf < s_surf_count && (s->wall == 1 || s->wall == SURF_CAP || s_surf_pushed[s - s_surf]) &&
+        s_surf_maxz[s - s_surf] > 0)
         maxz = s_surf_maxz[s - s_surf];
     int r, g, b, depth;
     if (s->wall) {
@@ -3074,10 +3079,368 @@ static void surf_depths(void) {
                 skip = 1;
             } else if (lod > 0 && s_surf_pieces[i] > 4) {
                 float area = 0.5f * fabsf((x[1] - x[0]) * (y[2] - y[0]) - (y[1] - y[0]) * (x[2] - x[0]));
-                skip = area < lod * (float)s_surf_pieces[i];
+                /* hysteresis: a surface near the threshold switched between textured and flat
+                 * colour every frame as the camera moved (room 121: hundreds a frame) */
+                float thr = lod * (float)s_surf_pieces[i] * (s_surf_skip[i] ? 1.4f : 0.7f);
+                skip = area < thr;
             }
         }
         s_surf_skip[i] = skip;
+    }
+}
+
+/* ================= actors against the room: sort fix and flicker log ================= */
+/* PsyZ has no depth buffer: the game links each model polygon at its own average view z / 4 (one slot
+ * = 4 units = 1.5 cm; 272 game units are a metre), the chase camera links each room surface at ONE slot
+ * (surf_depths). A wall triangle running past an actor sorts by its average, so the actor's polygons on
+ * either side of that slot flipped in front of and behind the wall as the camera turned. Each frame,
+ * before the actors draw (phase 0), the walls and obstacle tops next to an actor (whole wall edges, all
+ * their triangles alike) move to the actor's side of their plane: behind the actor when the actor
+ * stands between them and the camera, in front when they stand between. Floors and the ceiling keep
+ * their bands (moving them broke the stairs and the ceiling). F1 "Actor sorting" turns it off to
+ * compare; "Flicker log" writes what flips, frame by frame, to chasecam_flicker.log beside the settings. */
+#define ACTOR_R 110.0f      /* actor half width at scale 1 (about 40 cm) */
+#define ACTOR_H 540.0f      /* actor height above its feet at scale 1 (Aya is about 515) */
+#define ACTOR_NEAR 220.0f   /* walls farther than this from the actor's box keep their own sort */
+#define SORT_BEHIND 96.0f   /* view z past the actor's farthest point: wall slot - layers still behind */
+#define SORT_FRONT 168.0f   /* view z before the actor's nearest point: wall slot + images still in front */
+#define MAX_SORT_ACTORS 24
+#define FLOG_PER_SECOND 120
+typedef struct { float c[3], r, h, zmin, zmax, x0, y0, x1, y1; int amin, amax; } SortActor;
+static SortActor s_sort_actors[MAX_SORT_ACTORS];
+static int s_sort_actor_count;
+static int s_actor_sort = 1; /* F1 "Actor sorting" */
+static int s_flicker_log;    /* F1 "Flicker log" */
+/* this frame's limits per wall edge / obstacle top: sort distance at least lo, at most hi */
+static float s_edge_lo[MAX_WALLS], s_edge_hi[MAX_WALLS], s_top_lo[MAX_LOOPS], s_top_hi[MAX_LOOPS];
+static signed char s_edge_by[MAX_WALLS], s_top_by[MAX_LOOPS]; /* actor that set lo (-1 none) */
+
+static FILE *s_flog;
+static unsigned s_flog_second, s_flog_lines, s_flog_dropped;
+static unsigned s_flog_frames, s_flog_pushes, s_flog_conflicts, s_flog_straddles, s_flog_skips;
+/* last frame's state per surface: bit 0 skipped (far detail), 1 pushed behind, 2 pulled in front,
+ * 3 straddled by an actor */
+static u8 s_flog_prev[MAX_SURFACES];
+static int s_flog_room = -1, s_flog_surf_count = -1, s_flog_textured = -1;
+static unsigned s_flog_piece_key, s_flog_xvalid;
+
+static void flog(const char *fmt, ...) {
+    if (!s_flicker_log) return;
+    if (!s_flog) {
+        char path[1024];
+        if (pe_mod_path(path, sizeof path, "chasecam_flicker.log") != 0) return;
+        s_flog = fopen(path, "a");
+        if (!s_flog) {
+            pe_mod_log(MOD_ID, "flicker log: can't open %s", path);
+            s_flicker_log = 0;
+            return;
+        }
+        fprintf(s_flog, "--- flicker log on, frame %u, room %d, actor sorting %s, far detail %d\n", s_frame,
+                pe_room_number(), s_actor_sort ? "on" : "off", s_far_detail);
+        pe_mod_log(MOD_ID, "flicker log: %s", path);
+        s_flog_second = s_frame / 60;
+    }
+    unsigned sec = s_frame / 60;
+    if (sec != s_flog_second) {
+        if (s_flog_dropped)
+            fprintf(s_flog, "f=%u ... %u more lines in the last second (limit %d a second)\n", s_frame,
+                    s_flog_dropped, FLOG_PER_SECOND);
+        s_flog_second = sec;
+        s_flog_lines = s_flog_dropped = 0;
+        fflush(s_flog);
+    }
+    if (s_flog_lines >= FLOG_PER_SECOND) {
+        s_flog_dropped++;
+        return;
+    }
+    s_flog_lines++;
+    fprintf(s_flog, "f=%u room=%d ", s_frame, pe_room_number());
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(s_flog, fmt, ap);
+    va_end(ap);
+    fputc('\n', s_flog);
+}
+
+/* once a frame (on_frame): close the file when the row is turned off; a summary every 5 seconds,
+ * written even past the line limit */
+static void flog_tick(void) {
+    if (!s_flicker_log) {
+        if (s_flog) {
+            fprintf(s_flog, "--- flicker log off, frame %u\n", s_frame);
+            fclose(s_flog);
+            s_flog = NULL;
+        }
+        return;
+    }
+    if (++s_flog_frames >= 300) {
+        if (s_flog_lines >= FLOG_PER_SECOND) s_flog_lines = FLOG_PER_SECOND - 1;
+        flog("summary 300 frames: %u wall sort moves, %u conflicts, %u straddles, %u far-detail switches, "
+             "%d actors, %d surfaces", s_flog_pushes, s_flog_conflicts, s_flog_straddles, s_flog_skips,
+             s_sort_actor_count, s_surf_count);
+        s_flog_frames = s_flog_pushes = s_flog_conflicts = s_flog_straddles = s_flog_skips = 0;
+    }
+}
+
+static const char *surf_kind(const Surface *s) {
+    return s->wall == 1 ? "wall" : s->wall == 2 ? "ceiling" : s->wall == SURF_CAP ? "top" : "floor";
+}
+
+/* the actors the game draws as models this frame, as boxes seen from the chase camera */
+static void gather_sort_actors(void) {
+    s_sort_actor_count = 0;
+    for (const FieldActor *a = g_FieldActorListHead; a && s_sort_actor_count < MAX_SORT_ACTORS; a = a->next) {
+        if (a->flags & 0x20000040) continue; /* not drawn as a model (frame_update.c) */
+        if (a == g_PlayerEntity && (g_GameState.flags & 0x40000)) continue;
+        if (a->render_object.header == 0 || a->render_object.draw_count == 0) continue;
+        float scale = a->move_speed ? (float)a->move_speed / 4096.0f : 1.0f;
+        scale = clampf(scale, 0.25f, 4.0f);
+        float r = ACTOR_R * scale, h = ACTOR_H * scale;
+        float fx = (float)(a->pos_x >> 16), fy = (float)(a->pos_y >> 16), fz = (float)(a->pos_z >> 16);
+        SortActor *s = &s_sort_actors[s_sort_actor_count];
+        s->zmin = 1e30f;
+        s->zmax = -1e30f;
+        s->x0 = s->y0 = 1e30f;
+        s->x1 = s->y1 = -1e30f;
+        int behind = 0;
+        for (int k = 0; k < 8; ++k) {
+            V3 p = {fx + ((k & 1) ? r : -r), fy - ((k & 2) ? h : 0.0f), fz + ((k & 4) ? r : -r)};
+            float v[3];
+            to_view(&p, v);
+            if (v[2] < s->zmin) s->zmin = v[2];
+            if (v[2] > s->zmax) s->zmax = v[2];
+            if (v[2] < NEAR_Z) { behind = 1; continue; }
+            float x = 160.0f + s_h * v[0] / v[2], y = s_cy + s_h * v[1] / v[2];
+            if (x < s->x0) s->x0 = x;
+            if (x > s->x1) s->x1 = x;
+            if (y < s->y0) s->y0 = y;
+            if (y > s->y1) s->y1 = y;
+        }
+        /* a box the camera is in (or behind the camera) can't be ordered against walls */
+        if (behind) continue;
+        if (s->x1 < 0 || s->x0 > 320 || s->y1 < 0 || s->y0 > 224) continue;
+        s->c[0] = fx;
+        s->c[1] = fy - h * 0.5f;
+        s->c[2] = fz;
+        s->r = r;
+        s->h = h;
+        s->amin = (int)(s->zmin / 4.0f);
+        s->amax = (int)(s->zmax / 4.0f);
+        s_sort_actor_count++;
+    }
+}
+
+/* squared distance from p to triangle abc (Ericson, Real-Time Collision Detection 5.1.5) */
+static float tri_dist2(const float p[3], const V3 *ta, const V3 *tb, const V3 *tc) {
+    float a[3] = {ta->x, ta->y, ta->z}, b[3] = {tb->x, tb->y, tb->z}, c[3] = {tc->x, tc->y, tc->z};
+    float ab[3], ac[3], ap[3], q[3];
+    for (int i = 0; i < 3; ++i) { ab[i] = b[i] - a[i]; ac[i] = c[i] - a[i]; ap[i] = p[i] - a[i]; }
+#define DOT3(u, v) ((u)[0] * (v)[0] + (u)[1] * (v)[1] + (u)[2] * (v)[2])
+    float d1 = DOT3(ab, ap), d2 = DOT3(ac, ap);
+    if (d1 <= 0 && d2 <= 0) { for (int i = 0; i < 3; ++i) q[i] = a[i]; goto done; }
+    float bp[3]; for (int i = 0; i < 3; ++i) bp[i] = p[i] - b[i];
+    float d3 = DOT3(ab, bp), d4 = DOT3(ac, bp);
+    if (d3 >= 0 && d4 <= d3) { for (int i = 0; i < 3; ++i) q[i] = b[i]; goto done; }
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+        float v = d1 / (d1 - d3);
+        for (int i = 0; i < 3; ++i) q[i] = a[i] + v * ab[i];
+        goto done;
+    }
+    float cp[3]; for (int i = 0; i < 3; ++i) cp[i] = p[i] - c[i];
+    float d5 = DOT3(ab, cp), d6 = DOT3(ac, cp);
+    if (d6 >= 0 && d5 <= d6) { for (int i = 0; i < 3; ++i) q[i] = c[i]; goto done; }
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+        float w = d2 / (d2 - d6);
+        for (int i = 0; i < 3; ++i) q[i] = a[i] + w * ac[i];
+        goto done;
+    }
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        for (int i = 0; i < 3; ++i) q[i] = b[i] + w * (c[i] - b[i]);
+        goto done;
+    }
+    {
+        float den = 1.0f / (va + vb + vc), v = vb * den, w = vc * den;
+        for (int i = 0; i < 3; ++i) q[i] = a[i] + ab[i] * v + ac[i] * w;
+    }
+done:;
+    float d[3] = {p[0] - q[0], p[1] - q[1], p[2] - q[2]};
+    return DOT3(d, d);
+#undef DOT3
+}
+
+/* the slot a wall's pieces take at sort distance z, roughly (layers average out) */
+static int wall_slot(float z) { return wall_depth(z) - 8; }
+
+/* the limits of the edge / top a surface belongs to, or NULL (floors, ceiling, strips) */
+static int surf_group(const Surface *s, float **lo, float **hi, signed char **by) {
+    if (s->wall == 1 && s->src < MAX_WALLS) {
+        *lo = &s_edge_lo[s->src]; *hi = &s_edge_hi[s->src]; *by = &s_edge_by[s->src];
+        return 1;
+    }
+    if (s->wall == SURF_CAP && s->src < MAX_LOOPS) {
+        *lo = &s_top_lo[s->src]; *hi = &s_top_hi[s->src]; *by = &s_top_by[s->src];
+        return 1;
+    }
+    return 0;
+}
+
+/* Runs after surf_depths, before anything is linked. */
+static void actor_sort(void) {
+    int n = s_surf_count;
+    memset(s_surf_pushed, 0, (size_t)n);
+    gather_sort_actors();
+    int room = pe_room_number();
+    int logging = s_flicker_log;
+    if (logging && (room != s_flog_room || n != s_flog_surf_count)) {
+        flog("mesh: %d surfaces (%d floor), %d walls, %d actors drawn", n, s_floor_surf_count, s_wall_count,
+             s_sort_actor_count);
+        memset(s_flog_prev, 0, sizeof s_flog_prev);
+        for (int i = 0; i < n; ++i) s_flog_prev[i] = s_surf_skip[i];
+        s_flog_room = room;
+        s_flog_surf_count = n;
+    }
+    for (int i = 0; i < MAX_WALLS; ++i) { s_edge_lo[i] = 0; s_edge_hi[i] = 1e30f; s_edge_by[i] = -1; }
+    for (int i = 0; i < MAX_LOOPS; ++i) { s_top_lo[i] = 0; s_top_hi[i] = 1e30f; s_top_by[i] = -1; }
+    int straddles = 0, straddle_first = -1, straddle_actor = -1;
+    /* pass 1: what each actor needs of the walls and tops next to it, per edge / top */
+    if (s_sort_actor_count > 0) {
+        float cam[3] = {s_cam[0], s_cam[1], s_cam[2]};
+        for (int i = s_floor_surf_count; i < n; ++i) {
+            const Surface *s = &s_surf[i];
+            float *lo, *hi;
+            signed char *by;
+            if (s_surf_maxz[i] <= 0 || !surf_group(s, &lo, &hi, &by)) continue;
+            float sx0 = 1e30f, sy0 = 1e30f, sx1 = -1e30f, sy1 = -1e30f;
+            int screen_all = 0;
+            for (int k = 0; k < 3; ++k) {
+                float v[3];
+                to_view(&s->v[k], v);
+                if (v[2] < NEAR_Z) { screen_all = 1; continue; }
+                float x = 160.0f + s_h * v[0] / v[2], y = s_cy + s_h * v[1] / v[2];
+                if (x < sx0) sx0 = x;
+                if (x > sx1) sx1 = x;
+                if (y < sy0) sy0 = y;
+                if (y > sy1) sy1 = y;
+            }
+            float e1[3] = {s->v[1].x - s->v[0].x, s->v[1].y - s->v[0].y, s->v[1].z - s->v[0].z};
+            float e2[3] = {s->v[2].x - s->v[0].x, s->v[2].y - s->v[0].y, s->v[2].z - s->v[0].z};
+            float nrm[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+            float dc = nrm[0] * (cam[0] - s->v[0].x) + nrm[1] * (cam[1] - s->v[0].y) + nrm[2] * (cam[2] - s->v[0].z);
+            int slot = wall_slot(s_surf_maxz[i]);
+            for (int a = 0; a < s_sort_actor_count; ++a) {
+                const SortActor *ac = &s_sort_actors[a];
+                if (!screen_all && (ac->x1 < sx0 || ac->x0 > sx1 || ac->y1 < sy0 || ac->y0 > sy1)) continue;
+                float reach = ACTOR_NEAR + ac->r + ac->h * 0.5f;
+                if (tri_dist2(ac->c, &s->v[0], &s->v[1], &s->v[2]) > reach * reach) continue;
+                if (slot >= ac->amin && slot <= ac->amax) {
+                    if (!straddles++) { straddle_first = i; straddle_actor = a; }
+                    if (logging && !s_actor_sort) s_flog_prev[i] |= 0x10; /* this frame */
+                }
+                float da = nrm[0] * (ac->c[0] - s->v[0].x) + nrm[1] * (ac->c[1] - s->v[0].y) +
+                           nrm[2] * (ac->c[2] - s->v[0].z);
+                if (da * dc > 0) {
+                    /* the actor stands between the camera and the wall: the wall goes behind */
+                    if (ac->zmax + SORT_BEHIND > *lo) { *lo = ac->zmax + SORT_BEHIND; *by = (signed char)a; }
+                } else if (da * dc < 0) {
+                    /* the wall stands between the camera and the actor: it goes in front */
+                    float z = ac->zmin - SORT_FRONT;
+                    if (z < NEAR_Z) z = NEAR_Z;
+                    if (z < *hi) *hi = z;
+                }
+            }
+        }
+    }
+    /* pass 2: every triangle of an edge / top takes its limits */
+    int moved = 0, moved_first = -1, moved_by = -1, conflicts = 0, changed = 0;
+    int skips = 0, skip_first = -1, to_flat = 0;
+    for (int i = 0; i < n; ++i) {
+        const Surface *s = &s_surf[i];
+        u8 state = s_surf_skip[i];
+        float *lo, *hi;
+        signed char *by;
+        if (s_actor_sort && s_sort_actor_count > 0 && s_surf_maxz[i] > 0 && surf_group(s, &lo, &hi, &by) &&
+            (*lo > 0 || *hi < 1e29f)) {
+            float z = s_surf_maxz[i], before = z;
+            if (*lo > *hi) {
+                /* one actor in front of it, another behind: the actor in front wins */
+                z = z < *lo ? *lo : z;
+                if (logging && !(s_flog_prev[i] & 0x20)) conflicts++;
+                state |= 0x20;
+            } else {
+                if (z < *lo) z = *lo;
+                if (z > *hi) z = *hi;
+            }
+            if (z != before) {
+                s_surf_maxz[i] = z;
+                s_surf_pushed[i] = 1;
+                state |= z > before ? 2 : 4;
+                if (!moved++) { moved_first = i; moved_by = *by; }
+            }
+        }
+        if (logging) {
+            if ((s_flog_prev[i] & 0x10) && !s_actor_sort) state |= 8;
+            if ((s_flog_prev[i] ^ state) & 1) {
+                if (!skips++) skip_first = i;
+                to_flat += state & 1;
+            }
+            if ((s_flog_prev[i] ^ state) & 6) changed++;
+            s_flog_prev[i] = state;
+        }
+    }
+    if (!logging) return;
+    if (skips) {
+        s_flog_skips += (unsigned)skips;
+        flog("far detail: %d surfaces switched (%d to flat colour, %d to textured), first %s %d",
+             skips, to_flat, skips - to_flat, surf_kind(&s_surf[skip_first]), skip_first);
+    }
+    if (changed) {
+        s_flog_pushes += (unsigned)changed;
+        if (moved)
+            flog("actor sort: %d wall/top triangles moved (%d changed this frame), first %s %d (edge %u) "
+                 "by actor %d slots %d..%d", moved, changed, surf_kind(&s_surf[moved_first]), moved_first,
+                 (unsigned)s_surf[moved_first].src, moved_by,
+                 moved_by >= 0 ? s_sort_actors[moved_by].amin : 0, moved_by >= 0 ? s_sort_actors[moved_by].amax : 0);
+        else
+            flog("actor sort: walls back to their own slots");
+    }
+    if (conflicts) {
+        s_flog_conflicts += (unsigned)conflicts;
+        flog("actor sort: %d wall triangles have an actor in front and another behind", conflicts);
+    }
+    if (straddles && !s_actor_sort) {
+        static unsigned last;
+        s_flog_straddles += (unsigned)straddles;
+        if (s_frame - last >= 10) {
+            last = s_frame;
+            flog("straddle: %d wall/top triangles sort inside an actor's slots (would flicker), first %s %d "
+                 "slot %d, actor %d slots %d..%d", straddles, surf_kind(&s_surf[straddle_first]), straddle_first,
+                 wall_slot(s_surf_maxz[straddle_first]), straddle_actor, s_sort_actors[straddle_actor].amin,
+                 s_sort_actors[straddle_actor].amax);
+        }
+    }
+}
+
+/* draw_room_body: the room's own state changes that show as a whole-room flicker */
+static void flog_room_state(int textured) {
+    if (!s_flicker_log) return;
+    if (textured != s_flog_textured) {
+        if (s_flog_textured >= 0)
+            flog("textures %s: tiles %d, read at frame %u (%s)", textured ? "back" : "OFF this frame (flat colours)",
+                 s_tile_count, s_tile_frame,
+                 !s_textures ? "Room textures off" : s_tile_count <= 0 ? "no tiles" : "tiles older than 2 frames");
+        s_flog_textured = textured;
+    }
+    if (s_piece_key != s_flog_piece_key) {
+        flog("pieces rebuilt: %d pieces, key %08X", s_piece_count, s_piece_key);
+        s_flog_piece_key = s_piece_key;
+    }
+    if (s_xvalid_version != s_flog_xvalid) {
+        flog("other cameras' tiles dropped (their video memory changed): surfaces may switch camera");
+        s_flog_xvalid = s_xvalid_version;
     }
 }
 
@@ -3117,7 +3480,27 @@ static void draw_piece(const Piece *pc) {
     int floor_d = pc->surf < s_surf_count && s_surf_raised[pc->surf] ? raised_floor_depth(maxz) : floor_depth(maxz);
     int depth = clamp_depth((pc->wall ? wall_depth(maxz) - (pc->wall == SURF_CAP ? 4 : 0) : floor_d) - layer);
     if (s_semi_pass) {
-        depth = clamp_depth(depth & ~(SEMI_BAND - 1));
+        /* Rounding to the band's near edge would pull the piece over an actor standing up to
+         * SEMI_BAND slots in front of it (glass, shadows painted over Aya): stop just behind it. */
+        int banded = depth & ~(SEMI_BAND - 1);
+        if (s_actor_sort && banded < depth) {
+            float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+            for (int k = 0; k < n; ++k) {
+                float x = 160.0f + s_h * poly[k].v[0] / poly[k].v[2], y = s_cy + s_h * poly[k].v[1] / poly[k].v[2];
+                if (x < x0) x0 = x;
+                if (x > x1) x1 = x;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+            for (int a = 0; a < s_sort_actor_count; ++a) {
+                const SortActor *ac = &s_sort_actors[a];
+                if (ac->amax < banded || ac->amin > depth) continue;
+                if (ac->x1 < x0 || ac->x0 > x1 || ac->y1 < y0 || ac->y0 > y1) continue;
+                int stop = ac->amax + 2;
+                banded = stop > depth ? depth : stop > banded ? stop : banded;
+            }
+        }
+        depth = clamp_depth(banded);
         s_semi_mask |= UINT64_C(1) << ((depth / SEMI_BAND) & 63);
         s_perf.semi++;
     }
@@ -4041,7 +4424,8 @@ static void draw_flat_image(const Surface *s, int img, const Adjust *adj, int on
             /* This repeat's columns; draw_image_poly cuts the rows. */
             int n = clip_iv(a, 3, b, 0, 0, 1); if (n < 3) continue;
             n = clip_iv(b, n, a, 0, (float)im->tw, 0); if (n < 3) continue;
-            s_img_sort_z = s->wall == SURF_CAP && s - s_surf < s_surf_count ? s_surf_maxz[s - s_surf] : 0;
+            s_img_sort_z = s - s_surf < s_surf_count && (s->wall == SURF_CAP || s_surf_pushed[s - s_surf])
+                               ? s_surf_maxz[s - s_surf] : 0;
             draw_image_poly(im, a, n, on_floor);
             s_img_sort_z = 0;
         }
@@ -4267,6 +4651,8 @@ static void draw_room_body(void) {
     int ceil_ok = ceiling_visible();
     s_semi_mask = 0;
     surf_depths(); /* the flat surfaces sort by it too */
+    actor_sort();  /* surfaces near actors move to the actor's side */
+    flog_room_state(textured);
     if (textured) {
         /* Semi-transparent pieces first (see SEMI_BAND): linked first = drawn last in a slot. */
         s_semi_pass = 1;
@@ -5645,6 +6031,7 @@ static int on_frame(void *ctx, void *user) {
     (void)user;
     s_frame++;
     perf_log();
+    flog_tick();
     read_keys();
     float mdx = s_mouse_dx, mdy = s_mouse_dy, wheel = s_wheel;
     s_mouse_dx = s_mouse_dy = s_wheel = 0;
@@ -5652,6 +6039,9 @@ static int on_frame(void *ctx, void *user) {
         release_angles();
         return 0;
     }
+    if (s_flicker_log && s_drawn_frame && s_frame - s_drawn_frame == 2)
+        flog("field pass not drawn last frame (game flags %08X; battles, menus and movies skip it)",
+             (unsigned)g_GameState.flags);
     if (s_place_behind) {
         s_yaw = aya_yaw_behind();
         s_pitch = 0.30f;
@@ -5798,6 +6188,14 @@ static int chasecam_init(void) {
                             "Far surfaces whose texture pieces would be tiny on screen get their average "
                             "colour instead: Full always textures, Balanced (pieces under 2 pixels), "
                             "Fast (under 6 pixels) for long rooms.", &s_far_detail, kFarDetail, 3);
+    pe_menu_register_toggle(0, "Actor sorting",
+                            "Walls and obstacle tops next to Aya and the NPCs sort on the actor's side "
+                            "of them, so models stop flickering through walls. Off: the old sort.",
+                            &s_actor_sort, NULL);
+    pe_menu_register_toggle(0, "Flicker log",
+                            "Write what flips each frame (surface sort, far detail, textures off, "
+                            "rebuilds) to chasecam_flicker.log beside the settings.",
+                            &s_flicker_log, NULL);
     pe_menu_register_choice(0, "Other cameras",
                             "Rooms with several cameras: texture each surface from the camera that "
                             "shows it sharpest, or from the room camera first and the others only "

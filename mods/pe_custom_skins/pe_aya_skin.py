@@ -645,6 +645,7 @@ def write_skin(game, mesh, atlas, out_dir, name, key, log, hd_size=0):
     # with its last corner twice), so they stay over the face instead of flickering under it.
     overlay = mesh.get('overlay') or [False] * len(faces)
     outer = mesh.get('outer') or [0.0] * len(faces)
+    lift = mesh.get('lift') or [0] * len(faces)
     front, quads, tris = [], [], []
     for fi, f in enumerate(faces):
         vi = [new_index[a] for a, _ in f]
@@ -655,13 +656,13 @@ def write_skin(game, mesh, atlas, out_dir, name, key, log, hd_size=0):
         if overlay[fi]:
             if len(f) == 3: vi, uv = vi + vi[2:], uv + uv[2:]
             o = [0, 1, 3, 2] if game.order_outward else [1, 0, 2, 3]
-            front.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl)))
+            front.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl, lift[fi])))
         elif len(f) == 4:
             o = [0, 1, 3, 2] if game.order_outward else [1, 0, 2, 3]
-            quads.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl)))
+            quads.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl, lift[fi])))
         else:
             o = [0, 1, 2] if game.order_outward else [0, 2, 1]
-            tris.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl)))
+            tris.append((-outer[fi], ([vi[j] for j in o], [uv[j] for j in o], cl, lift[fi])))
     # outer layers first (farther from their bone: hair over the face, a jacket over the dress), so in a
     # tie they are drawn on top of what lies under them
     srt = lambda lst: [x for _, x in sorted(lst, key=lambda t: t[0])]
@@ -669,6 +670,9 @@ def write_skin(game, mesh, atlas, out_dir, name, key, log, hd_size=0):
     quads = front + quads
     if front:
         log('%d faces of small pieces (eyes, decals) drawn first, on top' % len(front))
+    if any(lift):
+        log('%d faces lying on another surface (straps, hair over the face) sort %d slots nearer' %
+            (sum(1 for x in lift if x), max(lift)))
     if len(quads) + len(tris) > 65535:
         raise SkinError('%d faces: the game format allows 65,535' % (len(quads) + len(tris)))
     NB = dict(header=bytearray(G['header']))
@@ -680,8 +684,9 @@ def write_skin(game, mesh, atlas, out_dir, name, key, log, hd_size=0):
     NB['verts'] = verts_out
     NB['colours'] = [0x808080] * len(verts_out)
     NB['desc'], NB['packets'] = [], []
-    for (vi, uv, cl), kind in [(q, QUAD_KIND) for q in quads] + [(t, TRI_KIND) for t in tris]:
-        d = bytearray(12); d[0:4] = bytes([0x80, 0x80, 0x80, kind])
+    for (vi, uv, cl, lf), kind in [(q, QUAD_KIND) for q in quads] + [(t, TRI_KIND) for t in tris]:
+        # unused bytes: 'P' 'B' n = sort n slots nearer (game builds with RENDER_FACE_LIFT, object.c)
+        d = bytearray(12); d[0:4] = bytes([0x50, 0x42, lf, kind] if lf else [0x80, 0x80, 0x80, kind])
         for k, x in enumerate(vi): struct.pack_into('<H', d, 4 + 2 * k, x)
         NB['desc'].append(d)
         pkt = bytearray(16 if len(vi) == 4 else 12)
@@ -2137,6 +2142,29 @@ if HAVE_BPY:
         c = mat.diffuse_color if mat else (0.8, 0.8, 0.8, 1)
         return np.tile(np.array([c[0] * 255, c[1] * 255, c[2] * 255, 255], np.uint8), (8, 8, 1))
 
+    def lying_faces(me):
+        """Sort lift per face (0 = none): faces lying on another surface of the model facing the same
+        way, closer than LIFT_GAP (a strap on the belly, hair over the ear, a belt on the skirt). The
+        game sorts each face by its own average depth in steps of 1.5 cm with no depth buffer, so such
+        a face and the bigger face under it traded places as the camera turned (flicker). The upper
+        face sorts LIFT_SLOTS nearer; whatever is farther than LIFT_GAP keeps the plain sort."""
+        from mathutils.bvhtree import BVHTree
+        LIFT_GAP = 0.04     # metres in the model (the skin is scaled to Aya's 1.9 m)
+        LIFT_SLOTS = 4      # about 6 cm
+        bm = bmesh.new(); bm.from_mesh(me); bm.faces.ensure_lookup_table()
+        tree = BVHTree.FromBMesh(bm)
+        lift = [0] * len(bm.faces)
+        for f in bm.faces:
+            n = f.normal
+            if n.length < 0.5: continue
+            for c in [f.calc_center_median()] + [v.co * 0.5 + f.calc_center_median() * 0.5 for v in f.verts]:
+                hit = tree.ray_cast(c - n * 0.0005, -n, LIFT_GAP)
+                if hit[0] is not None and hit[2] != f.index and bm.faces[hit[2]].normal.dot(n) > 0.5:
+                    lift[f.index] = LIFT_SLOTS
+                    break
+        bm.free()
+        return lift
+
     def small_pieces(me):
         """Vertex mask of the mesh's small separate pieces (eyes, brows, buttons, earrings): pieces with
         under 5% of the vertices. They lie on a surface: decimation must keep them and the game must
@@ -2348,7 +2376,9 @@ if HAVE_BPY:
                 pb = int(np.bincount(ps).argmax())
                 c = co[vs].mean(0)[None]
                 outer.append(float(seg_dist(c, *segs[pb])[0][0]) if pb in segs else 0.0)
-            info = write_skin(game, dict(verts=co, normals=nr, part=vp, faces=faces, overlay=overlay, outer=outer), atlas, out, name, key, log,
+            lift = lying_faces(me)
+            info = write_skin(game, dict(verts=co, normals=nr, part=vp, faces=faces, overlay=overlay, outer=outer,
+                                         lift=lift), atlas, out, name, key, log,
                               hd_size=A if s.hd else 0)
             check_skin(out, game.NP)
         finally:

@@ -1456,6 +1456,12 @@ typedef union RenderPacketAddress {
 } RenderPacketAddress;
 
 #define RENDER_TAG(p) ((RenderNativeTag *)(p))
+/* Custom skins (mods/pe_custom_skins): a face lying on another surface of the same model (a strap on
+ * the skin, hair over the ear) carries 'P' 'B' n in its descriptor's unused first bytes and sorts n
+ * slots nearer, so the two stop trading places as the camera turns. The game's own models keep 0x80
+ * there and are not touched. */
+#define RENDER_FACE_LIFT(record) \
+    ((record)->reserved00[0] == 0x50 && (record)->reserved00[1] == 0x42 ? (int)(record)->reserved00[2] : 0)
 #define RENDER_ADDPRIM(ot, packet) \
     (RENDER_TAG((packet).bytes)->address = RENDER_TAG(ot)->address, \
      RENDER_TAG(ot)->address = (packet).word)
@@ -1501,6 +1507,8 @@ void Render_DrawTexturedQuads(RenderObjectEntity *entity) {
             depth += z[c];
             depth += z[d];
             depth >>= 4;
+            depth -= RENDER_FACE_LIFT(record);
+            if (depth < 0) depth = 0;
             if (depth < 0x1000) {
                 RenderPacket34 *pkt = (RenderPacket34 *)packet.bytes;
                 u32 xy3 = xy[d];
@@ -1541,6 +1549,8 @@ void Render_DrawTexturedQuads(RenderObjectEntity *entity) {
         if (Psyz_GtePgxpNclip3(&xy[a], xy0, &xy[b], xy1, &xy[c], xy2, *area) > 0) {
             int depth = z[a] + z[b] + z[c];
             depth = depth / 3 >> 2;
+            depth -= RENDER_FACE_LIFT(record);
+            if (depth < 0) depth = 0;
             if (depth < 0x1000) {
                 RenderPacket28 *pkt = (RenderPacket28 *)packet.bytes;
                 RENDER_ADDPRIM(&ordering[depth], packet);
@@ -1581,6 +1591,8 @@ void Render_DrawTexturedQuads(RenderObjectEntity *entity) {
             depth += z[c];
             depth += z[d];
             depth >>= 4;
+            depth -= RENDER_FACE_LIFT(record);
+            if (depth < 0) depth = 0;
             if (depth < 0x1000) {
                 RenderPacket24 *pkt = (RenderPacket24 *)packet.bytes;
                 u32 xy3 = xy[d];
@@ -1621,6 +1633,8 @@ void Render_DrawTexturedQuads(RenderObjectEntity *entity) {
         if (Psyz_GtePgxpNclip3(&xy[a], xy0, &xy[b], xy1, &xy[c], xy2, *area) > 0) {
             int depth = z[a] + z[b] + z[c];
             depth = depth / 3 >> 2;
+            depth -= RENDER_FACE_LIFT(record);
+            if (depth < 0) depth = 0;
             if (depth < 0x1000) {
                 RenderPacket1C *pkt = (RenderPacket1C *)packet.bytes;
                 RENDER_ADDPRIM(&ordering[depth], packet);
